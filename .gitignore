@@ -1,19 +1,40 @@
+# Build outputs
+build/
+*.exe
+*.obj
+*.o
+*.dll
+*.lib
+*.exp
+*.pdb
+*.ilk
+
+# Slint SDK (downloaded)
+monitor_slint/slint_bin/
+slint_bin/
+
 # Python
 __pycache__/
 *.py[cod]
 *.pkl
 
-# C++
-*.exe
-*.o
-
 # IDE
 .vscode/
 .idea/
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.user
 
 # OS
 .DS_Store
 Thumbs.db
+desktop.ini
 
-# Claude Code
-.claude/
+# Training logs
+ai/logs/
+
+# Misc
+nul
+*.tmp
+*.bak

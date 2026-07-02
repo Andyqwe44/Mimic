@@ -1,0 +1,404 @@
+// Game Agent Monitor — MAA-Meow style central hub
+// Slint UI v1.17
+
+import { Button, VerticalBox, HorizontalBox, LineEdit, ScrollView }
+    from "std-widgets.slint";
+
+// ── Theme ──
+global Theme {
+    out property <color> bg-dark: #0D1117;
+    out property <color> bg-card: #161B22;
+    out property <color> bg-sidebar: #010409;
+    out property <color> accent: #4B9BFF;
+    out property <color> accent-green: #3FB950;
+    out property <color> text-primary: #E6EDF3;
+    out property <color> text-secondary: #8B949E;
+    out property <color> text-dim: #484F58;
+    out property <color> success: #3FB950;
+    out property <color> warning: #D29922;
+    out property <color> error: #F85149;
+    out property <color> border: #30363D;
+}
+
+// ── Sidebar Nav Button ──
+component NavButton {
+    in property <bool> selected;
+    in property <string> label;
+    callback clicked();
+    min-height: 44px;
+
+    if root.selected : Rectangle {
+        x: 0px; width: 3px; height: 100%; background: Theme.accent;
+    }
+    HorizontalLayout {
+        padding-left: 20px;
+        Text {
+            text: root.label; font-size: 14px;
+            color: root.selected ? Theme.text-primary : Theme.text-secondary;
+            font-weight: root.selected ? 600 : 400;
+            vertical-alignment: center;
+        }
+    }
+    TouchArea { clicked => { root.clicked(); } }
+}
+
+// ═══════ PAGES ═══════
+
+component MonitorPage {
+    in property <string> task-name: "No task";
+    in property <bool> task-running;
+    callback start-task();
+    callback stop-task();
+
+    HorizontalLayout {
+        spacing: 16px; padding: 20px;
+
+        // Screenshot area
+        Rectangle {
+            background: Theme.bg-card; border-radius: 8px;
+
+            VerticalLayout {
+                padding: 20px;
+
+                if !root.task-running : Text {
+                    text: "No task running.\nStart a task to see live game view.";
+                    color: Theme.text-dim; font-size: 14px;
+                    horizontal-alignment: center; vertical-alignment: center;
+                }
+
+                if root.task-running : Text {
+                    text: "Task: " + root.task-name + "\n\nCapturing...";
+                    color: Theme.text-primary; font-size: 14px;
+                    horizontal-alignment: center; vertical-alignment: center;
+                }
+            }
+        }
+
+        // Side panel
+        Rectangle {
+            min-width: 280px;
+
+            VerticalLayout {
+                spacing: 12px;
+
+                // Task control
+                Rectangle {
+                    background: Theme.bg-card; border-radius: 8px;
+                    VerticalLayout {
+                        spacing: 12px; padding: 16px;
+
+                        Text { text: "Task Control"; font-size: 16px; font-weight: 600; color: Theme.text-primary; }
+
+                        HorizontalLayout {
+                            spacing: 8px;
+
+                            if !root.task-running : Button {
+                                text: "▶  Start"; clicked => { root.start-task(); }
+                            }
+                            if root.task-running : Button {
+                                text: "■  Stop"; clicked => { root.stop-task(); }
+                            }
+                        }
+                    }
+                }
+
+                // Status
+                Rectangle {
+                    background: Theme.bg-card; border-radius: 8px;
+                    VerticalLayout {
+                        spacing: 6px; padding: 16px;
+
+                        Text { text: "Status"; font-size: 16px; font-weight: 600; color: Theme.text-primary; }
+
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Text { text: "Task:"; font-size: 12px; color: Theme.text-dim; }
+                            Text { text: root.task-name; font-size: 12px; color: Theme.text-primary; }
+                        }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Text { text: "State:"; font-size: 12px; color: Theme.text-dim; }
+                            Text {
+                                text: root.task-running ? "Running" : "Idle";
+                                font-size: 12px;
+                                color: root.task-running ? Theme.success : Theme.text-dim;
+                                font-weight: 600;
+                            }
+                        }
+                    }
+                }
+
+                // Quick info
+                Rectangle {
+                    background: Theme.bg-card; border-radius: 8px;
+                    VerticalLayout {
+                        spacing: 6px; padding: 16px;
+                        Text { text: "Info"; font-size: 16px; font-weight: 600; color: Theme.text-primary; }
+                        Text { text: "Game: TicTacToe"; font-size: 12px; color: Theme.text-dim; }
+                        Text { text: "Agent: Visual RL"; font-size: 12px; color: Theme.text-dim; }
+                    }
+                }
+            }
+        }
+    }
+}
+
+component LogPage {
+    in property <string> log-text: "";
+
+    VerticalLayout {
+        spacing: 0px; padding: 20px;
+
+        HorizontalLayout {
+            spacing: 12px; padding-bottom: 12px;
+            Button { text: "Clear All"; }
+            Text { text: "Runtime event log"; font-size: 12px; color: Theme.text-dim; vertical-alignment: center; }
+        }
+
+        Rectangle {
+            background: Theme.bg-card; border-radius: 8px;
+
+            ScrollView {
+                VerticalLayout {
+                    padding: 12px;
+
+                    if root.log-text == "" : Text {
+                        text: "No events yet. Start a task to see logs.";
+                        color: Theme.text-dim; font-size: 13px;
+                    }
+
+                    if root.log-text != "" : Text {
+                        text: root.log-text;
+                        font-size: 12px;
+                        color: Theme.text-secondary;
+                        font-family: "Consolas,monospace";
+                        wrap: word-wrap;
+                    }
+                }
+            }
+        }
+    }
+}
+
+component ConfigPage {
+    in-out property <string> server-host: "127.0.0.1";
+    in-out property <string> server-port: "9999";
+    in-out property <string> game-exe: "game\\main.exe";
+    in-out property <string> ai-script: "ai\\ai_server.py";
+    in-out property <string> model-path: "ai\\model.pkl";
+    in-out property <string> window-title: "Tic Tac Toe";
+
+    ScrollView {
+        VerticalLayout {
+            spacing: 16px; padding: 20px;
+
+            // Task Setup
+            Rectangle {
+                background: Theme.bg-card; border-radius: 8px;
+                VerticalLayout {
+                    spacing: 12px; padding: 24px;
+
+                    Text { text: "Task Setup"; font-size: 18px; font-weight: 700; color: Theme.text-primary; }
+                    Text { text: "Configure executables and scripts for the automated task."; font-size: 13px; color: Theme.text-secondary; }
+
+                    HorizontalLayout {
+                        spacing: 12px;
+                        Text { text: "Game Executable"; font-size: 14px; color: Theme.text-secondary; vertical-alignment: center; min-width: 120px; }
+                        LineEdit { text <=> root.game-exe; }
+                    }
+                    HorizontalLayout {
+                        spacing: 12px;
+                        Text { text: "AI Script"; font-size: 14px; color: Theme.text-secondary; vertical-alignment: center; min-width: 120px; }
+                        LineEdit { text <=> root.ai-script; }
+                    }
+                    HorizontalLayout {
+                        spacing: 12px;
+                        Text { text: "Model"; font-size: 14px; color: Theme.text-secondary; vertical-alignment: center; min-width: 120px; }
+                        LineEdit { text <=> root.model-path; }
+                    }
+                    HorizontalLayout {
+                        spacing: 12px;
+                        Text { text: "Window Title"; font-size: 14px; color: Theme.text-secondary; vertical-alignment: center; min-width: 120px; }
+                        LineEdit { text <=> root.window-title; }
+                    }
+                }
+            }
+
+            // Server Connection
+            Rectangle {
+                background: Theme.bg-card; border-radius: 8px;
+                VerticalLayout {
+                    spacing: 12px; padding: 24px;
+
+                    Text { text: "Server Connection"; font-size: 18px; font-weight: 700; color: Theme.text-primary; }
+                    Text { text: "Where the AI model server runs."; font-size: 13px; color: Theme.text-secondary; }
+
+                    HorizontalLayout {
+                        spacing: 12px;
+                        Text { text: "Host"; font-size: 14px; color: Theme.text-secondary; vertical-alignment: center; min-width: 120px; }
+                        LineEdit { text <=> root.server-host; }
+                    }
+                    HorizontalLayout {
+                        spacing: 12px;
+                        Text { text: "Port"; font-size: 14px; color: Theme.text-secondary; vertical-alignment: center; min-width: 120px; }
+                        LineEdit { text <=> root.server-port; }
+                    }
+                }
+            }
+
+            // Actions
+            HorizontalLayout {
+                spacing: 16px;
+                Button { text: "Save Config"; }
+                Button { text: "Test Connection"; }
+            }
+        }
+    }
+}
+
+component SettingsPage {
+    in property <string> version: "v0.1.0";
+
+    ScrollView {
+        VerticalLayout {
+            spacing: 16px; padding: 20px;
+
+            Rectangle {
+                background: Theme.bg-card; border-radius: 8px;
+                VerticalLayout {
+                    spacing: 8px; padding: 24px;
+                    Text { text: "Game Agent Monitor"; font-size: 18px; font-weight: 700; color: Theme.text-primary; }
+                    Text { text: "Version: " + root.version; font-size: 13px; color: Theme.text-secondary; }
+                    Text { text: "Author: Andyqwe44"; font-size: 13px; color: Theme.text-secondary; }
+                    Text { text: "Built with Slint UI + DXGI + Interception"; font-size: 13px; color: Theme.text-dim; }
+                }
+            }
+
+            Rectangle {
+                background: Theme.bg-card; border-radius: 8px;
+                VerticalLayout {
+                    spacing: 12px; padding: 24px;
+                    Text { text: "Project"; font-size: 18px; font-weight: 700; color: Theme.text-primary; }
+                    Text { text: "github.com/Andyqwe44/tictactoe"; font-size: 13px; color: Theme.accent; }
+                    Button { text: "★  Star on GitHub"; }
+                }
+            }
+
+            Rectangle {
+                background: Theme.bg-card; border-radius: 8px;
+                VerticalLayout {
+                    spacing: 8px; padding: 24px;
+                    Text { text: "About"; font-size: 18px; font-weight: 700; color: Theme.text-primary; }
+                    Text {
+                        text: "General Visual Game AI agent. Learns to play any game from pixels alone using self-organizing hierarchical reasoning. Model interface: pixels in, actions out.";
+                        font-size: 13px; color: Theme.text-secondary; wrap: word-wrap;
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+// ═══════ MAIN WINDOW ═══════
+export component AppWindow inherits Window {
+    title: "Game Agent Monitor";
+    preferred-width: 1200px;
+    preferred-height: 780px;
+    min-width: 900px;
+    min-height: 600px;
+
+    // ── State (updated by C++) ──
+    in property <string> status-text: "Idle";
+    in property <bool> connected: false;
+    in property <bool> task-running: false;
+    in property <string> task-name: "TicTacToe";
+    in property <string> server-addr: "127.0.0.1:9999";
+    in property <string> log-text: "";
+    in property <float> fps: 0.0;
+    in property <float> latency-ms: 0.0;
+    in property <string> version: "v0.1.0";
+    in-out property <int> current-page: 0;
+
+    // ── Callbacks (handled by C++) ──
+    callback start-task();
+    callback stop-task();
+
+    background: Theme.bg-dark;
+
+    VerticalLayout {
+        spacing: 0px;
+
+        // ── Body ──
+        HorizontalLayout {
+            spacing: 0px;
+
+            // SIDEBAR
+            Rectangle {
+                background: Theme.bg-sidebar;
+                min-width: 220px;
+
+                VerticalLayout {
+                    padding-top: 24px; padding-bottom: 24px; spacing: 0px;
+
+                    Text { text: "Game Agent"; font-size: 20px; font-weight: 700; color: Theme.text-primary; }
+                    Text { text: "Visual AI Monitor"; font-size: 12px; color: Theme.text-dim; }
+                    Rectangle { height: 20px; }
+
+                    NavButton { label: "  Monitor";   selected: root.current-page == 0; clicked => { root.current-page = 0; } }
+                    NavButton { label: "  Log";       selected: root.current-page == 1; clicked => { root.current-page = 1; } }
+                    NavButton { label: "  Config";    selected: root.current-page == 2; clicked => { root.current-page = 2; } }
+                    NavButton { label: "  Settings";  selected: root.current-page == 3; clicked => { root.current-page = 3; } }
+
+                    Rectangle { }
+
+                    // Status card
+                    Rectangle {
+                        background: Theme.bg-card; border-radius: 8px;
+                        HorizontalLayout {
+                            spacing: 8px; padding: 12px;
+                            Rectangle {
+                                width: 10px; height: 10px; border-radius: 5px;
+                                background: root.task-running ? Theme.success : Theme.warning;
+                            }
+                            VerticalLayout {
+                                Text { text: root.status-text; font-size: 13px; color: Theme.text-primary; }
+                                Text { text: root.server-addr; font-size: 11px; color: Theme.text-dim; }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // CONTENT
+            Rectangle {
+                background: Theme.bg-dark;
+
+                if root.current-page == 0 : MonitorPage {
+                    task-name: root.task-name;
+                    task-running: root.task-running;
+                    start-task => { root.start-task(); }
+                    stop-task  => { root.stop-task(); }
+                }
+                if root.current-page == 1 : LogPage { log-text: root.log-text; }
+                if root.current-page == 2 : ConfigPage { }
+                if root.current-page == 3 : SettingsPage { version: root.version; }
+            }
+        }
+
+        // STATUS BAR
+        Rectangle {
+            min-height: 30px; background: Theme.bg-card;
+            HorizontalLayout {
+                spacing: 12px; padding-left: 12px; alignment: start;
+                Text { text: root.version; font-size: 11px; color: Theme.text-dim; vertical-alignment: center; }
+                Text { text: "|"; font-size: 11px; color: Theme.border; vertical-alignment: center; }
+                Text { text: "FPS: " + round(root.fps); font-size: 11px; color: Theme.text-dim; vertical-alignment: center; }
+                Text { text: "|"; font-size: 11px; color: Theme.border; vertical-alignment: center; }
+                Text { text: "Lat: " + round(root.latency-ms) + "ms"; font-size: 11px; color: Theme.text-dim; vertical-alignment: center; }
+                Text { text: "|"; font-size: 11px; color: Theme.border; vertical-alignment: center; }
+                Text { text: "Star on GitHub"; font-size: 11px; color: Theme.accent; vertical-alignment: center; }
+            }
+        }
+    }
+}

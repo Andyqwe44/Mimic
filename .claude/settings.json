@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cmd //C \"start \\\\\"Test-Win\\\\\" cmd /k ai\\\\launch_train.bat\")",
+      "Bash(cmd //C start cmd /k ai\\\\launch_train.bat)",
+      "Bash(timeout 25 bash -c ' *)",
+      "Bash(cmd //C \"echo Testing paths: && cd /d %~dp0 2>nul || cd . && echo Current: %cd% && echo Game: %~dp0..\\\\game\\\\main.exe\")"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\Andyq\\codes\\tictactoe\\ai"
+    ]
+  }
+}
