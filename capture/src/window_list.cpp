@@ -1,8 +1,8 @@
 /**
  * Window enumeration tool — called by Tauri as a subprocess
- * Outputs JSON array of visible taskbar windows, one per line
+ * Outputs JSON array of taskbar-visible windows only (fast, small payload)
  *
- * Build: same as capture_test.exe (MSVC build.cmd)
+ * Build: MSVC build.cmd
  * Usage: window_list.exe → prints JSON to stdout
  */
 
@@ -21,7 +21,7 @@
 
 struct WinInfo {
     std::string title;
-    std::string category; // "desktop" | "window"
+    unsigned long long hwnd;
 };
 
 static std::vector<WinInfo> g_windows;
@@ -52,6 +52,8 @@ static bool is_taskbar_window(HWND hwnd) {
 }
 
 static BOOL CALLBACK enum_proc(HWND hwnd, LPARAM) {
+    if (!is_taskbar_window(hwnd)) return TRUE;
+
     wchar_t buf[256];
     if (GetWindowTextW(hwnd, buf, 256) == 0) return TRUE;
     std::wstring ws(buf);
@@ -61,27 +63,25 @@ static BOOL CALLBACK enum_proc(HWND hwnd, LPARAM) {
     while (!title.empty() && title.back() == '\0') title.pop_back();
     if (title.empty() || title == "Program Manager") return TRUE;
 
-    g_windows.push_back({title, is_taskbar_window(hwnd) ? "window" : "process"});
+    g_windows.push_back({title, (unsigned long long)(ULONG_PTR)hwnd});
     return TRUE;
 }
 
 int main() {
-    // Add desktop as first entry
-    printf("{\"category\":\"desktop\",\"title\":\" Entire Desktop\"}\n");
+    // Desktop first entry (hwnd=0 means full screen)
+    printf("{\"hwnd\":\"0\",\"category\":\"desktop\",\"title\":\" Entire Desktop\"}\n");
 
     EnumWindows(enum_proc, 0);
 
-    // Print as JSON lines
+    // Print taskbar windows as JSON lines
     for (auto& w : g_windows) {
-        // Escape quotes in title
         for (size_t i = 0; i < w.title.size(); i++) {
             if (w.title[i] == '"' || w.title[i] == '\\') {
-                w.title.insert(i, "\\");
-                i++;
+                w.title.insert(i, "\\"); i++;
             }
         }
-        printf("{\"category\":\"%s\",\"title\":\"%s\"}\n",
-               w.category.c_str(), w.title.c_str());
+        printf("{\"hwnd\":\"%llu\",\"category\":\"window\",\"title\":\"%s\"}\n",
+               w.hwnd, w.title.c_str());
     }
     return 0;
 }

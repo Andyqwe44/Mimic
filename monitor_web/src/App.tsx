@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { Play, Square, Camera, Monitor, Settings, Moon, Sun, ChevronUp, ChevronDown, FileText, Trash2, X, MonitorUp, Search, MonitorSmartphone } from 'lucide-react'
+import { Play, Square, Camera, Monitor, Settings, Moon, Sun, ChevronUp, ChevronDown, FileText, Trash2, X, MonitorUp, Search, MonitorSmartphone, RefreshCw } from 'lucide-react'
 
 // ═══ Tooltip ── 300ms delay, portal to body, smart positioning ═══
 function Tooltip({ text, children }: { text: string; children: React.ReactElement }) {
@@ -85,10 +85,13 @@ function ActionBtn({ icon, label, title, variant, onClick, className }: {
   variant: 'primary' | 'danger' | 'outline';
   onClick?: () => void; className?: string;
 }) {
+  const wide = label.length > 10
   return (
     <Tooltip text={title}>
       <button onClick={onClick}
-        className={`inline-flex items-center gap-1.5 rounded-md px-2.5 h-7 text-xs font-medium transition-all duration-150 ${className ?? ''} ${
+        className={`inline-flex items-center justify-center gap-1.5 rounded-md px-2.5 h-7 text-xs font-medium transition-all duration-150 ${
+          wide ? 'min-w-[120px]' : 'w-20'
+        } ${className ?? ''} ${
           variant === 'primary' ? 'bg-accent text-white hover:bg-accent-hover'
           : variant === 'danger' ? 'bg-error/20 text-error hover:bg-error/30'
           : 'border border-border text-text-secondary hover:bg-bg-hover'
@@ -103,7 +106,7 @@ function ActionBtn({ icon, label, title, variant, onClick, className }: {
 function TopBar({ tab, setTab, running, onStart, onStop }: {
   tab: string; setTab: (t: 'Monitor'|'Log'|'Config'|'Settings') => void; running: boolean; onStart: () => void; onStop: () => void
 }) {
-  const tabs = ['Monitor', 'Log', 'Config'] as const
+  const tabs = ['Monitor', 'Log'] as const
   return (
     <div className="flex items-center h-10 bg-bg-secondary border-b border-border select-none shrink-0">
       <div className="flex-1 flex items-center h-full overflow-x-auto px-1">
@@ -149,29 +152,54 @@ function BottomBar({ running, fps, lat }: { running: boolean; fps: number; lat: 
 }
 
 // ═══ WindowInfo type ───
-interface WindowInfo { title: string; category: string }
+interface WindowInfo { title: string; category: string; hwnd: number }
 
 // ═══ Window Picker ───
 function WindowPickerModal({ open, onClose, onSelect }: { open: boolean; onClose: () => void; onSelect: (w: WindowInfo) => void }) {
   const [search, setSearch] = useState('')
   const [windows, setWindows] = useState<WindowInfo[]>([])
+  const [processes, setProcesses] = useState<WindowInfo[]>([])
   const [filter, setFilter] = useState('all')
+  const [loading, setLoading] = useState(false)
 
-  useEffect(() => { if (open) { setFilter('all'); loadWindows() } }, [open])
+  useEffect(() => { if (open) { setFilter('all'); loadWindows(); setProcesses([]) } }, [open])
+
   const loadWindows = async () => {
+    setLoading(true)
     try {
       const { invoke } = await import('@tauri-apps/api/core')
       const list = await invoke<WindowInfo[]>('list_windows')
       setWindows(list)
     } catch {
-      setWindows([{ title: ' Entire Desktop', category: 'desktop' }, { title: 'Tic Tac Toe — main.exe', category: 'window' }, { title: 'Notepad', category: 'window' }, { title: 'Chrome', category: 'window' }])
+      setWindows([{ title: ' Entire Desktop', category: 'desktop', hwnd: 0 }, { title: 'Tic Tac Toe — main.exe', category: 'window', hwnd: 0 }, { title: 'Notepad', category: 'window', hwnd: 0 }, { title: 'Chrome', category: 'window', hwnd: 0 }])
     }
+    setLoading(false)
   }
 
-  const categories = ['all', 'desktop', 'window'] as const
-  const filtered = windows.filter(w => {
+  const loadProcesses = async () => {
+    setLoading(true)
+    try {
+      const { invoke } = await import('@tauri-apps/api/core')
+      const list = await invoke<WindowInfo[]>('list_processes')
+      setProcesses(list)
+    } catch {
+      setProcesses([{ title: 'svchost.exe', category: 'process', hwnd: 0 }, { title: 'explorer.exe', category: 'process', hwnd: 0 }])
+    }
+    setLoading(false)
+  }
+
+  // Lazy-load processes when Process filter clicked
+  useEffect(() => {
+    if (filter === 'process' && processes.length === 0 && open) { loadProcesses() }
+  }, [filter])
+
+  const categories = ['all', 'desktop', 'window', 'process'] as const
+  const winHwnds = new Set(windows.map(w => w.hwnd))
+  const allWindows = [...windows, ...processes.filter(p => !winHwnds.has(p.hwnd))]
+  const filtered = allWindows.filter(w => {
     if (filter === 'desktop') return w.category === 'desktop'
     if (filter === 'window') return w.category === 'window'
+    if (filter === 'process') return w.category === 'process'
     return true
   }).filter(w => w.title.toLowerCase().includes(search.toLowerCase()))
 
@@ -187,18 +215,24 @@ function WindowPickerModal({ open, onClose, onSelect }: { open: boolean; onClose
           </div>
           <Tooltip text="关闭"><button onClick={onClose} className="p-1 rounded-md hover:bg-bg-hover transition-colors"><X className="w-4 h-4 text-text-secondary" /></button></Tooltip>
         </div>
-        {/* Category tabs */}
-        <div className="flex gap-1 px-4 pt-3 pb-1">
+        {/* Category tabs + Refresh */}
+        <div className="flex items-center gap-1 px-4 pt-3 pb-1">
           {categories.map(c => (
-            <Tooltip text={`筛选: ${c === 'all' ? '全部' : c === 'desktop' ? '桌面' : '窗口'}`}>
+            <Tooltip text={`筛选: ${c === 'all' ? '全部' : c === 'desktop' ? '桌面' : c === 'window' ? '窗口' : '进程'}`}>
               <button key={c} onClick={() => setFilter(c)}
                 className={`px-3 py-1 rounded-full text-xs font-medium transition-colors capitalize
                   ${filter === c ? 'bg-accent text-white' : 'bg-bg-tertiary text-text-secondary hover:bg-bg-hover'}`}>
-                {c === 'all' ? 'All' : c === 'desktop' ? ' Desktop' : ' Windows'}
+                {c === 'all' ? 'All' : c === 'desktop' ? ' Desktop' : c === 'window' ? ' Windows' : ' Process'}
               </button>
             </Tooltip>
           ))}
           <div className="flex-1" />
+          <Tooltip text="刷新窗口列表">
+            <button onClick={() => { loadWindows(); setProcesses([]) }}
+              className={`p-1.5 rounded-md hover:bg-bg-hover transition-colors text-text-secondary ${loading ? 'animate-spin' : ''}`}>
+              <RefreshCw className="w-3.5 h-3.5" />
+            </button>
+          </Tooltip>
         </div>
         {/* Search */}
         <div className="px-4 py-2">
@@ -212,22 +246,26 @@ function WindowPickerModal({ open, onClose, onSelect }: { open: boolean; onClose
         </div>
         {/* List */}
         <div className="flex-1 overflow-y-auto px-2 pb-2">
-          {filtered.map((w, i) => (
-            <Tooltip text={`选择: ${w.title}`}>
-              <button key={i} onClick={() => { onSelect(w); onClose() }}
-              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left hover:bg-bg-hover transition-colors group">
-              {w.category === 'desktop' ? <MonitorSmartphone className="w-4 h-4 text-text-muted group-hover:text-accent shrink-0" />
-                : <Monitor className="w-4 h-4 text-text-muted group-hover:text-accent shrink-0" />}
-              <div className="flex-1 min-w-0">
-                <span className="text-sm text-text-primary truncate block">{w.title}</span>
-                <span className="text-xs text-text-muted capitalize">{w.category}</span>
-              </div>
-            </button>
-            </Tooltip>
-          ))}
+          {loading && filtered.length === 0 ? (
+            <div className="flex items-center justify-center py-8 text-sm text-text-muted">Loading...</div>
+          ) : (
+            filtered.map((w, i) => (
+              <Tooltip text={`选择: ${w.title}`}>
+                <button key={`${w.hwnd}-${w.category}`} onClick={() => { onSelect(w); onClose() }}
+                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left hover:bg-bg-hover transition-colors group">
+                {w.category === 'desktop' ? <MonitorSmartphone className="w-4 h-4 text-text-muted group-hover:text-accent shrink-0" />
+                  : <Monitor className="w-4 h-4 text-text-muted group-hover:text-accent shrink-0" />}
+                <div className="flex-1 min-w-0">
+                  <span className="text-sm text-text-primary truncate block">{w.title}</span>
+                  <span className="text-xs text-text-muted capitalize">{w.category}</span>
+                </div>
+              </button>
+              </Tooltip>
+            ))
+          )}
         </div>
         <div className="px-4 py-2 border-t border-border text-xs text-text-muted text-center">
-          {filtered.length} items — {windows.filter(w => w.category === 'desktop').length} desktops, {windows.filter(w => w.category === 'window').length} windows
+          {filtered.length} items — {windows.filter(w => w.category === 'desktop').length} desktops, {windows.filter(w => w.category === 'window').length} windows{processes.length > 0 ? `, ${processes.length} processes` : ''}
         </div>
       </div>
     </div>
@@ -238,11 +276,34 @@ function WindowPickerModal({ open, onClose, onSelect }: { open: boolean; onClose
 function ConnectionPanel({ onSelect }: { onSelect: (w: WindowInfo) => void }) {
   const [pickerOpen, setPickerOpen] = useState(false)
   const [title, setTitle] = useState(' Entire Desktop')
+  const [ip, setIp] = useState('127.0.0.1')
+  const [port, setPort] = useState('9999')
   const handleSelect = (w: WindowInfo) => { setTitle(w.title); onSelect(w); addLog(`Selected: ${w.title}`) }
+
+  // Auto-split "IP::port" — detect :: in either field, distribute to both
+  const handleIpChange = (value: string) => {
+    if (value.includes('::')) {
+      const [a, b] = value.split('::', 2)
+      setIp(a.trim())
+      if (b?.trim()) setPort(b.trim())
+    } else {
+      setIp(value)
+    }
+  }
+  const handlePortChange = (value: string) => {
+    if (value.includes('::')) {
+      const [a, b] = value.split('::', 2)
+      if (a?.trim()) setIp(a.trim())
+      setPort(b?.trim() ?? '')
+    } else {
+      setPort(value)
+    }
+  }
+
   return (
     <div className="rounded-xl bg-bg-secondary p-4">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-medium text-text-primary">Connection</span>
+        <span className="text-xs font-medium text-text-primary ml-1">Connection</span>
       </div>
       <div className="space-y-2">
         <div className="flex gap-2">
@@ -250,17 +311,18 @@ function ConnectionPanel({ onSelect }: { onSelect: (w: WindowInfo) => void }) {
             <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Window Title"
               className="flex-1 h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm text-text-primary outline-none focus:border-accent transition-colors placeholder:text-text-muted" />
           </Tooltip>
-          <Tooltip text="选择要捕获的窗口或桌面">
-            <button onClick={() => setPickerOpen(true)}
-              className="shrink-0 h-8 px-3 rounded-lg border border-border bg-bg-primary text-sm text-text-secondary hover:bg-bg-hover transition-colors flex items-center gap-1.5">
-              <MonitorUp className="w-3.5 h-3.5" /><span>Select</span>
-            </button>
+          <ActionBtn icon={<MonitorUp className="w-3.5 h-3.5" />} label="Select" title="选择要捕获的窗口或桌面" variant="primary" onClick={() => setPickerOpen(true)} />
+        </div>
+        <div className="flex gap-2">
+          <Tooltip text="AI模型服务器IP地址">
+            <input value={ip} onChange={e => handleIpChange(e.target.value)} placeholder="IP Address"
+              className="flex-1 min-w-0 h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm text-text-primary outline-none focus:border-accent transition-colors placeholder:text-text-muted" />
+          </Tooltip>
+          <Tooltip text="Port端口号">
+            <input value={port} onChange={e => handlePortChange(e.target.value)} placeholder="Port"
+              className="w-20 h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm text-text-primary outline-none focus:border-accent transition-colors placeholder:text-text-muted" />
           </Tooltip>
         </div>
-        <Tooltip text="AI模型服务器地址 (host:port)">
-          <input defaultValue="127.0.0.1:9999" placeholder="Server Address"
-            className="w-full h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm text-text-primary outline-none focus:border-accent transition-colors placeholder:text-text-muted" />
-        </Tooltip>
       </div>
       <WindowPickerModal open={pickerOpen} onClose={() => setPickerOpen(false)} onSelect={handleSelect} />
     </div>
@@ -268,7 +330,7 @@ function ConnectionPanel({ onSelect }: { onSelect: (w: WindowInfo) => void }) {
 }
 
 // ═══ Screenshot Panel ───
-function ScreenshotPanel() {
+function ScreenshotPanel({ selWin }: { selWin?: WindowInfo }) {
   const [expanded, setExpanded] = useState(true)
   const [previewing, setPreviewing] = useState(false)
   const [imgSrc, setImgSrc] = useState('')
@@ -302,16 +364,17 @@ function ScreenshotPanel() {
   return (
     <div className="mt-3 rounded-xl bg-bg-secondary p-4">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-medium text-text-primary">Screenshot</span>
+        <span className="text-xs font-medium text-text-primary ml-1">Screenshot</span>
         <div className="flex items-center gap-1">
           <IconBtn title="单帧截图" icon={<Camera className="w-3.5 h-3.5" />}
             onClick={async () => {
-              addLog('Capturing screenshot...')
+              const hwnd = selWin?.hwnd ?? 0;
+              addLog(`Capturing ${hwnd ? 'window' : 'desktop'}...`)
               try { const { invoke } = await import('@tauri-apps/api/core')
-                const b64 = await invoke<string>('capture_single')
+                const b64 = await invoke<string>('capture_window', { hwnd })
                 setImgSrc(`data:image/png;base64,${b64}`)
                 addLog('Screenshot captured')
-              } catch { addLog('Screenshot failed (browser mode)') }
+              } catch { addLog('Screenshot failed') }
             }} />
           {previewing
             ? <ActionBtn icon={<Square className="w-3 h-3" />} label="Stop" title="停止截屏预览" variant="danger" onClick={togglePreview} />
@@ -344,7 +407,7 @@ function LogPanel() {
   return (
     <div className="mt-3 rounded-xl bg-bg-secondary p-4">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-medium text-text-primary">Log</span>
+        <span className="text-xs font-medium text-text-primary ml-1">Log</span>
         <div className="flex items-center gap-1">
           <IconBtn title="运行日志" icon={<FileText className="w-3.5 h-3.5" />} />
           <IconBtn title="清空日志" icon={<Trash2 className="w-3.5 h-3.5" />} onClick={() => { gLogs = []; gLogListeners.forEach(f => f()) }} />
@@ -369,62 +432,80 @@ function LogPanel() {
 }
 
 // ═══ App ───
-// ═══ Config Panel (full page) ═══
-function ConfigPanel() {
-  return (
-    <div className="p-6 space-y-4 overflow-y-auto">
-      <div className="rounded-xl bg-bg-secondary p-4">
-        <div className="text-sm font-semibold mb-3">Game Window</div>
-        <div className="flex items-center gap-3 mb-2"><label className="text-sm text-text-secondary w-24 shrink-0">Window Title</label><Tooltip text="要捕获的游戏窗口标题"><input defaultValue="Tic Tac Toe" className="flex-1 h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent" /></Tooltip></div>
-      </div>
-      <div className="rounded-xl bg-bg-secondary p-4">
-        <div className="text-sm font-semibold mb-3">Model Server</div>
-        <div className="flex items-center gap-3 mb-2"><label className="text-sm text-text-secondary w-24 shrink-0">Host</label><Tooltip text="AI服务器地址"><input defaultValue="127.0.0.1" className="flex-1 h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent" /></Tooltip></div>
-        <div className="flex items-center gap-3"><label className="text-sm text-text-secondary w-24 shrink-0">Port</label><Tooltip text="AI服务器端口"><input defaultValue="9999" className="flex-1 h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent" /></Tooltip></div>
-      </div>
-      <div className="rounded-xl bg-bg-secondary p-4">
-        <div className="text-sm font-semibold mb-3">Capture</div>
-        <div className="flex items-center gap-3 mb-2"><label className="text-sm text-text-secondary w-24 shrink-0">Backend</label><Tooltip text="截图后端"><select defaultValue="dxgi" className="h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent"><option value="dxgi">DXGI (fast)</option><option value="gdi">GDI (fallback)</option></select></Tooltip></div>
-        <div className="flex items-center gap-3"><label className="text-sm text-text-secondary w-24 shrink-0">FPS</label><Tooltip text="预览帧率"><input defaultValue="20" className="flex-1 h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent" /></Tooltip></div>
-      </div>
-    </div>
-  )
-}
-
-// ═══ Settings Page ═══
+// ═══ Settings Page (includes Config, Theme, Update, Log, Links, Credits) ═══
 function SettingsPage() {
+  const colors = ['#3B82F6','#8B5CF6','#EC4899','#F59E0B','#10B981','#EF4444']
+  const [accent, setAccent] = useState('#3B82F6')
   return (
     <div className="flex-1 overflow-y-auto p-6 space-y-4">
+      {/* Game & Server (merged from Config) */}
       <div className="rounded-xl bg-bg-secondary p-4">
-        <div className="text-sm font-semibold mb-2">Update</div>
+        <div className="text-sm font-semibold mb-3">Connection</div>
+        <div className="flex items-center gap-3 mb-2"><label className="text-sm text-text-secondary w-28 shrink-0">Window Title</label><Tooltip text="要捕获的游戏窗口标题"><input defaultValue="Tic Tac Toe" className="flex-1 h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent" /></Tooltip></div>
+        <div className="flex items-center gap-3 mb-2"><label className="text-sm text-text-secondary w-28 shrink-0">Server Host</label><Tooltip text="AI模型服务器地址"><input defaultValue="127.0.0.1" className="flex-1 h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent" /></Tooltip></div>
+        <div className="flex items-center gap-3 mb-2"><label className="text-sm text-text-secondary w-28 shrink-0">Server Port</label><Tooltip text="AI模型服务端口"><input defaultValue="9999" className="flex-1 h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent" /></Tooltip></div>
+        <div className="flex items-center gap-3"><label className="text-sm text-text-secondary w-28 shrink-0">Capture FPS</label><Tooltip text="截屏预览帧率"><input defaultValue="20" className="w-20 h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent" /></Tooltip></div>
+      </div>
+
+      {/* Theme */}
+      <div className="rounded-xl bg-bg-secondary p-4">
+        <div className="text-sm font-semibold mb-3">Theme</div>
+        <div className="flex items-center gap-2 mb-2">
+          <label className="text-sm text-text-secondary w-28 shrink-0">Mode</label>
+          <div className="flex gap-1">
+            {[['Light','light'],['Dark','dark'],['System','system']].map(([l,v])=>
+              <button key={v} onClick={()=>document.documentElement.classList.toggle('dark',v==='dark')}
+                className="px-3 py-1 rounded-full text-xs font-medium bg-bg-tertiary text-text-secondary hover:bg-bg-hover transition-colors">{l}</button>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-text-secondary w-28 shrink-0">Accent</label>
+          <div className="flex gap-1.5">
+            {colors.map(c=>(
+              <button key={c} onClick={()=>setAccent(c)}
+                className="w-6 h-6 rounded-full border-2 transition-all" style={{background:c,borderColor:accent===c?'white':'transparent'}} />
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Model */}
+      <div className="rounded-xl bg-bg-secondary p-4">
+        <div className="text-sm font-semibold mb-3">Model Context</div>
+        <div className="text-xs text-text-muted mb-2">Base model + fine-tuning adapter for specific games.</div>
+        <div className="flex items-center gap-3 mb-2"><label className="text-sm text-text-secondary w-28 shrink-0">Base Model</label><Tooltip text="基础视觉模型"><input defaultValue="GenericAgent v1" className="flex-1 h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent" /></Tooltip></div>
+        <div className="flex items-center gap-3"><label className="text-sm text-text-secondary w-28 shrink-0">Adapter</label><Tooltip text="游戏微调权重"><input defaultValue="tictactoe-finetune" className="flex-1 h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent" /></Tooltip></div>
+      </div>
+
+      {/* Update */}
+      <div className="rounded-xl bg-bg-secondary p-4">
+        <div className="text-sm font-semibold mb-3">Update</div>
         <div className="flex items-center justify-between">
           <div><div className="text-sm text-text-secondary">Version v0.1.0</div><div className="text-xs text-text-muted">Latest version</div></div>
           <ActionBtn icon={<Settings className="w-3.5 h-3.5" />} label="Check" title="检查新版本" variant="outline" />
         </div>
       </div>
+
+      {/* Log */}
       <div className="rounded-xl bg-bg-secondary p-4">
-        <div className="text-sm font-semibold mb-2">Log</div>
-        <div className="space-y-2">
-          <div className="flex items-center gap-3"><label className="text-sm text-text-secondary w-24 shrink-0">Directory</label><Tooltip text="日志文件存放路径"><input defaultValue="logs/" className="flex-1 h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent" /></Tooltip></div>
-          <div className="flex items-center gap-3"><label className="text-sm text-text-secondary w-24 shrink-0">Keep</label><Tooltip text="最多保留日志文件数"><select defaultValue="5" className="h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent">{[3,5,7,10].map(n=><option key={n}>{n} files</option>)}</select></Tooltip></div>
-        </div>
+        <div className="text-sm font-semibold mb-3">Log</div>
+        <div className="flex items-center gap-3 mb-2"><label className="text-sm text-text-secondary w-28 shrink-0">Directory</label><Tooltip text="日志文件存放路径"><input defaultValue="logs/" className="flex-1 h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent" /></Tooltip></div>
+        <div className="flex items-center gap-3"><label className="text-sm text-text-secondary w-28 shrink-0">Keep Files</label><Tooltip text="最多保留日志文件数"><select defaultValue="5" className="h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent">{[3,5,7,10].map(n=><option key={n}>{n} files</option>)}</select></Tooltip></div>
       </div>
+
+      {/* Links + Credits */}
       <div className="rounded-xl bg-bg-secondary p-4">
-        <div className="text-sm font-semibold mb-2">Model Context</div>
-        <div className="text-xs text-text-muted mb-2">Fine-tuning adapter for specific games.</div>
-        <Tooltip text="基础模型"><input defaultValue="GenericAgent v1" className="w-full h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent mb-2" /></Tooltip>
-        <Tooltip text="微调权重"><input defaultValue="tictactoe-finetune" className="w-full h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent" /></Tooltip>
-      </div>
-      <div className="rounded-xl bg-bg-secondary p-4">
-        <div className="text-sm font-semibold mb-2">Links</div>
-        {[{l:'GitHub',u:'https://github.com/Andyqwe44/tictactoe'},{l:'Slint',u:'https://slint.dev'},{l:'Tauri 2',u:'https://v2.tauri.app'}].map(x=><a key={x.l} href={x.u} className="block text-sm text-accent hover:underline py-0.5">{x.l}</a>)}
-      </div>
-      <div className="rounded-xl bg-bg-secondary p-4">
-        <div className="text-sm font-semibold mb-2">Project</div>
+        <div className="text-sm font-semibold mb-3">Project</div>
         <div className="text-xs text-text-muted mb-3">If this project helps you, please star!</div>
-        <ActionBtn icon={<span>★</span>} label="Star on GitHub" title="给项目点Star" variant="primary" />
+        <ActionBtn icon={<span>★</span>} label="Star on GitHub" title="给项目点Star支持开发" variant="primary" />
         <div className="mt-4 pt-4 border-t border-border">
-          <div className="text-xs font-medium text-text-secondary mb-1">Credits</div>
+          <div className="text-xs font-medium text-text-secondary mb-1">Links</div>
+          {[{l:'GitHub',u:'https://github.com/Andyqwe44/tictactoe'},{l:'Slint',u:'https://slint.dev'},{l:'Tauri 2',u:'https://v2.tauri.app'}].map(x=>
+          <button key={x.l} onClick={async()=>{try{const{open}=await import('@tauri-apps/plugin-shell');await open(x.u)}catch{window.open(x.u,'_blank')}}}
+            className="block text-sm text-accent hover:underline py-0.5 cursor-pointer">{x.l}</button>
+        )}
+          <div className="text-xs font-medium text-text-secondary mt-3 mb-1">Credits</div>
           <div className="text-xs text-text-muted">Andyqwe44 · Tauri 2 · React · Tailwind · DXGI · Interception · PyTorch</div>
         </div>
       </div>
@@ -439,7 +520,7 @@ export default function App() {
   const [rightWidth, setRightWidth] = useState(DEFAULT_RIGHT_WIDTH)
   const [rightCollapsed, setRightCollapsed] = useState(false)
   const isResizing = useRef(false)
-  const [selWindow, setSelWindow] = useState<WindowInfo>({ title: ' Entire Desktop', category: 'desktop' })
+  const [selWindow, setSelWindow] = useState<WindowInfo>({ title: ' Entire Desktop', category: 'desktop', hwnd: 0 })
 
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault(); isResizing.current = true
@@ -460,16 +541,15 @@ export default function App() {
       <div className="flex-1 flex overflow-hidden">
         <div className="flex-1 flex flex-col overflow-hidden border-r border-border" style={{ minWidth: MIN_LEFT_WIDTH }}>
           {tab === 'Monitor' && (
-            <div className="flex-1 flex items-center justify-center p-4">
-              <div className="text-center space-y-3">
+            <div className="flex-1 flex items-center justify-center p-6">
+              <div className="rounded-xl bg-bg-secondary p-8 text-center space-y-3 max-w-md w-full">
                 <div className="text-5xl opacity-20">🎮</div>
                 <div className="text-sm text-text-secondary">{running ? 'Task running...' : 'Press Start to begin the agent'}</div>
                 <div className="text-xs text-text-muted">Target: {selWindow.title}</div>
               </div>
             </div>
           )}
-          {tab === 'Log' && <div className="flex-1 overflow-hidden"><LogPanel /></div>}
-          {tab === 'Config' && <div className="flex-1 overflow-y-auto"><ConfigPanel /></div>}
+          {tab === 'Log' && <div className="flex-1 overflow-hidden px-6"><LogPanel /></div>}
           {tab === 'Settings' && <SettingsPage />}
           <BottomBar running={running} fps={0} lat={0} />
         </div>
@@ -482,7 +562,7 @@ export default function App() {
         {!rightCollapsed && (
           <div className="flex flex-col p-3 gap-3 overflow-y-auto shrink-0" style={{ width: rightWidth, minWidth: 240 }}>
             <ConnectionPanel onSelect={setSelWindow} />
-            <ScreenshotPanel />
+            <ScreenshotPanel selWin={selWindow} />
             <LogPanel />
           </div>
         )}

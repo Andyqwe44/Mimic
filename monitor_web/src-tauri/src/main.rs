@@ -58,14 +58,45 @@ fn init_log(max_logs: usize) {
 }
 
 #[derive(Clone, Serialize)]
-struct WindowInfo { title: String, category: String }
+struct WindowInfo { title: String, category: String, hwnd: u64 }
+
+#[tauri::command]
+fn list_processes() -> Vec<WindowInfo> {
+    let t0 = Instant::now();
+    let exe = std::env::current_exe()
+        .map(|p| p.parent().unwrap_or(&p).join("..").join("..").join("..").join("..").join("capture").join("build").join("process_list.exe"))
+        .unwrap_or_else(|_| "capture/build/process_list.exe".into());
+    let exe = std::fs::canonicalize(&exe).unwrap_or(exe);
+
+    dlog!("list_processes: calling {}", exe.display());
+    match Command::new(&exe).output() {
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            if !stderr.is_empty() { dlog!("  stderr: {}", stderr.trim()); }
+            let result: Vec<_> = String::from_utf8_lossy(&out.stdout).lines().filter_map(|line| {
+                let line = line.trim(); if line.is_empty() { return None; }
+                let title = extract_json_str(line, "title").unwrap_or("Unknown");
+                let hwnd = extract_json_str(line, "hwnd").and_then(|s| s.parse().ok()).unwrap_or(0);
+                Some(WindowInfo { title: title.to_string(), category: "process".into(), hwnd })
+            }).collect();
+            dlog!("list_processes: {} entries in {:.0}ms", result.len(), t0.elapsed().as_millis());
+            result
+        }
+        Err(e) => {
+            dlog!("list_processes: ERROR {}", e);
+            vec![]
+        }
+    }
+}
 
 #[tauri::command]
 fn list_windows() -> Vec<WindowInfo> {
     let t0 = Instant::now();
-    let exe = std::env::current_dir()
-        .map(|d| d.join("..").join("capture").join("build").join("window_list.exe"))
-        .unwrap_or_else(|_| "../capture/build/window_list.exe".into());
+    // Navigate from exe dir: target/release -> target -> src-tauri -> monitor_web -> root -> capture/build
+    let exe = std::env::current_exe()
+        .map(|p| p.parent().unwrap_or(&p).join("..").join("..").join("..").join("..").join("capture").join("build").join("window_list.exe"))
+        .unwrap_or_else(|_| "capture/build/window_list.exe".into());
+    let exe = std::fs::canonicalize(&exe).unwrap_or(exe);
 
     dlog!("list_windows: calling {}", exe.display());
     match Command::new(&exe).output() {
@@ -76,14 +107,15 @@ fn list_windows() -> Vec<WindowInfo> {
                 let line = line.trim(); if line.is_empty() { return None; }
                 let cat = extract_json_str(line, "category").unwrap_or("window");
                 let title = extract_json_str(line, "title").unwrap_or("Unknown");
-                Some(WindowInfo { title: title.to_string(), category: cat.to_string() })
+                let hwnd = extract_json_str(line, "hwnd").and_then(|s| s.parse().ok()).unwrap_or(0);
+                Some(WindowInfo { title: title.to_string(), category: cat.to_string(), hwnd })
             }).collect();
             dlog!("list_windows: {} entries in {:.0}ms", result.len(), t0.elapsed().as_millis());
             result
         }
         Err(e) => {
             dlog!("list_windows: ERROR {}", e);
-            vec![WindowInfo { title: " Entire Desktop".into(), category: "desktop".into() }]
+            vec![WindowInfo { title: " Entire Desktop".into(), category: "desktop".into(), hwnd: 0 }]
         }
     }
 }
@@ -236,12 +268,74 @@ fn base64_encode(data: &[u8]) -> String {
     out
 }
 
+#[tauri::command]
+fn capture_window(hwnd: u64) -> String {
+    let t0 = Instant::now();
+    dlog!("capture_window: hwnd={}", hwnd);
+    let result = unsafe { capture_win_to_base64(hwnd as isize) }.unwrap_or_default();
+    dlog!("capture_window: {} bytes in {:.0}ms", result.len(), t0.elapsed().as_millis());
+    result
+}
+
+#[cfg(target_os = "windows")]
+unsafe fn capture_win_to_base64(hwnd: isize) -> Option<String> {
+    extern "system" {
+        fn GetDC(h: isize) -> isize; fn ReleaseDC(h: isize, dc: isize) -> i32;
+        fn CreateCompatibleDC(dc: isize) -> isize; fn CreateCompatibleBitmap(dc: isize, w: i32, h: i32) -> isize;
+        fn SelectObject(dc: isize, o: isize) -> isize;
+        fn DeleteDC(dc: isize) -> i32; fn DeleteObject(o: isize) -> i32;
+        fn BitBlt(d: isize, x: i32, y: i32, w: i32, h: i32, s: isize, sx: i32, sy: i32, op: u32) -> i32;
+        fn StretchBlt(d: isize, dx: i32, dy: i32, dw: i32, dh: i32, s: isize, sx: i32, sy: i32, sw: i32, sh: i32, op: u32) -> i32;
+        fn GetDIBits(dc: isize, bmp: isize, s: u32, l: u32, p: *mut u8, bmi: *const u8, u: u32) -> i32;
+        fn GetWindowRect(hwnd: isize, r: *mut i32) -> i32;
+    }
+    const SRCCOPY: u32 = 0x00CC0020;
+    let (w, h, dc): (i32, i32, isize);
+    if hwnd == 0 {
+        w=1920; h=1080; dc=GetDC(0); if dc==0 { return None; }
+    } else {
+        let mut rect=[0i32;4];
+        if GetWindowRect(hwnd, rect.as_mut_ptr())==0 { return None; }
+        w=rect[2]-rect[0]; h=rect[3]-rect[1];
+        dc=GetDC(hwnd); if dc==0 { return None; }
+    }
+    if w<=0||h<=0 { ReleaseDC(hwnd,dc); return None; }
+    let scale = (640.0/w as f32).min(1.0);
+    let sw = (w as f32*scale) as i32; let sh = (h as f32*scale) as i32;
+    let mdc=CreateCompatibleDC(dc); let bmp=CreateCompatibleBitmap(dc,sw,sh);
+    if bmp==0 { ReleaseDC(hwnd,dc); DeleteDC(mdc); return None; }
+    let old=SelectObject(mdc,bmp);
+    StretchBlt(mdc,0,0,sw,sh,dc,0,0,w,h,SRCCOPY);
+    let mut bmi=[0u8;44];
+    bmi[0..4].copy_from_slice(&44u32.to_le_bytes());
+    bmi[4..8].copy_from_slice(&(sw as u32).to_le_bytes());
+    bmi[8..12].copy_from_slice(&(-sh as i32).to_le_bytes());
+    bmi[12..14].copy_from_slice(&1u16.to_le_bytes());
+    bmi[14..16].copy_from_slice(&32u16.to_le_bytes());
+    let buf=(sw*sh*4) as usize; let mut px=vec![0u8;buf];
+    GetDIBits(mdc,bmp,0,sh as u32,px.as_mut_ptr(),bmi.as_ptr(),0);
+    SelectObject(mdc,old); DeleteObject(bmp); DeleteDC(mdc); ReleaseDC(hwnd,dc);
+    let mut rgba=vec![0u8;buf];
+    for i in (0..buf).step_by(4) { rgba[i]=px[i+2]; rgba[i+1]=px[i+1]; rgba[i+2]=px[i]; rgba[i+3]=255; }
+    let mut out=Vec::new();
+    out.extend_from_slice(&[137,80,78,71,13,10,26,10]);
+    let mut ihdr=Vec::new(); ihdr.extend_from_slice(&(sw as u32).to_be_bytes()); ihdr.extend_from_slice(&(sh as u32).to_be_bytes()); ihdr.extend_from_slice(&[8,6,0,0,0]);
+    write_png_chunk(&mut out,b"IHDR",&ihdr);
+    let mut raw=Vec::new();
+    for y in 0..sh { raw.push(0); raw.extend_from_slice(&rgba[(y*sw) as usize*4..(y*sw+sw) as usize*4]); }
+    write_png_chunk(&mut out,b"IDAT",&miniz_oxide::deflate::compress_to_vec_zlib(&raw,6));
+    write_png_chunk(&mut out,b"IEND",&[]);
+    Some(base64_encode(&out))
+}
+#[cfg(not(target_os = "windows"))]
+unsafe fn capture_win_to_base64(_: isize) -> Option<String> { None }
+
 fn main() {
     init_log(5);  // keep max 5 log files
     dlog!("Starting Tauri application...");
 
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![list_windows, capture_single])
+        .invoke_handler(tauri::generate_handler![list_windows, list_processes, capture_single, capture_window])
         .setup(|_app| {
             dlog!("Tauri setup complete, window created");
             Ok(())

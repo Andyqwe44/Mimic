@@ -8,3 +8,6 @@ if %ERRORLEVEL% EQU 0 (echo Build OK: capture\capture_test.exe)
 
 cl.exe /EHsc /std:c++17 /Fo"build\\" /Fe:build\window_list.exe src\window_list.cpp user32.lib dwmapi.lib
 if %ERRORLEVEL% EQU 0 (echo Build OK: capture\build\window_list.exe)
+
+cl.exe /EHsc /std:c++17 /Fo"build\\" /Fe:build\process_list.exe src\process_list.cpp user32.lib
+if %ERRORLEVEL% EQU 0 (echo Build OK: capture\build\process_list.exe)
