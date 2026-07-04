@@ -259,14 +259,33 @@ static bool win_capture(HWND hwnd, std::vector<uint8_t>& pixels, int& w, int& h)
     return true;
 }
 
-// ── Desktop capture (DXGI → GDI) ────────────────────────
+// ── Check if image is solid color ────────────────────────
+static bool solid_check(const uint8_t* data, int len) {
+    if (len < 16) return len < 4;
+    int step = len / 400; if (step < 4) step = 4;
+    uint8_t r0 = data[2], g0 = data[1], b0 = data[0];
+    int samples = 0, same = 0;
+    for (int i = 0; i < len; i += step * 4) {
+        samples++;
+        if (data[i+2] == r0 && data[i+1] == g0 && data[i] == b0) same++;
+    }
+    bool solid = (samples > 0 && same == samples);
+    if (solid) fprintf(stderr, "[capture] solid_check: SOLID color (%02x,%02x,%02x) %d/%d same\n", r0, g0, b0, same, samples);
+    return solid;
+}
+
+// ── Desktop capture (DXGI → GDI fallback if solid) ──────
 static bool desktop_capture(std::vector<uint8_t>& pixels, int& w, int& h) {
     fprintf(stderr, "[capture] desktop_capture: trying DXGI...\n");
     if (dxgi_capture(pixels, w, h)) {
-        fprintf(stderr, "[capture] desktop_capture: DXGI OK %dx%d\n", w, h);
-        return true;
+        if (!solid_check(pixels.data(), (int)pixels.size())) {
+            fprintf(stderr, "[capture] desktop_capture: DXGI OK %dx%d (not solid)\n", w, h);
+            return true;
+        }
+        fprintf(stderr, "[capture] desktop_capture: DXGI returned solid → GDI fallback\n");
+    } else {
+        fprintf(stderr, "[capture] desktop_capture: DXGI failed, GDI fallback\n");
     }
-    fprintf(stderr, "[capture] desktop_capture: DXGI failed, GDI fallback\n");
     return gdi_desktop(pixels, w, h);
 }
 
