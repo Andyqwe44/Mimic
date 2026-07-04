@@ -251,24 +251,26 @@ function WindowPickerModal({ open, onClose, onSelect }: { open: boolean; onClose
           {loading && filtered.length === 0 ? (
             <div className="flex items-center justify-center py-8 text-sm text-text-muted">Loading...</div>
           ) : (
-            filtered.map((w) => {
+            <div className="grid grid-cols-2 gap-1">
+            {filtered.map((w) => {
               const self = w.title.includes('Game Agent Monitor')
               return (
               <Tooltip key={`${w.hwnd}-${w.category}`} text={self ? '自身窗口，禁止捕获' : `选择: ${w.title}`}>
                 <button
                   disabled={self}
                   onClick={() => { onSelect(w); onClose() }}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors group
+                className={`w-full flex items-center gap-2 px-2 py-2 rounded-lg text-left transition-colors group min-w-0
                   ${self ? 'opacity-40 cursor-not-allowed' : 'hover:bg-bg-hover cursor-pointer'}`}>
-                {w.category === 'desktop' ? <MonitorSmartphone className="w-4 h-4 text-text-muted group-hover:text-accent shrink-0" />
-                  : <Monitor className="w-4 h-4 text-text-muted group-hover:text-accent shrink-0" />}
+                {w.category === 'desktop' ? <MonitorSmartphone className="w-3.5 h-3.5 text-text-muted group-hover:text-accent shrink-0" />
+                  : <Monitor className="w-3.5 h-3.5 text-text-muted group-hover:text-accent shrink-0" />}
                 <div className="flex-1 min-w-0">
-                  <span className="text-sm text-text-primary truncate block">{w.title}</span>
+                  <span className="text-xs text-text-primary truncate block">{w.title}</span>
                   <span className="text-xs text-text-muted capitalize">{w.category}</span>
                 </div>
               </button>
               </Tooltip>
-            )})
+            )})}
+            </div>
           )}
         </div>
         <div className="px-4 py-2 border-t border-border text-xs text-text-muted text-center">
