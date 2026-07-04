@@ -9,6 +9,10 @@
 *.pdb
 *.ilk
 
+# Rust / Tauri
+**/target/
+**/node_modules/
+
 # Slint SDK (downloaded)
 **/slint_bin/
 

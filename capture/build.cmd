@@ -5,3 +5,6 @@ if %ERRORLEVEL% NEQ 0 (echo vcvars failed & exit /b 1)
 if not exist "build" mkdir "build"
 cl.exe /EHsc /W4 /std:c++17 /I include /Fo"build\\" /Fe:capture_test.exe src\test_capture.cpp src\capture_dxgi.cpp src\preprocess.cpp d3d11.lib dxgi.lib user32.lib gdi32.lib
 if %ERRORLEVEL% EQU 0 (echo Build OK: capture\capture_test.exe)
+
+cl.exe /EHsc /std:c++17 /Fo"build\\" /Fe:build\window_list.exe src\window_list.cpp user32.lib dwmapi.lib
+if %ERRORLEVEL% EQU 0 (echo Build OK: capture\build\window_list.exe)
