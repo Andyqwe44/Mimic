@@ -47,36 +47,59 @@ namespace wf = winrt::Windows::Foundation;
 static std::atomic<bool> g_running{true};
 static void w32(uint32_t v) { fwrite(&v, 4, 1, stdout); }
 
-// ── DXGI desktop capture ────────────────────────────────
+// ── DXGI desktop capture (try all outputs, skip black/virtual) ──
 static bool dxgi_cap(std::vector<uint8_t>& p, int& w, int& h) {
     ComPtr<ID3D11Device> dev; ComPtr<ID3D11DeviceContext> ctx;
     if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0,
         nullptr, 0, D3D11_SDK_VERSION, &dev, nullptr, &ctx))) return false;
     ComPtr<IDXGIDevice> d; dev.As(&d);
     ComPtr<IDXGIAdapter> a; d->GetAdapter(&a);
-    ComPtr<IDXGIOutput> o; a->EnumOutputs(0, &o);
-    ComPtr<IDXGIOutput1> o1; o.As(&o1);
-    IDXGIOutputDuplication* dup = nullptr;
-    if (FAILED(o1->DuplicateOutput(dev.Get(), &dup))) return false;
-    IDXGIResource* res = nullptr; DXGI_OUTDUPL_FRAME_INFO fi = {};
-    if (FAILED(dup->AcquireNextFrame(16, &fi, &res))) { dup->Release(); return false; }
-    ComPtr<ID3D11Texture2D> src;
-    res->QueryInterface(__uuidof(ID3D11Texture2D), (void**)src.GetAddressOf()); res->Release();
-    D3D11_TEXTURE2D_DESC desc; src->GetDesc(&desc);
-    D3D11_TEXTURE2D_DESC sd = {};
-    sd.Width=desc.Width; sd.Height=desc.Height; sd.MipLevels=1; sd.ArraySize=1;
-    sd.Format=desc.Format; sd.SampleDesc.Count=1;
-    sd.Usage=D3D11_USAGE_STAGING; sd.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
-    ComPtr<ID3D11Texture2D> st;
-    if (FAILED(dev->CreateTexture2D(&sd, nullptr, &st))) { dup->ReleaseFrame(); dup->Release(); return false; }
-    ctx->CopyResource(st.Get(), src.Get()); src.Reset();
-    dup->ReleaseFrame(); dup->Release();
-    D3D11_MAPPED_SUBRESOURCE m={};
-    if (FAILED(ctx->Map(st.Get(), 0, D3D11_MAP_READ, 0, &m))) return false;
-    int fw=(int)desc.Width, fh=(int)desc.Height, pitch=(int)m.RowPitch;
-    p.resize(fw*fh*4); uint8_t* dst=p.data(); uint8_t* s=(uint8_t*)m.pData;
-    for (int y=0; y<fh; y++) memcpy(dst+y*fw*4, s+y*pitch, fw*4);
-    ctx->Unmap(st.Get(),0); w=fw; h=fh; return true;
+
+    // Try outputs — skip first one if it's likely virtual (small/suspect)
+    // Virtual displays often have DuplicateOutput succeed but return black.
+    // Strategy: try all outputs with a short timeout, skip solid-black frames.
+    for (UINT oi = 0; ; oi++) {
+        ComPtr<IDXGIOutput> o;
+        if (FAILED(a->EnumOutputs(oi, &o))) break;
+        DXGI_OUTPUT_DESC odesc;
+        o->GetDesc(&odesc);
+        // Skip outputs that look virtual (tiny resolution or no monitor)
+        if (odesc.AttachedToDesktop && odesc.DesktopCoordinates.right - odesc.DesktopCoordinates.left < 320)
+            continue;
+        ComPtr<IDXGIOutput1> o1;
+        if (FAILED(o.As(&o1))) continue;
+        IDXGIOutputDuplication* dup = nullptr;
+        if (FAILED(o1->DuplicateOutput(dev.Get(), &dup))) continue;
+        IDXGIResource* res = nullptr; DXGI_OUTDUPL_FRAME_INFO fi = {};
+        // Short timeout to quickly skip dead outputs
+        HRESULT acq = dup->AcquireNextFrame(16, &fi, &res);
+        if (FAILED(acq)) { dup->Release(); continue; }
+        ComPtr<ID3D11Texture2D> src;
+        res->QueryInterface(__uuidof(ID3D11Texture2D), (void**)src.GetAddressOf()); res->Release();
+        D3D11_TEXTURE2D_DESC desc; src->GetDesc(&desc);
+        D3D11_TEXTURE2D_DESC sd = {};
+        sd.Width=desc.Width; sd.Height=desc.Height; sd.MipLevels=1; sd.ArraySize=1;
+        sd.Format=desc.Format; sd.SampleDesc.Count=1;
+        sd.Usage=D3D11_USAGE_STAGING; sd.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
+        ComPtr<ID3D11Texture2D> st;
+        if (FAILED(dev->CreateTexture2D(&sd, nullptr, &st))) { dup->ReleaseFrame(); dup->Release(); continue; }
+        ctx->CopyResource(st.Get(), src.Get()); src.Reset();
+        dup->ReleaseFrame(); dup->Release();
+        D3D11_MAPPED_SUBRESOURCE m={};
+        if (FAILED(ctx->Map(st.Get(), 0, D3D11_MAP_READ, 0, &m))) continue;
+        int fw=(int)desc.Width, fh=(int)desc.Height, pitch=(int)m.RowPitch;
+        p.resize(fw*fh*4); uint8_t* dst=p.data(); uint8_t* s=(uint8_t*)m.pData;
+        for (int y=0; y<fh; y++) memcpy(dst+y*fw*4, s+y*pitch, fw*4);
+        ctx->Unmap(st.Get(),0);
+        // Skip if solid black (virtual display)
+        if (fw>0 && fh>0 && p.size()>=16) {
+            uint8_t r0=p[2],g0=p[1],b0=p[0]; int same=0,n=0,step=(int)p.size()/400; if(step<4)step=4;
+            for(size_t i=0;i<p.size();i+=(size_t)step*4){n++;if(p[i+2]==r0&&p[i+1]==g0&&p[i]==b0)same++;}
+            if (n>0 && same==n && b0==0 && g0==0 && r0==0) continue; // solid black → try next output
+        }
+        w=fw; h=fh; return true;
+    }
+    return false;
 }
 
 // ── GDI desktop fallback ────────────────────────────────
@@ -321,15 +344,19 @@ int main(int argc, char* argv[]) {
 
         if (use_fp) {
             ok = framepool_capture(cur, w, h);
-            if (!ok) { Sleep(1); continue; }
+            if (!ok) {
+                // No frame → content unchanged → emit empty frame (Rust reuses previous)
+                if (pw > 0 && ph > 0) {
+                    w32((uint32_t)pw); w32((uint32_t)ph); w32(4); w32(0);
+                    fflush(stdout); skipped++;
+                }
+                Sleep(1); continue;
+            }
         } else if (desk) {
-            ok=dxgi_cap(cur,w,h);
-            if(ok){
-                int step=(int)cur.size()/400; if(step<4)step=4;
-                uint8_t r0=cur[2],g0=cur[1],b0=cur[0]; int same=0,n=0;
-                for(size_t i=0;i<cur.size();i+=(size_t)step*4){n++;if(cur[i+2]==r0&&cur[i+1]==g0&&cur[i]==b0)same++;}
-                if(n>0&&same==n) ok=gdi_desk(cur,w,h);
-            } else ok=gdi_desk(cur,w,h);
+            if (method && strcmp(method, "DXGI") == 0) {
+                ok = dxgi_cap(cur, w, h);
+            }
+            if (!ok) ok = gdi_desk(cur, w, h);
         } else {
             // PrintWindow fallback
             int ww=wr.right-wr.left, wh=wr.bottom-wr.top;
