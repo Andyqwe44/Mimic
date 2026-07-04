@@ -1,5 +1,24 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Play, Square, Camera, Monitor, Settings, Moon, Sun, ChevronUp, ChevronDown, FileText, Trash2, Plus, X, MonitorUp, Search, MonitorSmartphone } from 'lucide-react'
+import { Play, Square, Camera, Monitor, Settings, Moon, Sun, ChevronUp, ChevronDown, FileText, Trash2, X, MonitorUp, Search, MonitorSmartphone } from 'lucide-react'
+
+// ═══ Tooltip ── 300ms delay, persists while hovering ═══
+function Tooltip({ text, children }: { text: string; children: React.ReactElement }) {
+  const [show, setShow] = useState(false)
+  const timer = useRef<number>(0)
+  return (
+    <div className="relative inline-flex"
+      onMouseEnter={() => { timer.current = window.setTimeout(() => setShow(true), 300) }}
+      onMouseLeave={() => { clearTimeout(timer.current); setShow(false) }}
+      onMouseMove={() => { if (!show) { clearTimeout(timer.current); timer.current = window.setTimeout(() => setShow(true), 300) } }}>
+      {children}
+      {show && (
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 bg-bg-tertiary text-text-primary text-xs rounded shadow-lg whitespace-nowrap z-50 pointer-events-none">
+          {text}
+        </div>
+      )}
+    </div>
+  )
+}
 
 // ═══ Layout ───
 const MIN_LEFT_WIDTH = 360
@@ -22,12 +41,34 @@ function ThemeBtn() {
   )
 }
 
-function IconBtn({ icon, onClick, title, active }: { icon: React.ReactNode; onClick?: () => void; title?: string; active?: boolean }) {
+// ═══ Reusable components with REQUIRED title (compile-time enforced) ═══
+function IconBtn({ icon, onClick, title, active }: { icon: React.ReactNode; onClick?: () => void; title: string; active?: boolean }) {
   return (
-    <button onClick={onClick} title={title}
-      className={`p-2 rounded-md transition-colors ${active ? 'bg-accent/10 text-accent' : 'hover:bg-bg-hover text-text-secondary'}`}>
-      {icon}
-    </button>
+    <Tooltip text={title}>
+      <button onClick={onClick}
+        className={`p-2 rounded-md transition-colors ${active ? 'bg-accent/10 text-accent' : 'hover:bg-bg-hover text-text-secondary'}`}>
+        {icon}
+      </button>
+    </Tooltip>
+  )
+}
+
+function ActionBtn({ icon, label, title, variant, onClick, className }: {
+  icon: React.ReactNode; label: string; title: string;
+  variant: 'primary' | 'danger' | 'outline';
+  onClick?: () => void; className?: string;
+}) {
+  return (
+    <Tooltip text={title}>
+      <button onClick={onClick}
+        className={`inline-flex items-center gap-1.5 rounded-md px-2.5 h-7 text-xs font-medium transition-all duration-150 ${className ?? ''} ${
+          variant === 'primary' ? 'bg-accent text-white hover:bg-accent-hover'
+          : variant === 'danger' ? 'bg-error/20 text-error hover:bg-error/30'
+          : 'border border-border text-text-secondary hover:bg-bg-hover'
+        }`}>
+        {icon}<span>{label}</span>
+      </button>
+    </Tooltip>
   )
 }
 
@@ -40,7 +81,7 @@ function TopBar({ tab, setTab, running, onStart, onStop }: {
     <div className="flex items-center h-10 bg-bg-secondary border-b border-border select-none shrink-0">
       <div className="flex-1 flex items-center h-full overflow-x-auto px-1">
         {tabs.map(t => (
-          <button key={t} onClick={() => setTab(t)}
+          <button title={t} key={t} onClick={() => setTab(t)}
             className={`group flex items-center h-full px-3 cursor-pointer border-r border-border min-w-[90px] transition-colors
               ${t === tab ? 'bg-bg-primary text-accent border-b-2 border-b-accent' : 'bg-bg-tertiary text-text-secondary hover:bg-bg-hover border-b-2 border-b-transparent'}`}>
             <span className="flex-1 truncate text-sm">{t}</span>
@@ -48,15 +89,13 @@ function TopBar({ tab, setTab, running, onStart, onStop }: {
         ))}
       </div>
       <div className="flex items-center gap-1 px-2">
-        <button onClick={running ? onStop : onStart}
-          className={`inline-flex items-center gap-2 rounded-lg px-3 h-8 text-sm font-medium transition-all duration-150
-            ${running ? 'bg-error/20 text-error hover:bg-error/30' : 'bg-accent text-white hover:bg-accent-hover'}`}>
-          {running ? <Square className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-          <span>{running ? 'Stop' : 'Start'}</span>
-        </button>
+        {running
+          ? <ActionBtn icon={<Square className="w-3.5 h-3.5" />} label="Stop" title="停止所有运行中的任务" variant="danger" onClick={onStop} />
+          : <ActionBtn icon={<Play className="w-3.5 h-3.5" />} label="Start" title="启动agent任务" variant="primary" onClick={onStart} />
+        }
         <div className="mx-1 h-4 w-px bg-border" />
         <ThemeBtn />
-        <IconBtn icon={<Settings className="w-4 h-4" />} title="Settings" />
+        <IconBtn title="设置" icon={<Settings className="w-4 h-4" />} />
       </div>
     </div>
   )
@@ -117,12 +156,12 @@ function WindowPickerModal({ open, onClose, onSelect }: { open: boolean; onClose
             <MonitorUp className="w-4 h-4 text-accent" />
             <span className="text-sm font-semibold text-text-primary">Select Target</span>
           </div>
-          <button onClick={onClose} className="p-1 rounded-md hover:bg-bg-hover transition-colors"><X className="w-4 h-4 text-text-secondary" /></button>
+          <button title="关闭" onClick={onClose} className="p-1 rounded-md hover:bg-bg-hover transition-colors"><X className="w-4 h-4 text-text-secondary" /></button>
         </div>
         {/* Category tabs */}
         <div className="flex gap-1 px-4 pt-3 pb-1">
           {categories.map(c => (
-            <button key={c} onClick={() => setFilter(c)}
+            <button title={"筛选: " + c} key={c} onClick={() => setFilter(c)}
               className={`px-3 py-1 rounded-full text-xs font-medium transition-colors capitalize
                 ${filter === c ? 'bg-accent text-white' : 'bg-bg-tertiary text-text-secondary hover:bg-bg-hover'}`}>
               {c === 'all' ? 'All' : c === 'desktop' ? ' Desktop' : ' Windows'}
@@ -141,7 +180,7 @@ function WindowPickerModal({ open, onClose, onSelect }: { open: boolean; onClose
         {/* List */}
         <div className="flex-1 overflow-y-auto px-2 pb-2">
           {filtered.map((w, i) => (
-            <button key={i} onClick={() => { onSelect(w); onClose() }}
+            <button title={"选择: " + w.title} key={i} onClick={() => { onSelect(w); onClose() }}
               className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left hover:bg-bg-hover transition-colors group">
               {w.category === 'desktop' ? <MonitorSmartphone className="w-4 h-4 text-text-muted group-hover:text-accent shrink-0" />
                 : <Monitor className="w-4 h-4 text-text-muted group-hover:text-accent shrink-0" />}
@@ -174,7 +213,7 @@ function ConnectionPanel({ onSelect }: { onSelect: (w: WindowInfo) => void }) {
         <div className="flex gap-2">
           <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Window Title"
             className="flex-1 h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm text-text-primary outline-none focus:border-accent transition-colors placeholder:text-text-muted" />
-          <button onClick={() => setPickerOpen(true)}
+          <button title="选择要截屏的窗口" onClick={() => setPickerOpen(true)}
             className="shrink-0 h-8 px-3 rounded-lg border border-border bg-bg-primary text-sm text-text-secondary hover:bg-bg-hover transition-colors flex items-center gap-1.5">
             <MonitorUp className="w-3.5 h-3.5" /><span>Select</span>
           </button>
@@ -224,13 +263,21 @@ function ScreenshotPanel() {
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs font-medium text-text-primary">Screenshot</span>
         <div className="flex items-center gap-1">
-          <IconBtn icon={<Camera className="w-3.5 h-3.5" />} />
-          <button onClick={togglePreview}
-            className={`inline-flex items-center gap-1.5 rounded-md px-2.5 h-7 text-xs font-medium transition-all duration-150
-              ${previewing ? 'bg-error/20 text-error hover:bg-error/30' : 'bg-accent text-white hover:bg-accent-hover'}`}>
-            {previewing ? <><Square className="w-3 h-3" /> Stop</> : <><Play className="w-3 h-3" /> Preview</>}
-          </button>
-          <IconBtn icon={expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          <IconBtn title="单帧截图" icon={<Camera className="w-3.5 h-3.5" />}
+            onClick={async () => {
+              addLog('Capturing screenshot...')
+              try { const { invoke } = await import('@tauri-apps/api/core')
+                const b64 = await invoke<string>('capture_single')
+                setImgSrc(`data:image/png;base64,${b64}`)
+                addLog('Screenshot captured')
+              } catch { addLog('Screenshot failed (browser mode)') }
+            }} />
+          {previewing
+            ? <ActionBtn icon={<Square className="w-3 h-3" />} label="Stop" title="停止截屏预览" variant="danger" onClick={togglePreview} />
+            : <ActionBtn icon={<Play className="w-3 h-3" />} label="Preview" title="开始实时截屏预览 (20 FPS)" variant="primary" onClick={togglePreview} />
+          }
+          <IconBtn title={expanded ? "折叠截图面板" : "展开截图面板"}
+            icon={expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
             onClick={() => setExpanded(!expanded)} />
         </div>
       </div>
@@ -258,9 +305,9 @@ function LogPanel() {
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs font-medium text-text-primary">Log</span>
         <div className="flex items-center gap-1">
-          <IconBtn icon={<FileText className="w-3.5 h-3.5" />} />
-          <IconBtn icon={<Trash2 className="w-3.5 h-3.5" />} onClick={() => { gLogs = []; gLogListeners.forEach(f => f()) }} />
-          <IconBtn icon={expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />} onClick={() => setExpanded(!expanded)} />
+          <IconBtn title="运行日志" icon={<FileText className="w-3.5 h-3.5" />} />
+          <IconBtn title="清空日志" icon={<Trash2 className="w-3.5 h-3.5" />} onClick={() => { gLogs = []; gLogListeners.forEach(f => f()) }} />
+          <IconBtn icon={expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />} title={expanded ? "折叠" : "展开"} onClick={() => setExpanded(!expanded)} />
         </div>
       </div>
       {expanded && (

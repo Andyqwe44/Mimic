@@ -110,11 +110,13 @@ cd agent   && build.cmd     # 智能体
 
 ## 监控面板功能
 
-- **Select Window** → 弹窗分类显示 Desktop / Window（任务栏可见）/ Process
-- **Preview** → 截屏预览 (C++ DXGI capture, TODO)
-- **Log** → 实时操作日志
-- **Config** → 模型服务器地址配置
-- **Settings** → 版本/项目信息
+- **Select Window** → C++ EnumWindows + DwmGetWindowAttribute, 分类 Desktop / Window / Process
+- **单帧截图** → Rust GDI capture → PNG base64, 点击 Screenshot 面板 📷 按钮
+- **Preview** → 实时截屏预览 20 FPS (TODO: 接入 DXGI)
+- **Log** → 实时操作日志, 全局共享状态
+- **Config** → 模型服务器 + 游戏窗口配置
+- **Tooltip** → 自定义悬停气泡, 300ms 延迟, 持续显示, TypeScript title: string 强制必填
+- **ActionBtn / IconBtn** → 统一组件, title 编译时强制检查
 
 ## 运行
 
@@ -122,8 +124,17 @@ cd agent   && build.cmd     # 智能体
 # 井字棋
 cd game && ./main.exe
 
-# 监控面板 (开发)
+# 监控面板 (开发, 需要 Vite HMR)
 cd monitor_web && npm run tauri dev
+
+# 监控面板 (发布版, 自包含 exe, 无需网络)
+cd monitor_web && npm run tauri build
+./src-tauri/target/release/game-agent-monitor.exe
+
+# C++ 工具
+cd capture && build.cmd          # window_list.exe + capture_test.exe
+cd input   && build.cmd          # input_test.exe
+cd agent   && build.cmd          # agent.exe
 
 # 训练 AI
 cd ai && python train.py --iters 50 --games 100
