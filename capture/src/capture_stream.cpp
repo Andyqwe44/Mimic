@@ -119,6 +119,8 @@ struct FramePoolCtx {
     winrt::Windows::Graphics::Capture::GraphicsCaptureSession session{nullptr};
     ComPtr<ID3D11Device> device;
     ComPtr<ID3D11DeviceContext> ctx;
+    ComPtr<ID3D11Texture2D> staging;  // reused across frames
+    int staging_w = 0, staging_h = 0;
     winrt::Windows::Graphics::Capture::GraphicsCaptureItem item{nullptr};
     bool ok = false;
 };
@@ -126,8 +128,36 @@ struct FramePoolCtx {
 static FramePoolCtx g_fp;
 
 static bool framepool_init(HWND hwnd) {
-    // Create D3D11 device
-    if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
+    // Get the correct GPU adapter for the target window's monitor
+    HMONITOR mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+    ComPtr<IDXGIFactory1> dxgi_factory;
+    if (FAILED(CreateDXGIFactory1(__uuidof(IDXGIFactory1), (void**)dxgi_factory.GetAddressOf()))) {
+        fprintf(stderr, "[framepool] CreateDXGIFactory1 failed\n");
+        return false;
+    }
+    ComPtr<IDXGIAdapter1> adapter;
+    bool found = false;
+    for (UINT i = 0; dxgi_factory->EnumAdapters1(i, adapter.GetAddressOf()) != DXGI_ERROR_NOT_FOUND; i++) {
+        ComPtr<IDXGIOutput> output;
+        for (UINT j = 0; adapter->EnumOutputs(j, output.GetAddressOf()) != DXGI_ERROR_NOT_FOUND; j++) {
+            DXGI_OUTPUT_DESC desc;
+            if (SUCCEEDED(output->GetDesc(&desc)) && desc.Monitor == mon) {
+                found = true; break;
+            }
+            output.Reset();
+        }
+        if (found) break;
+        adapter.Reset();
+    }
+    if (!found) {
+        fprintf(stderr, "[framepool] monitor not found on any adapter\n");
+        adapter.Reset();  // fall through to default
+    }
+
+    // Create D3D11 device on correct adapter
+    D3D_DRIVER_TYPE driver_type = adapter ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE;
+    IDXGIAdapter* adapter_ptr = adapter ? adapter.Get() : nullptr;
+    if (FAILED(D3D11CreateDevice(adapter_ptr, driver_type, nullptr,
         D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0, D3D11_SDK_VERSION,
         &g_fp.device, nullptr, &g_fp.ctx))) {
         fprintf(stderr, "[framepool] D3D11CreateDevice failed\n");
@@ -196,27 +226,32 @@ static bool framepool_capture(std::vector<uint8_t>& pixels, int& w, int& h) {
 
     D3D11_TEXTURE2D_DESC desc;
     tex->GetDesc(&desc);
+    int fw = (int)desc.Width, fh = (int)desc.Height;
 
-    D3D11_TEXTURE2D_DESC sd = {};
-    sd.Width = desc.Width; sd.Height = desc.Height; sd.MipLevels = 1;
-    sd.ArraySize = 1; sd.Format = desc.Format;
-    sd.SampleDesc.Count = 1;
-    sd.Usage = D3D11_USAGE_STAGING; sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    // Reuse staging texture if size unchanged
+    if (!g_fp.staging || g_fp.staging_w != fw || g_fp.staging_h != fh) {
+        D3D11_TEXTURE2D_DESC sd = {};
+        sd.Width = desc.Width; sd.Height = desc.Height; sd.MipLevels = 1;
+        sd.ArraySize = 1; sd.Format = desc.Format;
+        sd.SampleDesc.Count = 1;
+        sd.Usage = D3D11_USAGE_STAGING; sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        g_fp.staging.Reset();
+        if (FAILED(g_fp.device->CreateTexture2D(&sd, nullptr, &g_fp.staging))) return false;
+        g_fp.staging_w = fw; g_fp.staging_h = fh;
+    }
 
-    ComPtr<ID3D11Texture2D> st;
-    if (FAILED(g_fp.device->CreateTexture2D(&sd, nullptr, &st))) return false;
-    g_fp.ctx->CopyResource(st.Get(), tex.Get());
+    g_fp.ctx->CopyResource(g_fp.staging.Get(), tex.Get());
 
     D3D11_MAPPED_SUBRESOURCE m = {};
-    if (FAILED(g_fp.ctx->Map(st.Get(), 0, D3D11_MAP_READ, 0, &m))) return false;
+    if (FAILED(g_fp.ctx->Map(g_fp.staging.Get(), 0, D3D11_MAP_READ, 0, &m))) return false;
 
-    int fw = (int)desc.Width, fh = (int)desc.Height, pitch = (int)m.RowPitch;
+    int pitch = (int)m.RowPitch;
     pixels.resize(fw * fh * 4);
     uint8_t* dst = pixels.data();
     uint8_t* src = (uint8_t*)m.pData;
     for (int y = 0; y < fh; y++) memcpy(dst + y * fw * 4, src + y * pitch, fw * 4);
 
-    g_fp.ctx->Unmap(st.Get(), 0);
+    g_fp.ctx->Unmap(g_fp.staging.Get(), 0);
     w = fw; h = fh;
     return true;
 }
@@ -245,7 +280,7 @@ int main(int argc, char* argv[]) {
     bool desk=(hwnd==0||hwnd==GetDesktopWindow());
     fprintf(stderr,"[stream] hwnd=%p desktop=%d\n",hwnd,(int)desk);
 
-    // For window capture: try FramePool first, fallback to PrintWindow
+    // Window: FramePool first (GPU, now on correct adapter), PrintWindow fallback
     const char* method = desk ? "GDI" : "FramePool";
     bool use_fp = false;
     RECT wr={};
@@ -255,8 +290,8 @@ int main(int argc, char* argv[]) {
         if (!use_fp) {
             fprintf(stderr,"[stream] FramePool failed, PrintWindow fallback\n");
             method = "PrintWindow";
-            DwmGetWindowAttribute(hwnd,DWMWA_EXTENDED_FRAME_BOUNDS,&wr,sizeof(wr));
-            if(wr.right-wr.left<=0) GetWindowRect(hwnd,&wr);
+            DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, &wr, sizeof(wr));
+            if (wr.right - wr.left <= 0) GetWindowRect(hwnd, &wr);
         }
     } else {
         // Desktop: test DXGI, fallback GDI
@@ -277,6 +312,9 @@ int main(int argc, char* argv[]) {
 
     std::vector<uint8_t> prev, cur;
     int pw=0, ph=0, frames=0, skipped=0;
+    LARGE_INTEGER freq, t0, t1;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&t0);
 
     while(g_running) {
         int w=0,h=0; cur.clear(); bool ok=false;
@@ -339,6 +377,13 @@ int main(int argc, char* argv[]) {
             w32((uint32_t)sw); w32((uint32_t)sh); w32(4); w32(sz);
             fwrite(scaled.data(),1,sz,stdout); fflush(stdout);
             prev.swap(scaled); pw=sw; ph=sh; frames++;
+        }
+        // Timing log every 60 frames
+        if (frames > 0 && frames % 60 == 0) {
+            QueryPerformanceCounter(&t1);
+            double elapsed = (double)(t1.QuadPart - t0.QuadPart) / freq.QuadPart;
+            fprintf(stderr, "[stream] %d frames in %.2fs = %.1f fps (method=%s)\n",
+                frames, elapsed, frames/elapsed, method);
         }
         Sleep(1);
     }
