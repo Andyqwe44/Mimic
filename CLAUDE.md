@@ -71,7 +71,8 @@ tictactoe/
 ```bash
 # C++ modules (MSVC 2022, C:\Program Files\Microsoft Visual Studio\18\)
 cd game     && build.cmd    # main.exe
-cd capture  && build.cmd    # window_list.exe + capture_test.exe
+cd capture  && build.cmd    # window_list.exe + process_list.exe + capture_single.exe + capture_stream.exe + capture_test.exe
+# capture_stream.exe needs: d3d11.lib dxgi.lib dwmapi.lib windowsapp.lib
 cd input    && build.cmd    # input_test.exe
 cd agent    && build.cmd    # agent.exe
 
@@ -160,23 +161,96 @@ All components in one file (App.tsx, ~500 lines):
 
 ### capture_single.exe
 - Single-frame screenshot, raw BGRA pixels via binary stdout
-- Usage: `capture_single.exe <hwnd>` (0=desktop DXGI, other=window GDI)
-- Binary format: `[w:4][h:4][ch:4][pixels...]` (little-endian)
+- Usage: `capture_single.exe <hwnd>` (0=desktop, other=window)
+- Desktop: DXGI (skip virtual displays) → GDI fallback if solid
+- Window: PrintWindow(PW_RENDERFULLCONTENT|PW_CLIENTONLY) → DXGI crop → GDI
+- Binary format: `[w:4][h:4][ch:4][BGRA pixels...]` (little-endian)
 - Rust reads binary, does BGRA→RGBA, scale, PNG encode, base64 → frontend
-- Agent can consume raw pixels directly (no encoding overhead)
+
+### capture_stream.exe
+- Persistent capture process, frame-differenced stream
+- Usage: `capture_stream.exe <hwnd>` (0=desktop, other=window)
+- Window: FramePool (GPU via Windows.Graphics.Capture) → PrintWindow fallback
+- Desktop: GDI direct (DXGI blocked by virtual display)
+- C++ scales to max 640px before output (9x data reduction)
+- Protocol: first line = method name (text), then `[w:4][h:4][ch:4][size:4][BGRA pixels]`
+- size=0 = unchanged frame (Rust reuses previous)
+- Stdin: "q\n" → quit
+- Performance: C++ side 33fps (GDI desktop)
 
 ## Current State & Next Steps
 
 1. **DONE**: TicTacToe TUI game, C++ capture, C++ window enumeration, Tauri GUI
 2. **DONE**: Tooltip system, Settings page, Config merged into Settings
-3. **DONE**: Capture single frame via GDI (capture_window command with HWND)
-4. **DONE**: Split window_list/process_list, Process filter tab + refresh button in window picker
-5. **TODO**: Preview mode at 20fps via C++ DXGI (not GDI)
-6. **TODO**: C++ Agent directly communicates with AI model (not via GUI)
-7. **TODO**: GUI only monitors — reads data from C++ agent via pipe/TCP
-8. **DONE**: process_list.cpp built and wired into Rust+frontend
-9. **TODO**: Auto-update mechanism
-10. **TODO**: Model context switching (base model + fine-tune adapter)
+3. **DONE**: Capture single frame via C++ capture_single.exe (PrintWindow/DXGI/GDI)
+4. **DONE**: Split window_list/process_list, Process filter tab + refresh button
+5. **DONE**: Preview stream via capture_stream.exe (C++ persistent process → pipe → Rust → BMP → frontend)
+6. **DONE**: FramePool (Windows.Graphics.Capture) for window capture, PrintWindow fallback
+7. **DONE**: Binary IPC: BMP data URI (zero-encode, ~0.5ms) replaces PNG encoding (~3ms)
+8. **DONE**: Self-window disabled in picker (opacity-40, cursor-not-allowed)
+9. **DONE**: IP::port split inputs with `::` auto-parse
+10. **DONE**: ActionBtn auto-width: ≤10 chars = w-20, >10 = min-w-[120px]
+11. **DONE**: Connect GUI Log with C++ stderr → Rust dlog forwarding
+12. **TODO**: C++ Agent directly communicates with AI model (not via GUI)
+13. **TODO**: Media Foundation H.264 GPU encoding for Preview (plan Step 3)
+14. **TODO**: Auto-update mechanism
+
+## Key Performance Numbers (2026-07-05)
+
+| Metric | Value | Method |
+|--------|-------|--------|
+| C++ desktop capture | 33 fps | GDI (DXGI blocked by virtual display adapter) |
+| C++ window capture | varies | FramePool (GPU, 7fps on static frames) / PrintWindow (CPU, ~15ms) |
+| C++ scale 1920→640px | ~2ms | nearest-neighbor |
+| Rust BMP encode | ~0.1ms | trivial header, no compression |
+| Rust base64 encode | ~0.5ms | 900KB → 1.2MB |
+| Preview (C++ pipe only) | ~33fps desktop | GDI + scale + fwrite |
+| Preview (end-to-end) | ~15-25fps | +BMP base64 + Tauri IPC + img render |
+
+## Known Issues
+
+1. **DXGI desktop returns solid black** — GameViewer Virtual Display Adapter is output[0], 
+   our code now skips virtual/small outputs in dxgi_cap, but only GDI works reliably for desktop.
+2. **FramePool 0 frames on static windows** — DWM doesn't re-composite static content.
+   Empty frame fallback sends size=0, Rust reuses previous frame (frontend shows last good image).
+3. **PrintWindow solid content detection** — uses sampling to detect black/magenta sentinel.
+   Falls back to DXGI crop on solid detection.
+4. **Tauri IPC bottleneck** — BMP data URI is ~1.5MB per frame. Base64 + JSON serialization
+   takes ~5ms per frame. Next step: raw binary IPC to skip base64+JSON entirely.
+
+## GPU Hardware Encoding Plan (from C:\Users\Andyq\.claude\plans\glittery-drifting-seal.md)
+
+### Step 1: Binary direct transfer (done 2026-07-05)
+- BMP data URI replaces PNG, saves 3ms encode
+- stream-tick event for lightweight signal, stream_poll() for frame data
+
+### Step 2: JPEG hardware encoding (short term)
+- C++ WIC JPEG encode GPU-accelerated
+- JPEG 640×360 ≈ 15KB (vs BMP 900KB)
+
+### Step 3: H.264 video stream (medium term)
+- Media Foundation MFT hardware encoder
+- GPU capture → GPU encode → MSE <video> decode
+- Expected: 1-2ms per frame, 60fps+
+
+### Step 4: Agent direct path (future)
+- Agent.exe: DXGI → GPU texture → ONNX inference → action
+- Monitor GUI: reads Agent state via IPC, low frequency (100ms)
+
+## Stream Protocol
+
+**C++ capture_stream.exe → Rust stdout pipe**:
+- Line 1 (text): capture method name (e.g., "GDI", "FramePool", "PrintWindow", "DXGI")
+- Each frame: `[w:4 LE][h:4 LE][ch:4 LE][size:4 LE]` then `size` bytes of BGRA pixels
+- `size=0` → unchanged frame (Rust reuses previous)
+- Stdin: "q\n" → clean exit
+
+**Rust → Frontend**: 
+- `capture_stream_start(hwnd)` → spawns C++ process + reader thread
+- Reader builds BMP in-memory (BGRA→BGR, trivial header), base64 encodes
+- Emits "stream-tick" event (lightweight signal, no pixel data)
+- `stream_poll()` command returns BMP data URI string (`data:image/bmp;base64,...`)
+- `capture_stream_stop()` → sends "q\n" to stdin, waits for process exit
 
 ## Key Gotchas
 - Rust release build: `current_dir()` is `src-tauri/`, NOT `monitor_web/`. Use `current_exe()`.

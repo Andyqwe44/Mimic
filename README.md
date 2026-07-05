@@ -14,12 +14,22 @@ tictactoe/
 │   ├── src/             # main.cpp, board.cpp, tui.cpp, ...
 │   ├── include/         # board.hpp, tui.hpp, ...
 │   ├── build/           # *.obj
-│   ├── main.exe         # 可执行文件
-│   └── build.cmd        # MSVC 构建
+│   ├── main.exe
+│   └── build.cmd
 │
-├── capture/             # C++ 屏幕截图 + 窗口枚举
-│   ├── src/             # capture_single.cpp, capture_dxgi.cpp, window_list.cpp, process_list.cpp
-│   ├── include/         # capture.hpp, preprocess.hpp
+├── capture/             # C++ 屏幕截图 + 窗口枚举 + H.264 GPU 编码
+│   ├── src/
+│   │   ├── capture_single.cpp   # 单帧截图 (PrintWindow/DXGI/GDI)
+│   │   ├── capture_dxgi.cpp     # DXGI Desktop Duplication 后端
+│   │   ├── capture_stream.cpp   # BMP 帧差流 (老方案)
+│   │   ├── capture_h264.cpp     # GPU H.264 编码流 (新方案, 60FPS)
+│   │   ├── mf_encoder.cpp       # Media Foundation H.264 硬件编码器
+│   │   ├── window_list.cpp      # 任务栏窗口枚举 (JSON)
+│   │   └── process_list.cpp     # 所有可见窗口枚举 (JSON)
+│   ├── include/
+│   │   ├── capture.hpp          # ICaptureBackend 接口
+│   │   ├── mf_encoder.hpp       # MfH264Encoder 接口
+│   │   └── preprocess.hpp
 │   ├── build/           # *.exe
 │   └── build.cmd
 │
@@ -36,10 +46,18 @@ tictactoe/
 │   └── build.cmd
 │
 ├── monitor_web/         # Tauri 2 + React 监控面板 (桌面应用)
-│   ├── src/             # App.tsx, index.css
-│   ├── src-tauri/       # Rust IPC 胶水层
-│   │   └── src/main.rs  # 调用 C++ 子进程, PNG/base64 编码
-│   └── package.json
+│   ├── src/
+│   │   ├── App.tsx               # 主 UI (600+ lines, Tooltip/IconBtn/ActionBtn/ThemeBtn)
+│   │   ├── main.tsx              # React 入口
+│   │   └── index.css             # Tailwind + CSS 变量 (暗/亮主题)
+│   ├── src-tauri/                # Rust 后端
+│   │   ├── src/
+│   │   │   ├── main.rs           # 窗口枚举 + GDI 截图 + H.264 流 IPC + fMP4 封装
+│   │   │   └── fmp4.rs           # 最小 fMP4 ISOBMFF 构建器 (ftyp+moov+mvex, moof+mdat)
+│   │   ├── Cargo.toml            # tauri, windows, serde, chrono, miniz_oxide
+│   │   └── tauri.conf.json       # 1200x780 window, devUrl:1420
+│   ├── package.json              # react, tailwindcss, lucide-react, clsx, tailwind-merge
+│   └── vite.config.ts
 │
 ├── model/               # Python 模型
 │   ├── generic_agent.py  # L3 (~947K), hierarchical.py (#116K)
@@ -50,121 +68,143 @@ tictactoe/
 │   └── requirements.txt
 │
 ├── train/               # 训练数据采集器
-├── Makefile
 └── README.md
 ```
 
 ## 构建
 
-### 井字棋游戏
+### C++ 工具
 
 ```bash
-cd game && build.cmd
-./main.exe                  # 人vs人 TUI (方向键操作)
+cd capture && build.cmd     # 全部工具: window_list, process_list, capture_single,
+                            #   capture_stream, capture_h264
+cd input   && build.cmd     # 输入模拟
+cd agent   && build.cmd     # 智能体
 ```
 
-### 监控面板 (桌面应用)
+### 监控面板
 
 ```bash
 cd monitor_web
 npm install
-npm run tauri dev           # 开发模式 (Vite HMR 热更新, React 改动即时生效)
-npm run tauri build         # 生产打包 → .exe
+npm run tauri dev           # 开发模式 (Vite HMR, React 即时刷新)
+npm run tauri build         # 生产打包 → .exe (自包含, 无网络请求)
 ```
 
-### C++ 工具
+### Python AI
 
 ```bash
-cd capture && build.cmd     # capture_single, window_list, process_list
-cd input   && build.cmd     # 输入模拟
-cd agent   && build.cmd     # 智能体
+cd ai && python train.py --iters 50 --games 100
 ```
 
 ## 架构
 
 ```
-┌─ monitor_web (Tauri 2) ────────────────────────────┐
-│  React (TypeScript + Tailwind)  ←→  Rust (IPC)    │
-│       UI 界面                    调用 C++ 子进程    │
-└───────────────────────────┬────────────────────────┘
-                            │ stdout/stderr
-           ┌────────────────┼────────────────────┐
-           ▼                ▼                     ▼
-    window_list.exe   capture_single.exe   process_list.exe
-    (任务栏窗口)       (截图: raw BGRA)      (所有可见窗口)
-           │                │
-      EnumWindows     DXGI / PrintWindow
-      + DwmGetAttr    + PW_RENDERFULLCONTENT
-                      GDI fallback
+┌─ monitor_web (Tauri 2) ──────────────────────────────────────┐
+│  React (TypeScript + Tailwind)  ←→  Rust (IPC)              │
+│       UI 界面                   │  Win32 API 直调 (无子进程)  │
+│                                  │  fMP4 封装 (MSE 视频)      │
+└──────────────────────┬──────────┴────────────────────────────┘
+                       │
+           ┌───────────┼──────────────┐
+           ▼           ▼              ▼
+      Rust EnumWindows  Rust GDI     capture_h264.exe
+      (窗口枚举, 0ms)   (单帧截图)   (H.264 GPU 流, 60FPS)
+                            │              │
+                       GetWindowDC    FramePool/WGC → MF H.264 HW Encoder
+                       BitBlt         stdout pipe + TCP :9998
 ```
 
-**截图数据流**:
+### Screenshot (单帧截图) 数据流
+
 ```
-C++ capture_single.exe  →  raw BGRA pixels (stdout)
-Rust (main.rs)          →  scale + BGRA→RGBA + PNG + base64
-React (App.tsx)         →  <img src="data:image/png;base64,...">
+Rust Win32 API (直调, 无子进程)
+  Desktop: GetDC(None) + BitBlt → BGRA (GDI, ~2ms @ 1920x1080)
+  Window:  GetWindowDC + BitBlt → BGRA (GDI, ~2ms)
+  ↓
+Scale (max 640px) + BGRA→RGBA + PNG (miniz_oxide) + base64
+  ↓
+<img src="data:image/png;base64,...">
+```
+
+### Preview (实时预览) 数据流 — GPU H.264 视频
+
+```
+capture_h264.exe (持久进程, 只 spawn 一次)
+  Desktop: DXGI Desktop Duplication (跳过虚拟显示器) → GDI fallback
+  Window:  FramePool (Windows.Graphics.Capture, GPU)
+  ↓
+MF H.264 硬件编码器 (NVIDIA NVENC / AMD VCE / Intel QSV 通用)
+  ↓ [size:4][H.264 NAL units] binary stream
+  ├── stdout pipe → Rust → fMP4 (moof+mdat) → base64 → Tauri event
+  │   ↓
+  │   JS MSE SourceBuffer → <video> (GPU DXVA 解码)
+  │
+  └── TCP :9998 → agent.exe / 未来消费者 (预留)
 ```
 
 ## 可执行文件
 
-| 文件 | 用途 |
-|------|------|
-| `game/main.exe` | 井字棋 TUI 游戏 |
-| `capture/build/window_list.exe` | 任务栏窗口枚举 (JSON) |
-| `capture/build/process_list.exe` | 所有可见窗口枚举 (JSON, 按需加载) |
-| `capture/build/capture_single.exe` | 单帧截图 (BGRA raw, 支持后台/遮挡) |
-| `capture/build/capture_test.exe` | 截屏测试 |
-| `input/build/input_test.exe` | 输入测试 |
-| `agent/build/agent.exe` | AI Agent |
-| `monitor_web/src-tauri/target/debug/game-agent-monitor.exe` | 监控面板 |
+| 文件 | 用途 | 何时调用 |
+|------|------|---------|
+| `capture/build/capture_h264.exe` | GPU H.264 流式捕获 | Preview 按钮 (持久进程) |
+| `capture/build/capture_stream.exe` | BMP 帧差流 (老方案) | 未使用 (保留兼容) |
+| `capture/build/capture_single.exe` | 单帧截图 (C++ 独立) | 未使用 (Rust 直调取代) |
+| `capture/build/window_list.exe` | 任务栏窗口枚举 | 未使用 (Rust 直调取代) |
+| `capture/build/process_list.exe` | 所有可见窗口枚举 | Process 筛选 Tab |
+| `monitor_web/src-tauri/target/release/game-agent-monitor.exe` | 监控面板 | 主程序 |
+
+## 截图技术栈
+
+| 操作 | 技术 | 延迟 | 说明 |
+|------|------|------|------|
+| 窗口枚举 | Rust EnumWindows + DwmGetWindowAttribute | <1ms | 直调 Win32 API, 无子进程 |
+| 单帧截图 (桌面) | Rust GDI GetDC(None) + BitBlt | ~30ms | 无 DXGI, 避免虚拟显示器黑屏 |
+| 单帧截图 (窗口) | Rust GDI GetWindowDC + BitBlt | ~10ms | 直接读窗口 DC |
+| 实时预览 (桌面) | DXGI Desktop Duplication → MF H.264 HW Encoder | 60FPS (目标) | GPU 全链路, 跳过虚拟显示器 |
+| 实时预览 (窗口) | FramePool/WGC → MF H.264 HW Encoder | 60FPS (目标) | GPU 纹理 → GPU 编码, 零 CPU 拷贝 |
+
+### 单帧截图回退链 (Rust)
+
+```
+Desktop: GetDC(None) + BitBlt
+Window:  GetWindowDC + BitBlt
+  → 如果纯色 → PrintWindow (PW_RENDERFULLCONTENT, 处理遮挡/最小化)
+  → 如果仍纯色 → DXGI 裁剪窗口区域
+```
+
+## 性能 (2026-07-05)
+
+| 指标 | 老方案 (exe spawn) | 新方案 (Rust 直调) |
+|------|-------------------|-------------------|
+| 窗口列表加载 | 5200ms (spawn exe) | 0ms (Win32 直调) |
+| 单帧截图 | 5200ms (spawn exe) | 8-37ms (GDI 直调) |
+| 实时预览 | BMP 15-25fps | H.264 GPU 60fps (开发中) |
+| 编码器 | 无 (原始像素) | MF 硬件 MFT (NVIDIA/AMD/Intel) |
 
 ## 监控面板功能
 
-- **Select Window** → 双列网格, 分类筛选 Desktop / Window / Process, 搜索 + 刷新
-- **后台截图** → C++ PrintWindow + PW_RENDERFULLCONTENT, 支持遮挡/最小化窗口
-- **桌面截图** → DXGI (GPU) → GDI 自动回退 (WebView2 兼容)
-- **单帧截图** → 点击 📷 按钮, C++ → raw BGRA → Rust PNG/base64 → 前端预览
-- **Preview** → 连续截图 @20fps, 实时 FPS 计数
-- **IP/Port 分离** → `::` 分隔符自动拆分, 懒人友好
-- **ActionBtn** → label ≤10 字符用 `w-20`, >10 用 `min-w-[120px]`
-- **Tooltip** → Portal → body, z-index 9999, 智能翻转 + 水平限位
-- **Settings** → 连接配置, 主题/配色, 模型上下文, 日志, Links, Credits
-- **Log** → 实时操作日志, 全局共享状态
+- **Select Window** → 双列网格, 分类筛选 Desktop/Window/Process, 搜索+刷新
+- **单帧截图** → Camera 按钮, Rust GDI 直调, 日志显示耗时
+- **Preview** → MSE `<video>` + GPU H.264 流, 实时 FPS + 捕获方法覆盖层
+- **IP/Port** → `::` 分隔符自动拆分
+- **Log** → 最新在上, 固定高度+预留滚动条, 不触发重新排版
+- **滚动条** → `scrollbar-gutter: stable` 全局预留空间
+- **Settings** → 连接/主题/模型/日志/Links/Credits
 
-## 运行
+## 已知问题
 
-```bash
-# 井字棋
-cd game && ./main.exe
-
-# 监控面板 (开发, Vite HMR 热更新)
-cd monitor_web && npm run tauri dev
-
-# 监控面板 (发布版, 自包含 exe)
-cd monitor_web && npm run tauri build
-./src-tauri/target/release/game-agent-monitor.exe
-
-# C++ 工具
-cd capture && build.cmd          # 全部工具
-
-# 训练 AI
-cd ai && python train.py --iters 50 --games 100
-cd game && ./main.exe --server 127.0.0.1 9999 --auto --games 5000
-```
-
-## 截图技术
-
-| 场景 | 首选 | 回退 |
-|------|------|------|
-| 桌面 (hwnd=0) | DXGI Desktop Duplication | GDI BitBlt (WebView2 GPU 冲突自动触发) |
-| 窗口 (hwnd≠0) | **FramePool** (WinRT Graphics Capture, GPU, ~2ms) | PrintWindow → DXGI 裁剪 → GDI |
-
-FramePool = `Windows.Graphics.Capture` API (Win10 1903+), 直接从 DWM 帧池拿 GPU 纹理。
-参考 [MaaFramework](https://github.com/MaaXYZ/MaaFramework) Win32Controller 默认截图方案。
+1. **MF H.264 编码器兼容性**: MFTEnumEx 返回的硬件编码器可能不支持 NV12 输入,
+   或返回空类型列表 (CLSID ADC9BC80)。需逐个尝试编码器, 不能用第一个。
+2. **窗口截图质量**: GetWindowDC 对遮挡/最小化窗口可能截不到内容,
+   需实现 PrintWindow 回退链。
+3. **process_list.exe 仍慢**: 5s spawn 延迟, 待 Rust 重写。
+4. **音频**: TCP 端口预留, 接口未实现。
+5. **NV12 转换**: 当前 CPU 路径 (~0.3ms @ 640px), GPU Compute Shader TODO。
 
 ## 技术栈
 
-- **C++**: DXGI/PrintWindow/GDI 截图, Interception 输入, MSVC 2022
-- **Rust**: Tauri 2 IPC 胶水层, PNG/base64 编码 (miniz_oxide)
-- **React 19 + TypeScript + Tailwind CSS**: UI (MaaEnd/MXU 风格)
-- **Python**: PyTorch 模型训练, ONNX 推理
+- **C++**: DXGI/FramePool/WGC 屏幕捕获, MF H.264 硬件编码, MSVC 2022
+- **Rust**: Tauri 2 IPC, Win32 API 直调 (windows crate), fMP4 ISOBMFF 封装, PNG/base64 (miniz_oxide)
+- **React 19 + TypeScript + Tailwind CSS**: MSE `<video>` 预览, Tooltip/IconBtn/ActionBtn 组件
+- **Python**: PyTorch 训练, ONNX 推理

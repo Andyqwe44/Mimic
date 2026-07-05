@@ -16,6 +16,7 @@
   #define WIN32_LEAN_AND_MEAN
 #endif
 #define NOMINMAX
+#define _SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
 #include <windows.h>
 #include <dwmapi.h>
 #include <d3d11.h>
