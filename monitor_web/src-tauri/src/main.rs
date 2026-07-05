@@ -24,6 +24,7 @@ use windows::Win32::Graphics::Gdi::{
 };
 
 mod fmp4;
+mod stream_protocol;
 
 // ── Session-based debug logging ──
 // Each launch creates a new log file: agent_20260704_174500.log, max 5 kept
@@ -479,15 +480,6 @@ static STREAM_FRAME: Mutex<(String, i32, i32, String)> = Mutex::new((String::new
 // Raw BGRA pixels for TCP clients (scaled, uncompressed).
 static RAW_FRAME: Mutex<(Vec<u8>, i32, i32)> = Mutex::new((Vec::new(), 0, 0));
 
-/// Write a binary frame [w:4][h:4][ch:4][size:4][pixels] to a writer
-fn write_frame(w: &mut dyn Write, pixels: &[u8], w_val: i32, h_val: i32) -> std::io::Result<()> {
-    w.write_all(&(w_val as u32).to_le_bytes())?;
-    w.write_all(&(h_val as u32).to_le_bytes())?;
-    w.write_all(&4u32.to_le_bytes())?;
-    w.write_all(&(pixels.len() as u32).to_le_bytes())?;
-    w.write_all(pixels)?;
-    w.flush()
-}
 
 /// TCP broadcast thread: accepts clients, broadcasts latest frame to all
 fn tcp_broadcast_thread(
@@ -526,7 +518,7 @@ fn tcp_broadcast_thread(
         };
         if let Some((ref pixels, w, h)) = snapshot {
             clients.retain_mut(|client| {
-                if write_frame(client, pixels, w, h).is_err() { false } else { true }
+                if stream_protocol::write_frame(client, w as u32, h as u32, stream_protocol::FRAME_CH_BGRA, pixels).is_err() { false } else { true }
             });
         }
 
@@ -624,7 +616,7 @@ fn bgra_to_bmp_uri(pixels: &[u8], w: i32, h: i32) -> String {
 fn capture_stream_start(app: tauri::AppHandle, hwnd: u64, tcp_port: Option<u16>) -> Result<String, String> {
     let _ = capture_stream_stop();
 
-    let port = tcp_port.unwrap_or(9999);
+    let port = tcp_port.unwrap_or(stream_protocol::DEFAULT_TCP_PORT);
 
     let running = Arc::new(AtomicBool::new(true));
     let running_clone = running.clone();
