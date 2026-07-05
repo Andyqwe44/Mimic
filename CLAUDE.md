@@ -3,258 +3,167 @@
 ## Project Vision
 
 Build a self-organizing hierarchical visual game AI. Model interface: **pixels in, actions out**.
-C++ for real-time Windows operations (capture, input, window enumeration).
-Tauri 2 + React + Tailwind CSS for monitor GUI (MaaEnd/MXU style).
+C++ for real-time capture + future agent. Rust for monitor GUI + capture IPC.
 Python for AI model training/inference.
 
 ## Architecture
 
 ```
-C++ Agent (performance-critical)
-  ├── capture/       DXGI/GDI screen capture, window enumeration
-  ├── input/         Interception driver / SendInput simulation
-  └── agent/         pixels→actions agent loop
-
-Rust (Tauri glue)
-  └── monitor_web/src-tauri/   IPC bridge: Rust ↔ React, calls C++ subprocesses
-
-React (GUI, monitor only — not in the work loop)
-  └── monitor_web/src/         App.tsx + index.css
+┌─ monitor_web (Tauri 2) ────────────────────────────────┐
+│  React (TypeScript + Tailwind)  ←→  Rust (IPC)        │
+│       UI 界面                   │  Win32 API 直调      │
+│                                  │  TCP server :9999    │
+└──────────────────┬───────────────┴─────────────────────┘
+                   │
+     ┌─────────────┼──────────────┐
+     ▼             ▼              ▼
+  Rust            Rust           TCP :9999
+  EnumWindows     GDI Capture    (agent.exe / Python)
+  (窗口枚举)       (单帧+流)       binary frames
+                    │
+          ┌────────┼────────┐
+          ▼        ▼        ▼
+    GetWindowDC  PrintWindow  ScreenBitBlt
+    品红哨兵检测  纯色检测   自动回退链
 ```
-
-## Key Design Decisions
-
-- **GUI is monitor-only**: C++ does actual capture+AI work. Rust reads data from C++ and displays in React.
-- **C++ via subprocess**: Rust calls C++ .exe tools (window_list.exe, capture) via `std::process::Command`
-- **No Slint**: tried Slint v1.17, too restrictive. Switched to Tauri+React.
-- **Release builds**: `npm run tauri build` bundles frontend into exe, no localhost needed.
-- **Tooltip system**: Custom React component, portal to body, 300ms delay, auto-flip, smart positioning.
-- **IconBtn/ActionBtn**: `title: string` required, TypeScript compile-time enforcement.
 
 ## Project Structure
 
 ```
 tictactoe/
-├── common/              # Shared C++: types.hpp, signals.hpp/cpp
-├── game/                # TicTacToe TUI (arrow keys, ANSI, blinking cursor)
-│   ├── src/             .cpp files
-│   ├── include/         .hpp files  
-│   ├── build/           .obj
-│   ├── main.exe
-│   └── build.cmd        MSVC build
-├── capture/             # Screen capture + window enumeration
-│   ├── src/             capture_dxgi.cpp, window_list.cpp, process_list.cpp
-│   ├── include/         capture.hpp, preprocess.hpp
-│   ├── build/           window_list.exe, process_list.exe, capture_test.exe
-│   └── build.cmd
-├── input/               # Input simulation (SendInput + Interception)
-├── agent/               # Visual agent (pixels→actions)
-├── monitor_web/         # Tauri 2 + React desktop app
+├── protocol/                    # Wire format — shared across C++/Rust/Python
+│   ├── protocol.h               C/C++ constants + header helpers
+│   ├── protocol.rs              Rust: PayloadType enum, build/parse header
+│   └── protocol.py              Python: PayloadType IntEnum, header struct
+│
+├── common/                      # Shared C++ modules
+│   ├── include/                 types.hpp, signals.hpp
+│   ├── payload/bgra.hpp         BGRA pixel frame pack/unpack
+│   └── transport/
+│       ├── pipe.hpp             PipeSender/PipeReceiver (stdout/stdin)
+│       └── tcp.hpp              TcpSender broadcast server
+│
+├── capture/                     # C++ screen capture tools
+│   ├── src/                     capture_dxgi.cpp, capture_h264.cpp, mf_encoder.cpp, ...
+│   ├── include/                 capture.hpp, mf_encoder.hpp, preprocess.hpp
+│   └── build.cmd                MSVC build (all .exe in build/)
+│
+├── monitor_web/                 # Tauri 2 + React desktop app
 │   ├── src/
-│   │   ├── App.tsx      # Main UI (250+ lines, all components inline)
-│   │   ├── index.css    # Tailwind + CSS variables (dark/light theme)
-│   │   └── main.tsx     # React entry
-│   ├── src-tauri/       # Rust backend
-│   │   ├── Cargo.toml   # tauri, serde, chrono, miniz_oxide
-│   │   ├── src/main.rs  # list_windows, list_processes, capture_single, capture_window, logging
-│   │   └── tauri.conf.json  # 1200x780 window, devUrl:1420
-│   ├── package.json     # react, tailwindcss, lucide-react, clsx, tailwind-merge
-│   └── vite.config.ts   # Vite + Tailwind + Tauri env
-├── model/               # Python: generic_agent.py, hierarchical.py
-├── ai/                  # Python AI server (MLP, TCP text protocol)
-├── train/               # Training data collector
-└── README.md
+│   │   ├── App.tsx              Main UI (Tooltip/IconBtn/ActionBtn components)
+│   │   ├── index.css            Tailwind + CSS variables + scrollbar-gutter
+│   │   └── main.tsx             React entry
+│   └── src-tauri/
+│       ├── src/
+│       │   ├── main.rs          Rust backend (capture, stream, TCP, IPC)
+│       │   ├── fmp4.rs          fMP4 ISOBMFF builder (H.264 MSE, future)
+│       │   ├── protocol.rs      include!(shared protocol/protocol.rs)
+│       │   ├── payload/bgra.rs  BGRA frame pack/unpack
+│       │   └── transport/pipe.rs Frame send/recv over pipe
+│       ├── Cargo.toml           tauri, windows, serde, chrono, miniz_oxide
+│       └── tauri.conf.json      1200x780 window, devUrl:1420
+│
+├── model/                       # Python
+│   ├── payload/bgra.py          BGRA frame pack/unpack + StreamClient
+│   └── stream_protocol.py       (legacy, being migrated to protocol/)
+│
+└── examples/                    # End-to-end protocol examples
+    ├── hello_cpp_send.cpp       C++ pipe → Rust "hello world" ✓ tested
+    ├── hello_rust_recv.rs
+    ├── hello_tcp_send.cpp       C++ TCP → Python
+    └── hello_python_recv.py
 ```
+
+## Wire Protocol (protocol/)
+
+```
+Frame: [magic:4 "FRAM"][payload_size:4 LE][type_tag:4 LE][payload_body]
+
+type_tag:
+  0 = NONE          (unchanged frame / heartbeat)
+  1 = BGRA_FRAME    [w:4][h:4][ch:4][reserved:4][pixels: w*h*ch]
+  2 = H264_STREAM   (future)
+  3 = CONTROL_MSG   (future JSON/text)
+
+Transport constants: DEFAULT_TCP_PORT=9999, MAGIC=0x4D415246, FRAME_HEADER_SIZE=12
+```
+
+## Layered Architecture (解耦原则)
+
+```
+应用层 (payload/)       ← 知道 BGRA/H264 格式, pack/unpack
+    ↓ 只依赖
+协议层 (protocol/)      ← 只有常量: magic, type tags, header 结构
+    ↑ 只依赖
+传输层 (transport/)     ← 只搬运字节, 不管内容: send(type_tag, bytes) / recv()
+```
+
+transport 不 import payload。payload 不 import transport。加新格式只加 type_tag + payload 文件。
 
 ## Build Commands
 
 ```bash
-# C++ modules (MSVC 2022, C:\Program Files\Microsoft Visual Studio\18\)
-cd game     && build.cmd    # main.exe
-cd capture  && build.cmd    # window_list.exe + process_list.exe + capture_single.exe + capture_stream.exe + capture_test.exe
-# capture_stream.exe needs: d3d11.lib dxgi.lib dwmapi.lib windowsapp.lib
-cd input    && build.cmd    # input_test.exe
-cd agent    && build.cmd    # agent.exe
+# C++ modules
+cd capture  && build.cmd    # all tools
 
-# Tauri monitor (needs Node.js + Rust)
+# Tauri monitor (dev: HMR hot reload on frontend)
 cd monitor_web
 npm install
-npm run tauri dev     # dev mode (Vite HMR via port 1420)
-npm run tauri build   # release .exe (bundled frontend, no localhost)
-
-# Rust only (no frontend rebuild)
-cargo build --manifest-path monitor_web/src-tauri/Cargo.toml --release
+npm run tauri dev            # Vite HMR + Rust debug (slow, frontend only)
+npm run tauri build          # Release .exe (fast, production)
 
 # Python
-pip install torch onnx onnxruntime numpy opencv-python
-cd ai && python train.py --iters 50 --games 100
+pip install torch numpy opencv-python
 ```
 
-## Tauri Dev HMR (Hot Module Replacement)
+## Capture Methods (Rust-native, no subprocess)
 
-`npm run tauri dev` 启动流程：
-1. Vite dev server → `http://localhost:1420` (HMR websocket)
-2. Rust cargo run → 打开 WebView2 窗口，加载 Vite 地址
-3. 编辑 `.tsx`/`.css` → Vite 检测变化 → 增量编译 → 推送 WebView → 即时刷新
+**Stream preview** — multi-method fallback:
+1. `GetWindowDC + BitBlt` (~2-5ms) — fast, fails for occluded/minimized
+2. `PrintWindow(PW_RENDERFULLCONTENT)` (~15-30ms) — magenta sentinel detection
+3. `ScreenBitBlt` at window coords (~2-5ms) — last resort
 
-**前端代码（React/TSX/CSS）编辑后无需重启 Rust，即时生效。**
-仅改 Rust 代码时需重新 `cargo run`（Tauri 会 watch `src-tauri/` 自动重编译）。
+**Single-frame** — same 3-method chain, returns PNG base64 + window position JSON.
 
-Release 模式下 HMR 不可用 — 前端打包嵌入 exe，无网络请求。
+**TCP stream** — raw BGRA frames broadcast on `127.0.0.1:9999` when preview is active.
+Protocol: `[magic:4][size:4][type_tag:4][w:4][h:4][ch:4][0:4][pixels]`
 
-## Release EXE Location
-`monitor_web/src-tauri/target/release/game-agent-monitor.exe`
-(Bundled HTML/CSS/JS, no network needed)
+## Key Performance Numbers
 
-## Debug Log
-Each launch creates: `agent_YYYYMMDD_HHMMSS.log` next to the exe.
-Max 5 log files kept. `dlog!()` macro in Rust logs before every operation with flush().
+| Metric | Old (exe spawn) | New (Rust-native) |
+|--------|-----------------|-------------------|
+| Window list | 5000ms | 0ms |
+| Single capture | 5000ms | 8-37ms |
+| Stream capture | ~30ms/frame | 2-30ms/frame |
+| BGRA pack | N/A | ~12μs |
+| BMP+base64 | ~5ms | ~0.5ms |
 
-## Slint v1.17 Incompatibilities Discovered
-- `padding: a b;` (multi-value) NOT supported
-- `alignment: center;` on Layout NOT supported
-- `vertical-alignment:` on Rectangle NOT supported  
-- `@children` can only appear once at component top level
-- `em` units NOT supported (use px)
-- `drop-shadow-*`, `focus-ring-*` NOT supported
-- `horizontal-stretch:`, `overflow:`, `opacity:` NOT supported
-- `animate` blocks NOT supported
-- `:=` for components deprecated
-- `for` loop `idx` binding broken
-- `BOOL` type not in windows 0.60 crate
-- `background` on `Text` element NOT supported
-- `color` on `LineEdit` NOT supported
-- `placeholder-color` on `LineEdit` NOT supported
-- `text.length`, `substring()`, `to-upper-case()` NOT supported
-- `max()` NOT supported
-- `%` width only for `width`/`height` properties, not custom properties
-- `float()` conversion NOT supported
+## GPU H.264 Pipeline (capture_h264.exe)
 
-## Frontend Component Architecture (App.tsx)
+Status: **encoder init fails on AMD GPU** — MFT returns 0 input types.
+Tried: MFT_MESSAGE_SET_D3D_MANAGER, D3D11_AWARE, codec props, multiple input formats.
+All attempts return MF_E_INVALIDMEDIATYPE. Fallback: BMP streaming via Rust GDI.
 
-All components in one file (App.tsx, ~500 lines):
-- `Tooltip` — portal to body, 300ms delay, smart positioning, z-index 9999
-- `IconBtn` — icon button, `title: string` REQUIRED
-- `ActionBtn` — labeled button (primary/danger/outline), `title: string` REQUIRED, `min-w-[120px]`
-- `ThemeBtn` — light/dark toggle
-- `TopBar` — tabs (Monitor/Log) + Start/Stop + Theme + Settings gear icon
-- `BottomBar` — status bar (Running/Idle, FPS, Lat, GitHub link)
-- `WindowPickerModal` — categorized window selector with search + filter tabs
-- `ConnectionPanel` — window title input + Select button
-- `ScreenshotPanel` — Camera (single frame) + Preview button (20fps TODO)
-- `LogPanel` — real-time operation log
-- `SettingsPage` — Connection, Theme(6 colors), Model Context, Update, Log config, Star, Credits
-- `WindowInfo` interface: `{ title, category, hwnd }`
-
-## C++ Window Tools
-
-### window_list.exe
-- Enumerates taskbar-visible windows only (DwmGetWindowAttribute + style checks)
-- JSON output: `{"hwnd":"...", "category":"desktop|window", "title":"..."}`
-- Fast, small payload — loaded on every modal open
-
-### process_list.exe
-- Lists ALL visible windows (including background processes)
-- Used on demand when user clicks "Process" filter tab
-- JSON output: `{"hwnd":"...", "category":"process", "title":"..."}`
-- No desktop entry — desktop handled by window_list.exe
-
-### capture_single.exe
-- Single-frame screenshot, raw BGRA pixels via binary stdout
-- Usage: `capture_single.exe <hwnd>` (0=desktop, other=window)
-- Desktop: DXGI (skip virtual displays) → GDI fallback if solid
-- Window: PrintWindow(PW_RENDERFULLCONTENT|PW_CLIENTONLY) → DXGI crop → GDI
-- Binary format: `[w:4][h:4][ch:4][BGRA pixels...]` (little-endian)
-- Rust reads binary, does BGRA→RGBA, scale, PNG encode, base64 → frontend
-
-### capture_stream.exe
-- Persistent capture process, frame-differenced stream
-- Usage: `capture_stream.exe <hwnd>` (0=desktop, other=window)
-- Window: FramePool (GPU via Windows.Graphics.Capture) → PrintWindow fallback
-- Desktop: GDI direct (DXGI blocked by virtual display)
-- C++ scales to max 640px before output (9x data reduction)
-- Protocol: first line = method name (text), then `[w:4][h:4][ch:4][size:4][BGRA pixels]`
-- size=0 = unchanged frame (Rust reuses previous)
-- Stdin: "q\n" → quit
-- Performance: C++ side 33fps (GDI desktop)
-
-## Current State & Next Steps
-
-1. **DONE**: TicTacToe TUI game, C++ capture, C++ window enumeration, Tauri GUI
-2. **DONE**: Tooltip system, Settings page, Config merged into Settings
-3. **DONE**: Capture single frame via C++ capture_single.exe (PrintWindow/DXGI/GDI)
-4. **DONE**: Split window_list/process_list, Process filter tab + refresh button
-5. **DONE**: Preview stream via capture_stream.exe (C++ persistent process → pipe → Rust → BMP → frontend)
-6. **DONE**: FramePool (Windows.Graphics.Capture) for window capture, PrintWindow fallback
-7. **DONE**: Binary IPC: BMP data URI (zero-encode, ~0.5ms) replaces PNG encoding (~3ms)
-8. **DONE**: Self-window disabled in picker (opacity-40, cursor-not-allowed)
-9. **DONE**: IP::port split inputs with `::` auto-parse
-10. **DONE**: ActionBtn auto-width: ≤10 chars = w-20, >10 = min-w-[120px]
-11. **DONE**: Connect GUI Log with C++ stderr → Rust dlog forwarding
-12. **TODO**: C++ Agent directly communicates with AI model (not via GUI)
-13. **TODO**: Media Foundation H.264 GPU encoding for Preview (plan Step 3)
-14. **TODO**: Auto-update mechanism
-
-## Key Performance Numbers (2026-07-05)
-
-| Metric | Value | Method |
-|--------|-------|--------|
-| C++ desktop capture | 33 fps | GDI (DXGI blocked by virtual display adapter) |
-| C++ window capture | varies | FramePool (GPU, 7fps on static frames) / PrintWindow (CPU, ~15ms) |
-| C++ scale 1920→640px | ~2ms | nearest-neighbor |
-| Rust BMP encode | ~0.1ms | trivial header, no compression |
-| Rust base64 encode | ~0.5ms | 900KB → 1.2MB |
-| Preview (C++ pipe only) | ~33fps desktop | GDI + scale + fwrite |
-| Preview (end-to-end) | ~15-25fps | +BMP base64 + Tauri IPC + img render |
+Architecture when working:
+```
+FramePool/WGC → MF H.264 HW Encoder → [size:4][NAL data] → stdout + TCP :9998
+```
 
 ## Known Issues
 
-1. **DXGI desktop returns solid black** — GameViewer Virtual Display Adapter is output[0], 
-   our code now skips virtual/small outputs in dxgi_cap, but only GDI works reliably for desktop.
-2. **FramePool 0 frames on static windows** — DWM doesn't re-composite static content.
-   Empty frame fallback sends size=0, Rust reuses previous frame (frontend shows last good image).
-3. **PrintWindow solid content detection** — uses sampling to detect black/magenta sentinel.
-   Falls back to DXGI crop on solid detection.
-4. **Tauri IPC bottleneck** — BMP data URI is ~1.5MB per frame. Base64 + JSON serialization
-   takes ~5ms per frame. Next step: raw binary IPC to skip base64+JSON entirely.
+1. **MF H.264 encoder**: AMD CLSID ADC9BC80 rejects all input types — GPU driver issue
+2. **DXGI desktop**: returns solid black (virtual display adapter) — GDI fallback used
+3. **process_list.exe**: still 5s spawn (low priority, Process tab rarely used)
+4. **Preview timing logs**: cap_us/pack_us/bmp_us every 30 frames in agent_*.log
+5. **Single-frame timing**: total_ms + encode_ms per capture in agent_*.log
 
-## GPU Hardware Encoding Plan (from C:\Users\Andyq\.claude\plans\glittery-drifting-seal.md)
+## Stream Debug Log
 
-### Step 1: Binary direct transfer (done 2026-07-05)
-- BMP data URI replaces PNG, saves 3ms encode
-- stream-tick event for lightweight signal, stream_poll() for frame data
-
-### Step 2: JPEG hardware encoding (short term)
-- C++ WIC JPEG encode GPU-accelerated
-- JPEG 640×360 ≈ 15KB (vs BMP 900KB)
-
-### Step 3: H.264 video stream (medium term)
-- Media Foundation MFT hardware encoder
-- GPU capture → GPU encode → MSE <video> decode
-- Expected: 1-2ms per frame, 60fps+
-
-### Step 4: Agent direct path (future)
-- Agent.exe: DXGI → GPU texture → ONNX inference → action
-- Monitor GUI: reads Agent state via IPC, low frequency (100ms)
-
-## Stream Protocol
-
-**C++ capture_stream.exe → Rust stdout pipe**:
-- Line 1 (text): capture method name (e.g., "GDI", "FramePool", "PrintWindow", "DXGI")
-- Each frame: `[w:4 LE][h:4 LE][ch:4 LE][size:4 LE]` then `size` bytes of BGRA pixels
-- `size=0` → unchanged frame (Rust reuses previous)
-- Stdin: "q\n" → clean exit
-
-**Rust → Frontend**: 
-- `capture_stream_start(hwnd)` → spawns C++ process + reader thread
-- Reader builds BMP in-memory (BGRA→BGR, trivial header), base64 encodes
-- Emits "stream-tick" event (lightweight signal, no pixel data)
-- `stream_poll()` command returns BMP data URI string (`data:image/bmp;base64,...`)
-- `capture_stream_stop()` → sends "q\n" to stdin, waits for process exit
-
-## Key Gotchas
-- Rust release build: `current_dir()` is `src-tauri/`, NOT `monitor_web/`. Use `current_exe()`.
-- Old exe must be killed before `cargo build --release` or get "access denied"
-- `tauri dev` sometimes exits 127 (WebView2 conflict) — launch exe directly instead
-- Test window_list.exe standalone: `capture/build/window_list.exe` prints JSON to stdout
-- Frontend `npm run build` must succeed before Tauri build for bundled frontend
+```
+stream timing: cap=3500us pack=12us bmp=450us    ← every 30 frames
+capture: total=14ms encode=6ms method=PrintWindow  ← single-frame
+stream: detected method=PrintWindow state=normal 1920x1080
+capture: GetWindowDC → solid(0,0,0)
+capture: PrintWindow → magenta sentinel detected
+capture: ALL methods failed for hwnd=xxx state=minimized
+```

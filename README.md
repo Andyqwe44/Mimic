@@ -1,239 +1,117 @@
 # TicTacToe → 通用视觉游戏AI
 
-构建能**自己发现子任务**的通用视觉Agent。模型接口纯粹: **像素进, 动作出**。
+构建能**自己发现子任务**的通用视觉Agent。模型接口: **像素进, 动作出**。
+
+## 架构
+
+```
+┌─ monitor_web (Tauri 2) ────────────────────────────────┐
+│  React (TypeScript + Tailwind)  ←→  Rust (IPC)        │
+│       UI 界面                   │  Win32 API 直调      │
+│                                  │  TCP server :9999    │
+└──────────────────┬───────────────┴─────────────────────┘
+                   │           TCP :9999 → agent.exe / Python
+     ┌─────────────┼──────────────┐
+     ▼             ▼
+  Rust            Rust
+  EnumWindows     GDI Capture
+  (0ms)           (多方法回退链)
+```
 
 ## 项目结构
 
 ```
 tictactoe/
-├── common/              # 共享 C++ 工具
-│   ├── include/         # types.hpp, signals.hpp
-│   └── src/             # signals.cpp
-│
-├── game/                # 井字棋 TUI 游戏
-│   ├── src/             # main.cpp, board.cpp, tui.cpp, ...
-│   ├── include/         # board.hpp, tui.hpp, ...
-│   ├── build/           # *.obj
-│   ├── main.exe
-│   └── build.cmd
-│
-├── capture/             # C++ 屏幕截图 + 窗口枚举 + H.264 GPU 编码
-│   ├── src/
-│   │   ├── capture_single.cpp   # 单帧截图 (PrintWindow/DXGI/GDI)
-│   │   ├── capture_dxgi.cpp     # DXGI Desktop Duplication 后端
-│   │   ├── capture_stream.cpp   # BMP 帧差流 (老方案)
-│   │   ├── capture_h264.cpp     # GPU H.264 编码流 (新方案, 60FPS)
-│   │   ├── mf_encoder.cpp       # Media Foundation H.264 硬件编码器
-│   │   ├── window_list.cpp      # 任务栏窗口枚举 (JSON)
-│   │   └── process_list.cpp     # 所有可见窗口枚举 (JSON)
-│   ├── include/
-│   │   ├── capture.hpp          # ICaptureBackend 接口
-│   │   ├── mf_encoder.hpp       # MfH264Encoder 接口
-│   │   └── preprocess.hpp
-│   ├── build/           # *.exe
-│   └── build.cmd
-│
-├── input/               # C++ 输入模拟
-│   ├── src/             # input_sendinput.cpp, input_interception.cpp
-│   ├── include/         # input.hpp
-│   ├── build/
-│   └── build.cmd
-│
-├── agent/               # C++ 智能体 (像素→动作)
-│   ├── src/             # agent.cpp, action_mapper.cpp
-│   ├── include/         # agent.hpp, action_mapper.hpp
-│   ├── build/
-│   └── build.cmd
-│
-├── monitor_web/         # Tauri 2 + React 监控面板 (桌面应用)
-│   ├── src/
-│   │   ├── App.tsx               # 主 UI (600+ lines, Tooltip/IconBtn/ActionBtn/ThemeBtn)
-│   │   ├── main.tsx              # React 入口
-│   │   └── index.css             # Tailwind + CSS 变量 (暗/亮主题)
-│   ├── src-tauri/                # Rust 后端
-│   │   ├── src/
-│   │   │   ├── main.rs           # 窗口枚举 + GDI 截图 + H.264 流 IPC + fMP4 封装
-│   │   │   └── fmp4.rs           # 最小 fMP4 ISOBMFF 构建器 (ftyp+moov+mvex, moof+mdat)
-│   │   ├── Cargo.toml            # tauri, windows, serde, chrono, miniz_oxide
-│   │   └── tauri.conf.json       # 1200x780 window, devUrl:1420
-│   ├── package.json              # react, tailwindcss, lucide-react, clsx, tailwind-merge
-│   └── vite.config.ts
-│
-├── model/               # Python 模型
-│   ├── generic_agent.py  # L3 (~947K), hierarchical.py (#116K)
-│   └── action_space.py   # 通用动作空间
-│
-├── ai/                  # Python AI (MLP 文本协议)
-│   ├── ai_server.py, train.py, net.py, model.py
-│   └── requirements.txt
-│
-├── train/               # 训练数据采集器
-└── README.md
+├── protocol/                  # 线格式 — C++/Rust/Python 共享
+│   ├── protocol.h / .rs / .py
+├── common/
+│   ├── payload/bgra.hpp       # BGRA 像素打包/解析
+│   └── transport/             # 传输层 (pipe, tcp)
+├── capture/                   # C++ 屏幕捕获
+├── monitor_web/               # Tauri 2 + React 监控面板
+│   └── src-tauri/src/
+│       ├── main.rs            # Rust 后端
+│       ├── protocol.rs        # include! shared protocol
+│       ├── payload/bgra.rs    # Rust 应用层
+│       └── transport/pipe.rs  # Rust 传输层
+├── model/                     # Python
+│   └── payload/bgra.py        # Python 应用层 + StreamClient
+└── examples/                  # 端到端协议示例
+    ├── hello_cpp_send.cpp     # C++ pipe → Rust ✓
+    └── hello_python_recv.py   # C++ TCP → Python
+```
+
+## 线协议 (protocol/)
+
+```
+Frame: [magic:4 "FRAM"][size:4 LE][type_tag:4 LE][payload...]
+
+payload (BGRA, type=1): [w:4][h:4][ch:4][reserved:4][pixels: w*h*ch]
+
+DEFAULT_TCP_PORT = 9999  |  MAGIC = 0x4D415246
+```
+
+## 三层解耦
+
+```
+应用层 (payload/)   ← pack/unpack BGRA/H264, 不碰传输
+协议层 (protocol/)  ← 只有常量和 type tags
+传输层 (transport/) ← send(type, bytes) / recv(), 不碰内容
 ```
 
 ## 构建
 
-### C++ 工具
-
 ```bash
-cd capture && build.cmd     # 全部工具: window_list, process_list, capture_single,
-                            #   capture_stream, capture_h264
-cd input   && build.cmd     # 输入模拟
-cd agent   && build.cmd     # 智能体
-```
-
-### 监控面板
-
-```bash
+cd capture     && build.cmd          # C++ 工具
 cd monitor_web
-npm install
-npm run tauri dev           # 开发模式 (Vite HMR, React 即时刷新)
-npm run tauri build         # 生产打包 → .exe (自包含, 无网络请求)
+npm install && npm run tauri dev     # 开发 (Vite HMR)
+npm run tauri build                  # 生产 .exe
+pip install torch numpy opencv-python
 ```
 
-### Python AI
+## 截图技术
 
-```bash
-cd ai && python train.py --iters 50 --games 100
+### 单帧截图 (Camera)
+
+3 方法回退: `GetWindowDC → PrintWindow(品红检测) → ScreenBitBlt`。
+纯色/品红自动回退。返回 PNG + 窗口屏坐标 JSON。按比例定位在 16:9 容器。
+
+### 实时预览 (Preview)
+
+Rust 线程, 无子进程:
+- 首帧: 检测最佳方法 → 后续帧: 直接调用 (跳过回退链)
+- 帧差跳过, 窗口关闭自动停止
+- TCP :9999 广播 BGRA 帧 (多客户端)
+- 时间戳: `cap=3500us pack=12us bmp=450us` (每30帧)
+
+### H.264 GPU (未来)
+
+`capture_h264.exe`: FramePool → MF H.264 硬件编码 → pipe/TCP。
+AMD 驱动不暴露 MF 编码器 (CLSID ADC9BC80 返回空类型)。
+
+## 性能
+
+| 操作 | 老 (exe spawn) | 新 (Rust 直调) |
+|------|---------------|---------------|
+| 窗口列表 | 5000ms | 0ms |
+| 单帧截图 | 5000ms | 8-37ms |
+| 流式捕获 | ~30ms/帧 | 2-30ms/帧 |
+| BGRA 打包 | N/A | ~12μs |
+
+## API 示例
+
+**Python 接收帧**:
+```python
+import sys; sys.path.insert(0, 'model/payload')
+from bgra import BgraFrame
+# connect TCP :9999, read protocol headers, unpack BGRA payloads
 ```
 
-## 架构
-
+**C++ 发送**:
+```cpp
+#include "common/payload/bgra.hpp"
+#include "common/transport/tcp.hpp"
+transport::TcpSender tcp; tcp.listen();
+auto payload = payload::bgra_pack(pixels, w, h, 4);
+tcp.broadcast(PAYLOAD_TYPE_BGRA_FRAME, payload.data(), payload.size());
 ```
-┌─ monitor_web (Tauri 2) ────────────────────────────────────┐
-│  React (TypeScript + Tailwind)  ←→  Rust (IPC)            │
-│       UI 界面                   │  Win32 API 直调          │
-│                                  │  TCP server (帧广播)     │
-└──────────────────┬───────────────┴─────────────────────────┘
-                   │
-     ┌─────────────┼──────────────┐
-     ▼             ▼              ▼
-  Rust            Rust           TCP :9999
-  EnumWindows     GDI Capture    (agent.exe / Python / 任意)
-  (窗口枚举, 0ms)  (单帧截图)     binary BGRA frames
-                    │
-          ┌────────┼────────┐
-          ▼        ▼        ▼
-    GetWindowDC  PrintWindow  ScreenBitBlt
-```
-
-### TCP 帧流协议
-
-Preview 启动时自动在 `127.0.0.1:9999` 开启 TCP server。多客户端可同时连接。
-
-```
-每帧 (binary, LE): [w:4][h:4][ch:4][size:4][BGRA pixels: size bytes]
-```
-
-### Screenshot (单帧截图) 数据流 — 三方法回退链
-
-```
-Rust Win32 API (直调, 无子进程)
-  Method 1: GetWindowDC + BitBlt        (~2-5ms, 快但窗口遮挡时黑)
-  Method 2: PrintWindow(PW_RENDERFULLCONTENT) (~15-30ms, DWM合成, 处理遮挡)
-  Method 3: ScreenBitBlt 窗口位置裁剪    (~2-5ms, 从屏幕DC截取)
-  ↓
-纯色/品红检测 → 自动回退到下一方法
-  ↓
-Scale (max 640px) + BGRA→RGBA + PNG (miniz_oxide) + base64
-  ↓
-<img> 按比例定位在 16:9 容器内
-```
-
-### Preview (实时预览) — BMP 多方法流式捕获 + TCP 广播
-
-```
-Rust 线程 (持久, 无 C++ 子进程)
-  首帧: capture_window_internal → 检测最佳方法
-  后续帧: capture_fast(method) → 跳过回退链
-  ├── BGRA → BMP → base64 → stream-tick → GUI <img>
-  └── BGRA → RAW_FRAME → TCP :9999 广播 → agent.exe/Python/任意
-```
-
-**TCP 帧协议** (binary LE):
-```
-[w:4][h:4][ch:4][size:4][BGRA pixels: size bytes]
-w,h=缩放后尺寸, ch=4, size=w*h*4
-```
-
-**流式捕获方法回退链:**
-```
-Method 1: GetWindowDC + BitBlt (~2-5ms, 200+fps)
-Method 2: PrintWindow(PW_RENDERFULLCONTENT) (~15-30ms, 品红哨兵检测)
-Method 3: ScreenBitBlt (~2-5ms, 窗口屏幕坐标裁剪)
-```
-首帧检测最佳方法后, 后续帧直接使用该方法。
-品红/纯色检测自动触发回退, 持续失败自动重检测。
-窗口关闭自动停止 (IsWindow 检查)。
-
-**未来方案: GPU H.264 硬件编码 (capture_h264.exe)**
-```
-GPU 纹理 → MF H.264 硬件编码器 → TCP :9998 → agent.exe / MSE <video>
-```
-MF 编码器兼容性待解决 (系统返回空类型列表的假阳性 MFT)。
-
-## 可执行文件
-
-| 文件 | 用途 | 何时调用 |
-|------|------|---------|
-| `capture/build/capture_h264.exe` | GPU H.264 流式捕获 | Preview 按钮 (持久进程) |
-| `capture/build/capture_stream.exe` | BMP 帧差流 (老方案) | 未使用 (保留兼容) |
-| `capture/build/capture_single.exe` | 单帧截图 (C++ 独立) | 未使用 (Rust 直调取代) |
-| `capture/build/window_list.exe` | 任务栏窗口枚举 | 未使用 (Rust 直调取代) |
-| `capture/build/process_list.exe` | 所有可见窗口枚举 | Process 筛选 Tab |
-| `monitor_web/src-tauri/target/release/game-agent-monitor.exe` | 监控面板 | 主程序 |
-
-## 截图技术栈
-
-| 操作 | 技术 | 延迟 | 说明 |
-|------|------|------|------|
-| 窗口枚举 | Rust EnumWindows + DwmGetWindowAttribute | <1ms | 直调 Win32 API, 无子进程 |
-| 单帧截图 (桌面) | Rust GDI GetDC(None) + BitBlt | ~30ms | 无 DXGI, 避免虚拟显示器黑屏 |
-| 单帧截图 (窗口) | Rust GDI GetWindowDC + BitBlt | ~10ms | 直接读窗口 DC |
-| 实时预览 (桌面) | DXGI Desktop Duplication → MF H.264 HW Encoder | 60FPS (目标) | GPU 全链路, 跳过虚拟显示器 |
-| 实时预览 (窗口) | FramePool/WGC → MF H.264 HW Encoder | 60FPS (目标) | GPU 纹理 → GPU 编码, 零 CPU 拷贝 |
-
-### 单帧截图回退链 (Rust)
-
-```
-Desktop: GetDC(None) + BitBlt
-Window:  GetWindowDC + BitBlt
-  → 如果纯色 → PrintWindow (PW_RENDERFULLCONTENT, 处理遮挡/最小化)
-  → 如果仍纯色 → DXGI 裁剪窗口区域
-```
-
-## 性能 (2026-07-05)
-
-| 指标 | 老方案 (exe spawn) | 新方案 (Rust 直调) |
-|------|-------------------|-------------------|
-| 窗口列表加载 | 5200ms (spawn exe) | 0ms (Win32 直调) |
-| 单帧截图 | 5200ms (spawn exe) | 8-37ms (GDI 直调) |
-| 实时预览 | BMP 15-25fps | H.264 GPU 60fps (开发中) |
-| 编码器 | 无 (原始像素) | MF 硬件 MFT (NVIDIA/AMD/Intel) |
-
-## 监控面板功能
-
-- **Select Window** → 双列网格, 分类筛选 Desktop/Window/Process, 搜索+刷新
-- **单帧截图** → Camera 按钮, Rust GDI 直调, 日志显示耗时
-- **Preview** → MSE `<video>` + GPU H.264 流, 实时 FPS + 捕获方法覆盖层
-- **IP/Port** → `::` 分隔符自动拆分
-- **Log** → 最新在上, 固定高度+预留滚动条, 不触发重新排版
-- **滚动条** → `scrollbar-gutter: stable` 全局预留空间
-- **Settings** → 连接/主题/模型/日志/Links/Credits
-
-## 已知问题
-
-1. **MF H.264 编码器兼容性**: MFTEnumEx 返回的硬件编码器可能不支持 NV12 输入,
-   或返回空类型列表 (CLSID ADC9BC80)。需逐个尝试编码器, 不能用第一个。
-2. **窗口截图质量**: GetWindowDC 对遮挡/最小化窗口可能截不到内容,
-   需实现 PrintWindow 回退链。
-3. **process_list.exe 仍慢**: 5s spawn 延迟, 待 Rust 重写。
-4. **音频**: TCP 端口预留, 接口未实现。
-5. **NV12 转换**: 当前 CPU 路径 (~0.3ms @ 640px), GPU Compute Shader TODO。
-
-## 技术栈
-
-- **C++**: DXGI/FramePool/WGC 屏幕捕获, MF H.264 硬件编码, MSVC 2022
-- **Rust**: Tauri 2 IPC, Win32 API 直调 (windows crate), fMP4 ISOBMFF 封装, PNG/base64 (miniz_oxide)
-- **React 19 + TypeScript + Tailwind CSS**: MSE `<video>` 预览, Tooltip/IconBtn/ActionBtn 组件
-- **Python**: PyTorch 训练, ONNX 推理
