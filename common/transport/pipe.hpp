@@ -34,11 +34,14 @@ struct PipeSender {
 
 /// Read a frame from stdin. Returns (type_tag, payload_bytes). Empty = EOF.
 struct PipeReceiver {
+    static constexpr uint32_t MAX_PAYLOAD = 256u * 1024 * 1024;  // 256 MiB
+
     bool recv(uint32_t& type_tag, std::vector<uint8_t>& payload) {
         uint8_t hdr[PROTOCOL_FRAME_HEADER];
         if (fread(hdr, 1, sizeof(hdr), stdin) != sizeof(hdr)) return false;
         uint32_t size = 0;
         if (!protocol_parse_header(hdr, size, type_tag)) return false;
+        if (size > MAX_PAYLOAD) return false;
         payload.resize(size);
         if (size > 0 && fread(payload.data(), 1, size, stdin) != size) return false;
         return true;

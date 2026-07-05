@@ -39,13 +39,24 @@ struct TcpSender {
         clients_.push_back(c);
     }
 
+    // Send all bytes, looping to handle short writes. Returns true on success.
+    static bool send_all(SOCKET s, const char* data, int len) {
+        int sent = 0;
+        while (sent < len) {
+            int n = send(s, data + sent, len - sent, 0);
+            if (n <= 0) return false;
+            sent += n;
+        }
+        return true;
+    }
+
     void broadcast(uint32_t type_tag, const void* payload, uint32_t size) {
         uint8_t hdr[PROTOCOL_FRAME_HEADER];
         protocol_build_header(hdr, size, type_tag);
         auto it = clients_.begin();
         while (it != clients_.end()) {
-            bool ok = send(*it, (char*)hdr, sizeof(hdr), 0) == sizeof(hdr);
-            if (ok && size > 0) ok = send(*it, (char*)payload, (int)size, 0) == (int)size;
+            bool ok = send_all(*it, (char*)hdr, sizeof(hdr));
+            if (ok && size > 0) ok = send_all(*it, (char*)payload, (int)size);
             if (!ok) { closesocket(*it); it = clients_.erase(it); }
             else ++it;
         }

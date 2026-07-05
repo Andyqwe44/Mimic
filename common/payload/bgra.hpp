@@ -48,6 +48,7 @@ inline std::vector<uint8_t> bgra_pack(const std::vector<uint8_t>& pixels, uint32
 }
 
 /// Unpack payload bytes → BgraFrame.
+/// Returns empty frame (width=0) on invalid/malformed input.
 inline BgraFrame bgra_unpack(const uint8_t* payload, size_t payload_size) {
     BgraFrame f = {};
     if (payload_size < HEADER_SIZE) return f;
@@ -55,7 +56,13 @@ inline BgraFrame bgra_unpack(const uint8_t* payload, size_t payload_size) {
     f.width    = r32(payload);
     f.height   = r32(payload + 4);
     f.channels = r32(payload + 8);
-    size_t px_size = (size_t)f.width * f.height * f.channels;
+    // Validate: non-zero, reasonable dimensions, no overflow
+    if (f.width == 0 || f.height == 0 || f.channels == 0) return BgraFrame{};
+    if (f.width > 16384 || f.height > 16384 || f.channels > 16) return BgraFrame{};
+    // Check w*h*ch overflow before multiplication
+    uint64_t px_u64 = (uint64_t)f.width * f.height * f.channels;
+    if (px_u64 > (uint64_t)SIZE_MAX || px_u64 > 1024ULL*1024*1024) return BgraFrame{};
+    size_t px_size = (size_t)px_u64;
     if (payload_size >= HEADER_SIZE + px_size) {
         f.pixels.assign(payload + HEADER_SIZE, payload + HEADER_SIZE + px_size);
     }

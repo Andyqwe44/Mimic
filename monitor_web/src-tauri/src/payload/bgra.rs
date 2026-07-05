@@ -31,7 +31,13 @@ pub fn unpack(payload: &[u8]) -> Option<BgraFrame> {
     let w  = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
     let h  = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
     let ch = u32::from_le_bytes([payload[8], payload[9], payload[10], payload[11]]);
-    let px_size = (w * h * ch) as usize;
+    // Validate: non-zero, reasonable dimensions, no overflow
+    if w == 0 || h == 0 || ch == 0 { return None; }
+    if w > 16384 || h > 16384 || ch > 16 { return None; }
+    let px_size = (w as u64 * h as u64 * ch as u64) as usize;
+    // Overflow check: if the cast truncates, the value was too large
+    if px_size as u64 != w as u64 * h as u64 * ch as u64 { return None; }
+    if px_size > 1024 * 1024 * 1024 { return None; } // 1 GiB sanity cap
     if payload.len() < HEADER_SIZE + px_size { return None; }
     Some(BgraFrame {
         width: w, height: h, channels: ch,

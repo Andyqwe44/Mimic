@@ -23,6 +23,7 @@ DEFAULT_PIPE_NAME: str = "tictactoe_stream"
 
 FRAME_MAGIC: int = 0x4D415246  # "FRAM" LE
 FRAME_HEADER_SIZE: int = 8     # magic(4) + size(4)
+MAX_PAYLOAD_SIZE: int = 256 * 1024 * 1024  # 256 MiB, reject larger as corrupt
 
 TRANSPORT_HEADER = struct.Struct("<II")  # magic, size
 
@@ -54,6 +55,8 @@ def recv_frame(sock: socket.socket) -> Optional[bytes]:
         if hdr == b"\x00" * FRAME_HEADER_SIZE:
             return None
         raise ValueError(f"Bad magic in frame header")
+    if size > MAX_PAYLOAD_SIZE:
+        raise ValueError(f"Payload size {size} exceeds max {MAX_PAYLOAD_SIZE}")
     return _recv_exact(sock, size)
 
 def _recv_exact(sock: socket.socket, n: int) -> Optional[bytes]:
