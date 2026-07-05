@@ -100,31 +100,44 @@ cd ai && python train.py --iters 50 --games 100
 ## 架构
 
 ```
-┌─ monitor_web (Tauri 2) ──────────────────────────────────────┐
-│  React (TypeScript + Tailwind)  ←→  Rust (IPC)              │
-│       UI 界面                   │  Win32 API 直调 (无子进程)  │
-│                                  │  fMP4 封装 (MSE 视频)      │
-└──────────────────────┬──────────┴────────────────────────────┘
-                       │
-           ┌───────────┼──────────────┐
-           ▼           ▼              ▼
-      Rust EnumWindows  Rust GDI     capture_h264.exe
-      (窗口枚举, 0ms)   (单帧截图)   (H.264 GPU 流, 60FPS)
-                            │              │
-                       GetWindowDC    FramePool/WGC → MF H.264 HW Encoder
-                       BitBlt         stdout pipe + TCP :9998
+┌─ monitor_web (Tauri 2) ────────────────────────────────────┐
+│  React (TypeScript + Tailwind)  ←→  Rust (IPC)            │
+│       UI 界面                   │  Win32 API 直调          │
+│                                  │  TCP server (帧广播)     │
+└──────────────────┬───────────────┴─────────────────────────┘
+                   │
+     ┌─────────────┼──────────────┐
+     ▼             ▼              ▼
+  Rust            Rust           TCP :9999
+  EnumWindows     GDI Capture    (agent.exe / Python / 任意)
+  (窗口枚举, 0ms)  (单帧截图)     binary BGRA frames
+                    │
+          ┌────────┼────────┐
+          ▼        ▼        ▼
+    GetWindowDC  PrintWindow  ScreenBitBlt
 ```
 
-### Screenshot (单帧截图) 数据流
+### TCP 帧流协议
+
+Preview 启动时自动在 `127.0.0.1:9999` 开启 TCP server。多客户端可同时连接。
+
+```
+每帧 (binary, LE): [w:4][h:4][ch:4][size:4][BGRA pixels: size bytes]
+```
+
+### Screenshot (单帧截图) 数据流 — 三方法回退链
 
 ```
 Rust Win32 API (直调, 无子进程)
-  Desktop: GetDC(None) + BitBlt → BGRA (GDI, ~2ms @ 1920x1080)
-  Window:  GetWindowDC + BitBlt → BGRA (GDI, ~2ms)
+  Method 1: GetWindowDC + BitBlt        (~2-5ms, 快但窗口遮挡时黑)
+  Method 2: PrintWindow(PW_RENDERFULLCONTENT) (~15-30ms, DWM合成, 处理遮挡)
+  Method 3: ScreenBitBlt 窗口位置裁剪    (~2-5ms, 从屏幕DC截取)
+  ↓
+纯色/品红检测 → 自动回退到下一方法
   ↓
 Scale (max 640px) + BGRA→RGBA + PNG (miniz_oxide) + base64
   ↓
-<img src="data:image/png;base64,...">
+<img> 按比例定位在 16:9 容器内
 ```
 
 ### Preview (实时预览) 数据流 — BMP 多方法流式捕获

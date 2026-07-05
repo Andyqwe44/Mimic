@@ -12,7 +12,7 @@ use std::time::Instant;
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetWindowTextW, GetWindowLongPtrW, IsWindowVisible,
     GetDesktopWindow, GetWindow, GetWindowRect, GetSystemMetrics,
-    IsIconic, GW_OWNER, GWL_STYLE, GWL_EXSTYLE, WS_CAPTION, WS_EX_TOOLWINDOW,
+    IsIconic, IsWindow, GW_OWNER, GWL_STYLE, GWL_EXSTYLE, WS_CAPTION, WS_EX_TOOLWINDOW,
     SM_CXSCREEN, SM_CYSCREEN,
 };
 use windows::Win32::Foundation::{RECT, HWND, BOOL, TRUE, LPARAM};
@@ -218,6 +218,19 @@ fn is_solid_color(pixels: &[u8]) -> bool {
     n > 0 && same == n
 }
 
+/// Check for magenta sentinel pixels (R=255, G=0, B=255).
+/// PrintWindow fills with magenta before drawing — if more than 5% of samples
+/// are still magenta, PrintWindow likely failed to render the window content.
+fn has_magenta_sentinel(pixels: &[u8]) -> bool {
+    if pixels.len() < 16 { return false; }
+    let step = (pixels.len() / 200).max(4);
+    let mut magenta = 0usize; let mut n = 0usize;
+    for i in (0..pixels.len()).step_by(step * 4) { n += 1;
+        if pixels[i+2] == 255 && pixels[i+1] == 0 && pixels[i] == 255 { magenta += 1; } }
+    // If >5% of samples are magenta, PrintWindow failed
+    n > 0 && magenta * 20 > n
+}
+
 unsafe fn bitblt_bgra(dc: HDC, src_dc: HDC, w: i32, h: i32) -> Option<(Vec<u8>, i32, i32)> {
     let mem_dc = CreateCompatibleDC(dc);
     if mem_dc.0.is_null() { return None; }
@@ -256,6 +269,9 @@ unsafe fn capture_window_internal(hwnd: u64) -> CaptureResult {
 
     // Window: detect state
     let mut state = "normal";
+    if !IsWindow(hwnd_ptr).as_bool() {
+        return CaptureResult{window_state:"closed",..def};
+    }
     if IsIconic(hwnd_ptr).as_bool() { state = "minimized"; }
     else if !IsWindowVisible(hwnd_ptr).as_bool() { state = "hidden"; }
     let mut wr = RECT::default();
@@ -267,11 +283,15 @@ unsafe fn capture_window_internal(hwnd: u64) -> CaptureResult {
     let dc=GetWindowDC(hwnd_ptr);
     if !dc.0.is_null() {
         if let Some((p,pw,ph)) = bitblt_bgra(dc, dc, ww, wh) {
-            if !is_solid_color(&p) { let _=ReleaseDC(hwnd_ptr, dc);
-                return CaptureResult{pixels:p,w:pw,h:ph,method:"GDI(GetWindowDC)",window_state:state}; }
-        }
+            if is_solid_color(&p) {
+                dlog!("capture: GetWindowDC → solid({},{},{})", p[2], p[1], p[0]);
+            } else {
+                let _=ReleaseDC(hwnd_ptr, dc);
+                return CaptureResult{pixels:p,w:pw,h:ph,method:"GDI(GetWindowDC)",window_state:state};
+            }
+        } else { dlog!("capture: GetWindowDC bitblt failed"); }
         let _=ReleaseDC(hwnd_ptr, dc);
-    }
+    } else { dlog!("capture: GetWindowDC returned null"); }
 
     // Method 2: PrintWindow
     let sdc=GetDC(None);
@@ -292,7 +312,12 @@ unsafe fn capture_window_internal(hwnd: u64) -> CaptureResult {
                 let copied=GetDIBits(mdc,bmp,0,wh as u32,Some(pix.as_mut_ptr() as *mut _),
                     &mut bi as *mut _ as *mut BITMAPINFO, DIB_RGB_COLORS);
                 let _=SelectObject(mdc,old); let _=DeleteObject(bmp);
-                if copied!=0 && pw_ok && !is_solid_color(&pix) { let _=DeleteDC(mdc); let _=ReleaseDC(None,sdc);
+                if copied == 0 { dlog!("capture: PrintWindow GetDIBits failed"); }
+                else if !pw_ok { dlog!("capture: PrintWindow returned FALSE"); }
+                else if is_solid_color(&pix) { dlog!("capture: PrintWindow → solid({},{},{})", pix[2], pix[1], pix[0]); }
+                else if has_magenta_sentinel(&pix) { dlog!("capture: PrintWindow → magenta sentinel detected"); }
+                else {
+                    let _=DeleteDC(mdc); let _=ReleaseDC(None,sdc);
                     let m = if state=="minimized" {"PrintWindow(minimized)"} else {"PrintWindow"};
                     return CaptureResult{pixels:pix,w:ww,h:wh,method:m,window_state:state}; }
             }
@@ -301,16 +326,38 @@ unsafe fn capture_window_internal(hwnd: u64) -> CaptureResult {
         let _=ReleaseDC(None,sdc);
     }
 
-    // Method 3: BitBlt from screen DC at window position
+    // Method 3: BitBlt from screen DC at window screen position
     let sc=GetDC(None);
     if !sc.0.is_null() {
-        if let Some((p,pw,ph)) = bitblt_bgra(sc, sc, ww, wh) {
-            if !is_solid_color(&p) { let _=ReleaseDC(None,sc);
-                return CaptureResult{pixels:p,w:pw,h:ph,method:"ScreenBitBlt",window_state:state}; }
+        // BitBlt from screen coordinates (wr.left, wr.top) — not (0,0)
+        let mem_dc = CreateCompatibleDC(sc);
+        if !mem_dc.0.is_null() {
+            let bmp = CreateCompatibleBitmap(sc, ww, wh);
+            if !bmp.0.is_null() {
+                let old = SelectObject(mem_dc, bmp);
+                if BitBlt(mem_dc, 0, 0, ww, wh, sc, wr.left, wr.top, SRCCOPY).is_ok() {
+                    let mut bi = BITMAPINFOHEADER::default();
+                    bi.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+                    bi.biWidth=ww; bi.biHeight=-wh; bi.biPlanes=1; bi.biBitCount=32; bi.biCompression=BI_RGB.0 as u32;
+                    let mut pix = vec![0u8;(ww*wh*4)as usize];
+                    let copied = GetDIBits(mem_dc, bmp, 0, wh as u32, Some(pix.as_mut_ptr() as *mut _),
+                        &mut bi as *mut _ as *mut BITMAPINFO, DIB_RGB_COLORS);
+                    if copied != 0 && !is_solid_color(&pix) {
+                        let _=SelectObject(mem_dc,old); let _=DeleteObject(bmp); let _=DeleteDC(mem_dc);
+                        let _=ReleaseDC(None,sc);
+                        return CaptureResult{pixels:pix,w:ww,h:wh,method:"ScreenBitBlt",window_state:state};
+                    } else if copied != 0 {
+                        dlog!("capture: ScreenBitBlt → solid({},{},{})", pix[2], pix[1], pix[0]);
+                    }
+                }
+                let _=SelectObject(mem_dc,old); let _=DeleteObject(bmp);
+            }
+            let _=DeleteDC(mem_dc);
         }
         let _=ReleaseDC(None,sc);
-    }
+    } else { dlog!("capture: ScreenBitBlt GetDC(null) failed"); }
 
+    dlog!("capture: ALL methods failed for hwnd={} state={} {}x{}", hwnd, state, ww, wh);
     CaptureResult{pixels:vec![],w:ww,h:wh,method:"ALL_FAILED",window_state:state}
 }
 
@@ -348,11 +395,19 @@ fn capture_single() -> String {
     dlog!("capture_single: desktop...");
     unsafe {
         let result = capture_window_internal(0);
+        let screen_w = GetSystemMetrics(SM_CXSCREEN);
+        let screen_h = GetSystemMetrics(SM_CYSCREEN);
         if !result.pixels.is_empty() {
             let b64 = pixels_to_png_base64(&result.pixels, result.w, result.h);
-            dlog!("capture_single: {}x{} method={} state={} → {}b base64, total={:.0}ms",
-                result.w, result.h, result.method, result.window_state, b64.len(), t0.elapsed().as_millis());
-            b64
+            dlog!("capture_single: {}x{} method={} → {}b, total={:.0}ms",
+                result.w, result.h, result.method, b64.len(), t0.elapsed().as_millis());
+            serde_json::json!({
+                "image": b64,
+                "w": result.w, "h": result.h,
+                "x": 0, "y": 0,
+                "screen_w": screen_w, "screen_h": screen_h,
+                "method": result.method
+            }).to_string()
         } else {
             dlog!("capture_single: FAILED method={} state={}", result.method, result.window_state);
             String::new()
@@ -366,11 +421,29 @@ fn capture_window(hwnd: u64) -> String {
     dlog!("capture_window: hwnd={}...", hwnd);
     unsafe {
         let result = capture_window_internal(hwnd);
+        let screen_w = GetSystemMetrics(SM_CXSCREEN);
+        let screen_h = GetSystemMetrics(SM_CYSCREEN);
+
+        // Get window screen position for proportional display
+        let (wx, wy) = if hwnd != 0 {
+            let hwnd_ptr = HWND(std::ptr::with_exposed_provenance_mut::<std::ffi::c_void>(hwnd as usize));
+            let mut wr = RECT::default();
+            if GetWindowRect(hwnd_ptr, &mut wr).is_ok() {
+                (wr.left, wr.top)
+            } else { (0, 0) }
+        } else { (0, 0) };
+
         if !result.pixels.is_empty() {
             let b64 = pixels_to_png_base64(&result.pixels, result.w, result.h);
-            dlog!("capture_window: {}x{} method={} state={} → {}b base64, total={:.0}ms",
-                result.w, result.h, result.method, result.window_state, b64.len(), t0.elapsed().as_millis());
-            b64
+            dlog!("capture_window: {}x{} @({},{}) screen={}x{} method={} → {}b, total={:.0}ms",
+                result.w, result.h, wx, wy, screen_w, screen_h, result.method, b64.len(), t0.elapsed().as_millis());
+            serde_json::json!({
+                "image": b64,
+                "w": result.w, "h": result.h,
+                "x": wx, "y": wy,
+                "screen_w": screen_w, "screen_h": screen_h,
+                "method": result.method
+            }).to_string()
         } else {
             dlog!("capture_window: FAILED method={} state={} w={} h={}",
                 result.method, result.window_state, result.w, result.h);
@@ -439,16 +512,85 @@ fn base64_encode(data: &[u8]) -> String {
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::net::{TcpListener, TcpStream};
 
 struct StreamState {
     running: Arc<AtomicBool>,
+    _tcp_thread: Option<thread::JoinHandle<()>>,
 }
 
 static STREAM: Mutex<Option<StreamState>> = Mutex::new(None);
 static STREAM_FRAME: Mutex<(String, i32, i32, String)> = Mutex::new((String::new(), 0, 0, String::new())); // b64, w, h, method
+// Raw BGRA pixels for TCP/pipe clients (scaled, uncompressed)
+static RAW_FRAME: Mutex<(Vec<u8>, i32, i32)> = Mutex::new((Vec::new(), 0, 0));
+
+/// Write a binary frame [w:4][h:4][ch:4][size:4][pixels] to a writer
+fn write_frame(w: &mut dyn Write, pixels: &[u8], w_val: i32, h_val: i32) -> std::io::Result<()> {
+    w.write_all(&(w_val as u32).to_le_bytes())?;
+    w.write_all(&(h_val as u32).to_le_bytes())?;
+    w.write_all(&4u32.to_le_bytes())?;
+    w.write_all(&(pixels.len() as u32).to_le_bytes())?;
+    w.write_all(pixels)?;
+    w.flush()
+}
+
+/// TCP broadcast thread: accepts clients, broadcasts latest frame to all
+fn tcp_broadcast_thread(
+    port: u16,
+    running: Arc<AtomicBool>,
+) {
+    let listener = match TcpListener::bind(("127.0.0.1", port)) {
+        Ok(l) => l,
+        Err(e) => { dlog!("tcp: bind :{} failed: {}", port, e); return; }
+    };
+    // Non-blocking accept
+    let _ = listener.set_nonblocking(true);
+    dlog!("tcp: listening on 127.0.0.1:{}", port);
+
+    let mut clients: Vec<TcpStream> = Vec::new();
+
+    while running.load(Ordering::Relaxed) {
+        // Accept new connections
+        match listener.accept() {
+            Ok((stream, addr)) => {
+                let _ = stream.set_nonblocking(true);
+                dlog!("tcp: client connected from {}", addr);
+                clients.push(stream);
+            }
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(_) => {}
+        }
+
+        // Get latest frame
+        if let Ok(guard) = RAW_FRAME.lock() {
+            let (ref pixels, w, h) = *guard;
+            if !pixels.is_empty() {
+                // Broadcast to all clients
+                clients.retain_mut(|client| {
+                    if write_frame(client, pixels, w, h).is_err() {
+                        // Client disconnected
+                        false
+                    } else {
+                        true
+                    }
+                });
+            }
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+
+    dlog!("tcp: broadcast thread exiting");
+}
+
 
 /// Fast capture using a specific method (no fallback chain)
 unsafe fn capture_fast(method: &str, hwnd_ptr: HWND, w: i32, h: i32) -> Option<(Vec<u8>, i32, i32)> {
+    // Quick check: window still alive?
+    if !hwnd_ptr.0.is_null() && hwnd_ptr != GetDesktopWindow() && !IsWindow(hwnd_ptr).as_bool() {
+        return None;
+    }
+    if w <= 0 || h <= 0 { return None; }
     match method {
         "GDI" | "GDI(GetWindowDC)" => {
             let dc = GetWindowDC(hwnd_ptr);
@@ -517,13 +659,19 @@ fn bgra_to_bmp_uri(pixels: &[u8], w: i32, h: i32) -> String {
 }
 
 #[tauri::command]
-fn capture_stream_start(app: tauri::AppHandle, hwnd: u64) -> Result<String, String> {
+fn capture_stream_start(app: tauri::AppHandle, hwnd: u64, tcp_port: Option<u16>) -> Result<String, String> {
     let _ = capture_stream_stop();
+
+    let port = tcp_port.unwrap_or(9999);
 
     let running = Arc::new(AtomicBool::new(true));
     let running_clone = running.clone();
 
-    dlog!("stream_start: hwnd={} (Rust-native)", hwnd);
+    dlog!("stream_start: hwnd={} port={} (Rust-native)", hwnd, port);
+
+    // Start TCP broadcast server
+    let tcp_running = running.clone();
+    let tcp_handle = thread::spawn(move || { tcp_broadcast_thread(port, tcp_running); });
 
     thread::spawn(move || {
         // --- First frame: detect best method ---
@@ -555,6 +703,12 @@ fn capture_stream_start(app: tauri::AppHandle, hwnd: u64) -> Result<String, Stri
         let fps_t0 = Instant::now();
 
         while running_clone.load(Ordering::Relaxed) {
+            // Window gone → abort (skip for desktop)
+            if hwnd != 0 && unsafe { !IsWindow(hwnd_ptr).as_bool() } {
+                dlog!("stream: window closed, stopping");
+                break;
+            }
+
             let frame_t0 = Instant::now();
 
             let result = unsafe { capture_fast(&method, hwnd_ptr, w, h) };
@@ -566,10 +720,14 @@ fn capture_stream_start(app: tauri::AppHandle, hwnd: u64) -> Result<String, Stri
                 if pixels.len() == prev_pixels.len() && pixels == prev_pixels {
                     // Emit size=0 signal (frontend reuses previous)
                     if let Ok(mut state) = STREAM_FRAME.lock() {
-                        state.3 = method.clone(); // update method string
+                        state.3 = method.clone();
                     }
                 } else {
                     let uri = bgra_to_bmp_uri(&pixels, w, h);
+                    // Store raw BGRA for TCP/pipe clients
+                    if let Ok(mut raw) = RAW_FRAME.lock() {
+                        *raw = (pixels.clone(), w, h);
+                    }
                     prev_pixels = pixels;
                     if let Ok(mut state) = STREAM_FRAME.lock() {
                         *state = (uri, w, h, method.clone());
@@ -607,7 +765,10 @@ fn capture_stream_start(app: tauri::AppHandle, hwnd: u64) -> Result<String, Stri
         dlog!("stream: exited after {} frames", frames);
     });
 
-    *STREAM.lock().unwrap() = Some(StreamState { running });
+    *STREAM.lock().unwrap() = Some(StreamState {
+        running,
+        _tcp_thread: Some(tcp_handle),
+    });
     Ok("started".into())
 }
 

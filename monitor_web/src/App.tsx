@@ -343,12 +343,35 @@ function ScreenshotPanel({ selWin }: { selWin?: WindowInfo }) {
   const [expanded, setExpanded] = useState(true)
   const [previewing, setPreviewing] = useState(false)
   const [imgSrc, setImgSrc] = useState('')       // single-frame PNG / preview BMP
+  const [imgStyle, setImgStyle] = useState<React.CSSProperties>({})
   const [fps, setFps] = useState(0)
   const [capMethod, setCapMethod] = useState('')
   const previewingRef = useRef(false)
   const framesRef = useRef(0)
   const lastFpsRef = useRef(Date.now())
   const unlistenRef = useRef<(() => void) | null>(null)
+
+  // Compute proportional position within screen-aspect container
+  const applyCaptureJson = (jsonStr: string) => {
+    try {
+      const info = JSON.parse(jsonStr)
+      const src = `data:image/png;base64,${info.image}`
+      setImgSrc(src)
+      setCapMethod(info.method || '')
+      // Proportional positioning: window rect mapped to screen-sized container
+      if (info.screen_w && info.screen_h && info.w && info.h) {
+        setImgStyle({
+          position: 'absolute',
+          left: `${(info.x / info.screen_w) * 100}%`,
+          top: `${(info.y / info.screen_h) * 100}%`,
+          width: `${(info.w / info.screen_w) * 100}%`,
+          height: `${(info.h / info.screen_h) * 100}%`,
+          objectFit: 'fill',
+        })
+      }
+      return true
+    } catch { return false }
+  }
 
   // ── BMP Preview: Rust-native multi-method → BMP → <img> ──
   const togglePreview = async () => {
@@ -361,7 +384,7 @@ function ScreenshotPanel({ selWin }: { selWin?: WindowInfo }) {
     } else {
       const hwnd = selWin?.hwnd ?? 0
       addLog(`Preview: ${selWin?.title ?? 'desktop'} (multi-method BMP)`)
-      try { const { invoke } = await import('@tauri-apps/api/core'); await invoke<string>('capture_stream_start', { hwnd }) }
+      try { const { invoke } = await import('@tauri-apps/api/core'); await invoke<string>('capture_stream_start', { hwnd, tcpPort: 9999 }) }
       catch (e) { addLog(`Stream start failed: ${e}`); return }
 
       previewingRef.current = true; setPreviewing(true); setImgSrc('')
@@ -402,10 +425,14 @@ function ScreenshotPanel({ selWin }: { selWin?: WindowInfo }) {
               const t0 = Date.now()
               try {
                 const { invoke } = await import('@tauri-apps/api/core')
-                const b64 = await invoke<string>('capture_window', { hwnd })
+                const json = await invoke<string>('capture_window', { hwnd })
                 const elapsed = Date.now() - t0
-                setImgSrc(`data:image/png;base64,${b64}`)
-                addLog(`Screenshot OK: ${b64.length} chars base64, ${elapsed}ms total`)
+                if (applyCaptureJson(json)) {
+                  addLog(`Screenshot OK (${elapsed}ms)`)
+                } else {
+                  setImgSrc(''); setImgStyle({})
+                  addLog(`Screenshot failed after ${elapsed}ms`)
+                }
               } catch { addLog(`Screenshot failed after ${Date.now() - t0}ms`) }
             }} />
           {previewing
@@ -418,17 +445,17 @@ function ScreenshotPanel({ selWin }: { selWin?: WindowInfo }) {
         </div>
       </div>
       {expanded && (
-        <div className="min-h-[160px] rounded-lg bg-bg-primary overflow-hidden flex items-center justify-center relative">
+        <div className="w-full aspect-video rounded-lg bg-bg-primary overflow-hidden flex items-center justify-center relative">
           {imgSrc ? (
-            <img src={imgSrc} className="w-full h-auto object-contain" alt="preview" />
+            <img src={imgSrc} style={imgStyle} alt="preview" />
           ) : (
             <span className="text-sm text-text-muted">{previewing ? 'Waiting...' : 'Press Preview'}</span>
           )}
-          {previewing && (
+          {(imgSrc || previewing) && (
             <div className="absolute bottom-2 right-2 flex items-center gap-1.5 text-xs bg-bg-primary/80 px-2 py-0.5 rounded font-mono">
               {capMethod && <span className="text-success">{capMethod}</span>}
-              {capMethod && <span className="text-border">|</span>}
-              <span className="text-accent">{fps} FPS</span>
+              {capMethod && previewing && <span className="text-border">|</span>}
+              {previewing && <span className="text-accent">{fps} FPS</span>}
             </div>
           )}
         </div>

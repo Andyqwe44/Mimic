@@ -75,6 +75,26 @@ bool MfH264Encoder::init(ComPtr<ID3D11Device> device, int width, int height,
         return false;
     }
 
+    // CRITICAL: Set D3D11 device manager BEFORE type negotiation.
+    // Hardware MFTs need the GPU device via MFT_MESSAGE_SET_D3D_MANAGER.
+    {
+        ComPtr<IMFDXGIDeviceManager> dev_mgr;
+        UINT reset_token = 0;
+        HRESULT hr_mgr = MFCreateDXGIDeviceManager(&reset_token, &dev_mgr);
+        if (SUCCEEDED(hr_mgr) && dev_mgr) {
+            hr_mgr = dev_mgr->ResetDevice(device_.Get(), reset_token);
+            fprintf(stderr, "[mf_enc] IMFDXGIDeviceManager created + ResetDevice: 0x%08lX\n", hr_mgr);
+            hr_mgr = encoder_->ProcessMessage(MFT_MESSAGE_SET_D3D_MANAGER,
+                reinterpret_cast<ULONG_PTR>(dev_mgr.Get()));
+            fprintf(stderr, "[mf_enc] MFT_MESSAGE_SET_D3D_MANAGER: 0x%08lX\n", hr_mgr);
+        } else {
+            fprintf(stderr, "[mf_enc] MFCreateDXGIDeviceManager failed: 0x%08lX\n", hr_mgr);
+        }
+    }
+
+    // Also set D3D11 awareness + codec props
+    configure_encoder(width, height, fps, bitrate);
+
     if (!set_input_type(width, height, fps)) return false;
     if (!set_output_type()) return false;
 
@@ -223,6 +243,53 @@ bool MfH264Encoder::find_hardware_encoder() {
     return true;
 }
 
+// ── Configure encoder BEFORE type negotiation ─────────────────
+// AMD/NVIDIA/Intel hardware MFTs need D3D11 awareness + codec props
+// set via IMFAttributes BEFORE they expose their input/output types.
+void MfH264Encoder::configure_encoder(int width, int height, int fps, int bitrate) {
+    if (!encoder_) return;
+
+    // GUIDs for D3D11-aware encoding + codec properties
+    const GUID GUID_D3D11_AWARE = { 0xe8fadc4b, 0x72ef, 0x4e94, { 0x84, 0xe6, 0x8b, 0x8d, 0x3d, 0x78, 0x6b, 0xaf } };
+    const GUID GUID_D3D11_SHARED = { 0x39a7e28d, 0x81db, 0x4e33, { 0x95, 0x4c, 0x1d, 0xae, 0x13, 0xdf, 0x90, 0x5a } };
+
+    // Get IMFAttributes from encoder
+    IMFAttributes* attrs = nullptr;
+    HRESULT hr_attr = encoder_->QueryInterface(IID_PPV_ARGS(&attrs));
+    if (FAILED(hr_attr) || !attrs) {
+        // Try GetAttributes (some MFTs expose attrs this way)
+        hr_attr = encoder_->GetAttributes(&attrs);
+    }
+    if (!attrs) {
+        fprintf(stderr, "[mf_enc] Cannot get IMFAttributes from encoder\n");
+        return;
+    }
+
+    // 1) D3D11 awareness — MUST be set before type negotiation
+    HRESULT hr = attrs->SetUINT32(GUID_D3D11_AWARE, TRUE);
+    fprintf(stderr, "[mf_enc] D3D11_AWARE: 0x%08lX\n", hr);
+    attrs->SetUINT32(GUID_D3D11_SHARED, TRUE); // optional, ignore result
+
+    // 2) Low latency mode — no B-frames
+    attrs->SetUINT32(CODECAPI_AVLowLatencyMode, TRUE);
+
+    // 3) Rate control: Unconstrained VBR
+    attrs->SetUINT32(CODECAPI_AVEncCommonRateControlMode,
+        eAVEncCommonRateControlMode_UnconstrainedVBR);
+
+    // 4) Quality level (0-100, VBR mode)
+    attrs->SetUINT32(CODECAPI_AVEncCommonQuality, 70);
+
+    // 5) GOP size (~2 seconds)
+    attrs->SetUINT32(CODECAPI_AVEncMPVGOPSize, (UINT32)(fps * 2));
+
+    // 6) Mean bitrate
+    attrs->SetUINT32(CODECAPI_AVEncCommonMeanBitRate, (UINT32)bitrate);
+
+    attrs->Release();
+    fprintf(stderr, "[mf_enc] configure_encoder: D3D11+codec props set (result=0x%08lX)\n", hr);
+}
+
 // ── Set input media type — try supported formats in order ──
 bool MfH264Encoder::set_input_type(int width, int height, int fps) {
     DWORD in_count = 0, out_count = 0;
@@ -282,52 +349,80 @@ bool MfH264Encoder::set_input_type(int width, int height, int fps) {
             fi, width, height, fps, hr);
     }
 
-    // All specific formats failed — try using encoder's own preferred type
+    // All specific formats failed — try partial types that the encoder may complete
+    // Some encoders reject fully-specified types but accept incomplete ones
     {
-        ComPtr<IMFMediaType> pref;
-        if (SUCCEEDED(encoder_->GetInputAvailableType(input_stream_id_, 0, &pref))) {
-            GUID pref_subtype = {};
-            pref->GetGUID(MF_MT_SUBTYPE, &pref_subtype);
-            fprintf(stderr, "[mf_enc] encoder preferred subtype: %c%c%c%c\n",
-                (char)(pref_subtype.Data1 & 0xFF),
-                (char)((pref_subtype.Data1 >> 8) & 0xFF),
-                (char)((pref_subtype.Data1 >> 16) & 0xFF),
-                (char)((pref_subtype.Data1 >> 24) & 0xFF));
-
-            // Modify preferred type with our resolution
-            MFSetAttributeSize(pref.Get(), MF_MT_FRAME_SIZE, width, height);
-            MFSetAttributeRatio(pref.Get(), MF_MT_FRAME_RATE, fps, 1);
-            pref->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
-
-            hr = encoder_->SetInputType(input_stream_id_, pref.Get(), 0);
-            if (SUCCEEDED(hr)) {
-                fprintf(stderr, "[mf_enc] SetInputType OK (preferred+resized) %dx%d @%d\n",
-                    width, height, fps);
-                return true;
-            }
-            fprintf(stderr, "[mf_enc] SetInputType preferred+resized failed: 0x%08lX\n", hr);
+        // Try: major type only (let encoder pick everything)
+        ComPtr<IMFMediaType> mt;
+        MFCreateMediaType(&mt);
+        mt->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+        hr = encoder_->SetInputType(input_stream_id_, mt.Get(), 0);
+        fprintf(stderr, "[mf_enc] SetInputType(major-only): 0x%08lX\n", hr);
+        if (SUCCEEDED(hr)) {
+            ComPtr<IMFMediaType> current;
+            encoder_->GetInputCurrentType(input_stream_id_, &current);
+            GUID sub = {};
+            UINT32 mw=0, mh=0;
+            current->GetGUID(MF_MT_SUBTYPE, &sub);
+            MFGetAttributeSize(current.Get(), MF_MT_FRAME_SIZE, &mw, &mh);
+            fprintf(stderr, "[mf_enc] encoder chose: %c%c%c%c %dx%d\n",
+                (char)(sub.Data1&0xFF),(char)((sub.Data1>>8)&0xFF),
+                (char)((sub.Data1>>16)&0xFF),(char)((sub.Data1>>24)&0xFF), (int)mw, (int)mh);
+            return true;
         }
     }
-
-    // Last resort: try with just major type + frame size, no subtype
     {
+        // Try: major type + frame size only
         ComPtr<IMFMediaType> mt;
-        if (SUCCEEDED(MFCreateMediaType(&mt))) {
-            mt->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
-            MFSetAttributeSize(mt.Get(), MF_MT_FRAME_SIZE, width, height);
-            hr = encoder_->SetInputType(input_stream_id_, mt.Get(), 0);
-            if (SUCCEEDED(hr)) {
-                GUID actual = {};
-                ComPtr<IMFMediaType> current;
-                encoder_->GetInputCurrentType(input_stream_id_, &current);
-                current->GetGUID(MF_MT_SUBTYPE, &actual);
-                fprintf(stderr, "[mf_enc] SetInputType OK (untyped), actual subtype: %c%c%c%c\n",
-                    (char)(actual.Data1 & 0xFF), (char)((actual.Data1 >> 8) & 0xFF),
-                    (char)((actual.Data1 >> 16) & 0xFF), (char)((actual.Data1 >> 24) & 0xFF));
-                return true;
-            }
-            fprintf(stderr, "[mf_enc] SetInputType untyped failed: 0x%08lX\n", hr);
+        MFCreateMediaType(&mt);
+        mt->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+        MFSetAttributeSize(mt.Get(), MF_MT_FRAME_SIZE, width, height);
+        hr = encoder_->SetInputType(input_stream_id_, mt.Get(), 0);
+        fprintf(stderr, "[mf_enc] SetInputType(major+size %dx%d): 0x%08lX\n", width, height, hr);
+        if (SUCCEEDED(hr)) {
+            ComPtr<IMFMediaType> current;
+            encoder_->GetInputCurrentType(input_stream_id_, &current);
+            GUID sub = {};
+            current->GetGUID(MF_MT_SUBTYPE, &sub);
+            fprintf(stderr, "[mf_enc] encoder chose: %c%c%c%c\n",
+                (char)(sub.Data1&0xFF),(char)((sub.Data1>>8)&0xFF),
+                (char)((sub.Data1>>16)&0xFF),(char)((sub.Data1>>24)&0xFF));
+            return true;
         }
+    }
+    {
+        // Try: major type + frame size + framerate
+        ComPtr<IMFMediaType> mt;
+        MFCreateMediaType(&mt);
+        mt->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+        MFSetAttributeSize(mt.Get(), MF_MT_FRAME_SIZE, width, height);
+        MFSetAttributeRatio(mt.Get(), MF_MT_FRAME_RATE, fps, 1);
+        mt->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
+        hr = encoder_->SetInputType(input_stream_id_, mt.Get(), 0);
+        fprintf(stderr, "[mf_enc] SetInputType(major+size+fps %dx%d@%d): 0x%08lX\n", width, height, fps, hr);
+        if (SUCCEEDED(hr)) {
+            ComPtr<IMFMediaType> current;
+            encoder_->GetInputCurrentType(input_stream_id_, &current);
+            GUID sub = {};
+            current->GetGUID(MF_MT_SUBTYPE, &sub);
+            fprintf(stderr, "[mf_enc] encoder chose: %c%c%c%c\n",
+                (char)(sub.Data1&0xFF),(char)((sub.Data1>>8)&0xFF),
+                (char)((sub.Data1>>16)&0xFF),(char)((sub.Data1>>24)&0xFF));
+            return true;
+        }
+    }
+    {
+        // Windows 11 24H2+ often uses ARGB32 for GPU capture → try BGRA
+        ComPtr<IMFMediaType> mt;
+        MFCreateMediaType(&mt);
+        mt->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+        mt->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_ARGB32);
+        MFSetAttributeSize(mt.Get(), MF_MT_FRAME_SIZE, width, height);
+        MFSetAttributeRatio(mt.Get(), MF_MT_FRAME_RATE, fps, 1);
+        mt->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
+        hr = encoder_->SetInputType(input_stream_id_, mt.Get(), 0);
+        fprintf(stderr, "[mf_enc] SetInputType(ARGB32 %dx%d@%d): 0x%08lX\n", width, height, fps, hr);
+        if (SUCCEEDED(hr)) return true;
     }
 
     fprintf(stderr, "[mf_enc] SetInputType: ALL approaches failed\n");

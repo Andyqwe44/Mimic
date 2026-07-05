@@ -49,6 +49,7 @@ public:
 
 private:
     bool find_hardware_encoder();
+    void configure_encoder(int width, int height, int fps, int bitrate);
     bool set_input_type(int width, int height, int fps);
     bool set_output_type();
     bool create_resources(int width, int height);
