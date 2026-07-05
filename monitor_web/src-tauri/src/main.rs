@@ -12,7 +12,7 @@ use std::time::Instant;
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetWindowTextW, GetWindowLongPtrW, IsWindowVisible,
     GetDesktopWindow, GetWindow, GetWindowRect, GetSystemMetrics,
-    GW_OWNER, GWL_STYLE, GWL_EXSTYLE, WS_CAPTION, WS_EX_TOOLWINDOW,
+    IsIconic, GW_OWNER, GWL_STYLE, GWL_EXSTYLE, WS_CAPTION, WS_EX_TOOLWINDOW,
     SM_CXSCREEN, SM_CYSCREEN,
 };
 use windows::Win32::Foundation::{RECT, HWND, BOOL, TRUE, LPARAM};
@@ -20,6 +20,7 @@ use windows::Win32::Graphics::Gdi::{
     GetDC, GetWindowDC, CreateCompatibleDC, CreateCompatibleBitmap,
     SelectObject, BitBlt, GetDIBits, DeleteDC, DeleteObject, ReleaseDC,
     BITMAPINFOHEADER, BITMAPINFO, SRCCOPY, DIB_RGB_COLORS, BI_RGB,
+    HDC, HBRUSH,
 };
 
 mod fmp4;
@@ -190,72 +191,127 @@ fn extract_json_str<'a>(line: &'a str, key: &str) -> Option<&'a str> {
     Some(rest)
 }
 
-// ── Screenshot: Rust-native GDI → BGRA → scale → PNG → base64 (no subprocess) ──
+// ── Screenshot: multi-method capture with diagnostics ──
 
-/// Capture screen or window via GDI. Returns BGRA pixels, w, h.
-unsafe fn gdi_capture(hwnd: u64) -> Option<(Vec<u8>, i32, i32)> {
-    let hwnd = HWND(std::ptr::with_exposed_provenance_mut::<std::ffi::c_void>(hwnd as usize));
-    let is_desktop = hwnd.0.is_null() || hwnd == GetDesktopWindow();
+// PrintWindow — not in windows crate, use raw FFI
+const PW_RENDERFULLCONTENT: u32 = 0x00000002;
+const PW_CLIENTONLY: u32 = 0x00000001;
+extern "system" {
+    fn PrintWindow(hwnd: HWND, hdc: HDC, flags: u32) -> BOOL;
+    fn FillRect(hdc: HDC, lprc: *const RECT, hbr: HBRUSH) -> i32;
+    fn CreateSolidBrush(color: u32) -> HBRUSH;
+}
 
-    // GetDC/GetWindowDC returns raw HDC — null on failure
-    let dc = if is_desktop { GetDC(None) } else { GetWindowDC(hwnd) };
-    if dc.0.is_null() { return None; }
+struct CaptureResult {
+    pixels: Vec<u8>, w: i32, h: i32,
+    method: &'static str,    // "GDI(GetWindowDC)", "PrintWindow", "ScreenBitBlt", "ALL_FAILED"
+    window_state: &'static str, // "normal", "minimized", "hidden", "desktop", "zero-size"
+}
 
-    let (w, h) = if is_desktop {
-        (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN))
-    } else {
-        let mut r = RECT::default();
-        GetWindowRect(hwnd, &mut r).ok()?;
-        (r.right - r.left, r.bottom - r.top)
-    };
-    if w <= 0 || h <= 0 { let _ = ReleaseDC(hwnd, dc); return None; }
+fn is_solid_color(pixels: &[u8]) -> bool {
+    if pixels.len() < 16 { return pixels.len() < 4; }
+    let step = (pixels.len() / 400).max(4);
+    let (r0, g0, b0) = (pixels[2], pixels[1], pixels[0]);
+    let mut same = 0usize; let mut n = 0usize;
+    for i in (0..pixels.len()).step_by(step * 4) { n += 1;
+        if pixels[i+2]==r0 && pixels[i+1]==g0 && pixels[i]==b0 { same+=1; } }
+    n > 0 && same == n
+}
 
-    // CreateCompatibleDC/Bitmap return raw handles
+unsafe fn bitblt_bgra(dc: HDC, src_dc: HDC, w: i32, h: i32) -> Option<(Vec<u8>, i32, i32)> {
     let mem_dc = CreateCompatibleDC(dc);
-    if mem_dc.0.is_null() { let _ = ReleaseDC(hwnd, dc); return None; }
+    if mem_dc.0.is_null() { return None; }
     let bitmap = CreateCompatibleBitmap(dc, w, h);
-    if bitmap.0.is_null() { let _ = DeleteDC(mem_dc); let _ = ReleaseDC(hwnd, dc); return None; }
-
+    if bitmap.0.is_null() { let _ = DeleteDC(mem_dc); return None; }
     let old_bmp = SelectObject(mem_dc, bitmap);
-    // BitBlt returns Result<()>
-    if BitBlt(mem_dc, 0, 0, w, h, dc, 0, 0, SRCCOPY).is_err() {
-        let _ = SelectObject(mem_dc, old_bmp);
-        let _ = DeleteObject(bitmap);
-        let _ = DeleteDC(mem_dc);
-        let _ = ReleaseDC(hwnd, dc);
-        return None;
-    }
-
+    if BitBlt(mem_dc, 0, 0, w, h, src_dc, 0, 0, SRCCOPY).is_err() {
+        let _ = SelectObject(mem_dc, old_bmp); let _ = DeleteObject(bitmap); let _ = DeleteDC(mem_dc); return None; }
     let mut bi = BITMAPINFOHEADER::default();
     bi.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
-    bi.biWidth = w;
-    bi.biHeight = -h; // top-down
-    bi.biPlanes = 1;
-    bi.biBitCount = 32;
-    bi.biCompression = BI_RGB.0 as u32;
-
+    bi.biWidth=w; bi.biHeight=-h; bi.biPlanes=1; bi.biBitCount=32; bi.biCompression=BI_RGB.0 as u32;
     let mut pixels = vec![0u8; (w * h * 4) as usize];
-    // GetDIBits returns i32 — 0 on failure
-    let copied = GetDIBits(
-        mem_dc, bitmap, 0, h as u32,
-        Some(pixels.as_mut_ptr() as *mut _),
-        &mut bi as *mut _ as *mut BITMAPINFO,
-        DIB_RGB_COLORS,
-    );
-    if copied == 0 {
-        let _ = SelectObject(mem_dc, old_bmp);
-        let _ = DeleteObject(bitmap);
-        let _ = DeleteDC(mem_dc);
-        let _ = ReleaseDC(hwnd, dc);
-        return None;
+    let copied = GetDIBits(mem_dc, bitmap, 0, h as u32, Some(pixels.as_mut_ptr() as *mut _),
+        &mut bi as *mut _ as *mut BITMAPINFO, DIB_RGB_COLORS);
+    let _ = SelectObject(mem_dc, old_bmp); let _ = DeleteObject(bitmap); let _ = DeleteDC(mem_dc);
+    if copied == 0 { None } else { Some((pixels, w, h)) }
+}
+
+unsafe fn capture_window_internal(hwnd: u64) -> CaptureResult {
+    let hwnd_ptr = HWND(std::ptr::with_exposed_provenance_mut::<std::ffi::c_void>(hwnd as usize));
+    let is_desktop = hwnd_ptr.0.is_null() || hwnd_ptr == GetDesktopWindow();
+    let def = CaptureResult { pixels: vec![], w: 0, h: 0, method: "None", window_state: "error" };
+
+    // Desktop: simple GDI BitBlt
+    if is_desktop {
+        let dc = GetDC(None); if dc.0.is_null() { return def; }
+        let w=GetSystemMetrics(SM_CXSCREEN); let h=GetSystemMetrics(SM_CYSCREEN);
+        if w<=0||h<=0 { let _=ReleaseDC(None, dc); return def; }
+        let r = bitblt_bgra(dc, dc, w, h);
+        let _=ReleaseDC(None, dc);
+        return match r {
+            Some((p,pw,ph)) => CaptureResult { pixels:p, w:pw, h:ph, method:"GDI", window_state:"desktop" },
+            None => def
+        };
     }
 
-    let _ = SelectObject(mem_dc, old_bmp);
-    let _ = DeleteObject(bitmap);
-    let _ = DeleteDC(mem_dc);
-    let _ = ReleaseDC(hwnd, dc);
+    // Window: detect state
+    let mut state = "normal";
+    if IsIconic(hwnd_ptr).as_bool() { state = "minimized"; }
+    else if !IsWindowVisible(hwnd_ptr).as_bool() { state = "hidden"; }
+    let mut wr = RECT::default();
+    if GetWindowRect(hwnd_ptr, &mut wr).is_err() { return CaptureResult{window_state:"no-rect",..def}; }
+    let ww=wr.right-wr.left; let wh=wr.bottom-wr.top;
+    if ww<=0||wh<=0 { return CaptureResult{window_state:"zero-size",..def}; }
 
-    Some((pixels, w, h))
+    // Method 1: GetWindowDC + BitBlt
+    let dc=GetWindowDC(hwnd_ptr);
+    if !dc.0.is_null() {
+        if let Some((p,pw,ph)) = bitblt_bgra(dc, dc, ww, wh) {
+            if !is_solid_color(&p) { let _=ReleaseDC(hwnd_ptr, dc);
+                return CaptureResult{pixels:p,w:pw,h:ph,method:"GDI(GetWindowDC)",window_state:state}; }
+        }
+        let _=ReleaseDC(hwnd_ptr, dc);
+    }
+
+    // Method 2: PrintWindow
+    let sdc=GetDC(None);
+    if !sdc.0.is_null() {
+        let mdc=CreateCompatibleDC(sdc);
+        if !mdc.0.is_null() {
+            let bmp=CreateCompatibleBitmap(sdc,ww,wh);
+            if !bmp.0.is_null() {
+                let old=SelectObject(mdc,bmp);
+                let fill_r = RECT{left:0,top:0,right:ww,bottom:wh};
+                let brush=CreateSolidBrush(0x00FF00FF); // magenta sentinel
+                if !brush.0.is_null() { FillRect(mdc,&fill_r,brush); let _=DeleteObject(brush); }
+                let pw_ok = PrintWindow(hwnd_ptr,mdc,PW_RENDERFULLCONTENT|PW_CLIENTONLY).as_bool();
+                let mut bi=BITMAPINFOHEADER::default();
+                bi.biSize=std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+                bi.biWidth=ww; bi.biHeight=-wh; bi.biPlanes=1; bi.biBitCount=32; bi.biCompression=BI_RGB.0 as u32;
+                let mut pix=vec![0u8;(ww*wh*4)as usize];
+                let copied=GetDIBits(mdc,bmp,0,wh as u32,Some(pix.as_mut_ptr() as *mut _),
+                    &mut bi as *mut _ as *mut BITMAPINFO, DIB_RGB_COLORS);
+                let _=SelectObject(mdc,old); let _=DeleteObject(bmp);
+                if copied!=0 && pw_ok && !is_solid_color(&pix) { let _=DeleteDC(mdc); let _=ReleaseDC(None,sdc);
+                    let m = if state=="minimized" {"PrintWindow(minimized)"} else {"PrintWindow"};
+                    return CaptureResult{pixels:pix,w:ww,h:wh,method:m,window_state:state}; }
+            }
+            let _=DeleteDC(mdc);
+        }
+        let _=ReleaseDC(None,sdc);
+    }
+
+    // Method 3: BitBlt from screen DC at window position
+    let sc=GetDC(None);
+    if !sc.0.is_null() {
+        if let Some((p,pw,ph)) = bitblt_bgra(sc, sc, ww, wh) {
+            if !is_solid_color(&p) { let _=ReleaseDC(None,sc);
+                return CaptureResult{pixels:p,w:pw,h:ph,method:"ScreenBitBlt",window_state:state}; }
+        }
+        let _=ReleaseDC(None,sc);
+    }
+
+    CaptureResult{pixels:vec![],w:ww,h:wh,method:"ALL_FAILED",window_state:state}
 }
 
 /// Scale BGRA → max 640px wide, BGRA→RGBA, PNG encode, base64
@@ -264,45 +320,24 @@ fn pixels_to_png_base64(pixels: &[u8], w: i32, h: i32) -> String {
     let scale = (640.0 / w as f32).min(1.0);
     let sw = (w as f32 * scale) as i32;
     let sh = (h as f32 * scale) as i32;
-
-    // Nearest-neighbor scale + BGRA→RGBA
     let mut rgba = vec![0u8; (sw * sh * 4) as usize];
-    for y in 0..sh {
-        let sy = (y as f32 / scale) as usize;
-        for x in 0..sw {
-            let sx = (x as f32 / scale) as usize;
-            let di = (y * sw + x) as usize * 4;
-            let si = (sy * w as usize + sx) * 4;
-            rgba[di]     = pixels[si + 2]; // B→R
-            rgba[di + 1] = pixels[si + 1]; // G
-            rgba[di + 2] = pixels[si];     // R→B
-            rgba[di + 3] = 255;            // A
-        }
-    }
+    for y in 0..sh { let sy = (y as f32 / scale) as usize;
+        for x in 0..sw { let sx = (x as f32 / scale) as usize;
+            let di = (y * sw + x) as usize * 4; let si = (sy * w as usize + sx) * 4;
+            rgba[di]=pixels[si+2]; rgba[di+1]=pixels[si+1]; rgba[di+2]=pixels[si]; rgba[di+3]=255; } }
     let scale_ms = t0.elapsed().as_millis();
-
-    // PNG encode
     let png_t0 = Instant::now();
     let mut out = Vec::new();
-    out.extend_from_slice(&[137, 80, 78, 71, 13, 10, 26, 10]);
+    out.extend_from_slice(&[137,80,78,71,13,10,26,10]);
     let mut ihdr = Vec::new();
-    ihdr.extend_from_slice(&(sw as u32).to_be_bytes());
-    ihdr.extend_from_slice(&(sh as u32).to_be_bytes());
-    ihdr.extend_from_slice(&[8, 6, 0, 0, 0]);
-    write_png_chunk(&mut out, b"IHDR", &ihdr);
-
+    ihdr.extend_from_slice(&(sw as u32).to_be_bytes()); ihdr.extend_from_slice(&(sh as u32).to_be_bytes());
+    ihdr.extend_from_slice(&[8,6,0,0,0]); write_png_chunk(&mut out, b"IHDR", &ihdr);
     let mut raw = Vec::new();
-    for y in 0..sh {
-        raw.push(0);
-        raw.extend_from_slice(&rgba[(y * sw) as usize * 4..(y * sw + sw) as usize * 4]);
-    }
+    for y in 0..sh { raw.push(0); raw.extend_from_slice(&rgba[(y*sw)as usize*4..(y*sw+sw)as usize*4]); }
     let compressed = miniz_oxide::deflate::compress_to_vec_zlib(&raw, 6);
-    write_png_chunk(&mut out, b"IDAT", &compressed);
-    write_png_chunk(&mut out, b"IEND", &[]);
+    write_png_chunk(&mut out, b"IDAT", &compressed); write_png_chunk(&mut out, b"IEND", &[]);
     let png_ms = png_t0.elapsed().as_millis();
-    let b64_t0 = Instant::now();
-    let b64 = base64_encode(&out);
-    let b64_ms = b64_t0.elapsed().as_millis();
+    let b64_t0 = Instant::now(); let b64 = base64_encode(&out); let b64_ms = b64_t0.elapsed().as_millis();
     dlog!("  scale={}ms PNG={}ms b64={}ms", scale_ms, png_ms, b64_ms);
     b64
 }
@@ -310,16 +345,17 @@ fn pixels_to_png_base64(pixels: &[u8], w: i32, h: i32) -> String {
 #[tauri::command]
 fn capture_single() -> String {
     let t0 = Instant::now();
-    dlog!("capture_single: GDI desktop...");
+    dlog!("capture_single: desktop...");
     unsafe {
-        match gdi_capture(0) {
-            Some((pixels, w, h)) => {
-                let b64 = pixels_to_png_base64(&pixels, w, h);
-                dlog!("capture_single: {}x{} → {}b base64, total={:.0}ms",
-                    w, h, b64.len(), t0.elapsed().as_millis());
-                b64
-            }
-            None => { dlog!("capture_single: FAILED"); String::new() }
+        let result = capture_window_internal(0);
+        if !result.pixels.is_empty() {
+            let b64 = pixels_to_png_base64(&result.pixels, result.w, result.h);
+            dlog!("capture_single: {}x{} method={} state={} → {}b base64, total={:.0}ms",
+                result.w, result.h, result.method, result.window_state, b64.len(), t0.elapsed().as_millis());
+            b64
+        } else {
+            dlog!("capture_single: FAILED method={} state={}", result.method, result.window_state);
+            String::new()
         }
     }
 }
@@ -327,16 +363,18 @@ fn capture_single() -> String {
 #[tauri::command]
 fn capture_window(hwnd: u64) -> String {
     let t0 = Instant::now();
-    dlog!("capture_window: hwnd={} GDI...", hwnd);
+    dlog!("capture_window: hwnd={}...", hwnd);
     unsafe {
-        match gdi_capture(hwnd) {
-            Some((pixels, w, h)) => {
-                let b64 = pixels_to_png_base64(&pixels, w, h);
-                dlog!("capture_window: {}x{} → {}b base64, total={:.0}ms",
-                    w, h, b64.len(), t0.elapsed().as_millis());
-                b64
-            }
-            None => { dlog!("capture_window: FAILED"); String::new() }
+        let result = capture_window_internal(hwnd);
+        if !result.pixels.is_empty() {
+            let b64 = pixels_to_png_base64(&result.pixels, result.w, result.h);
+            dlog!("capture_window: {}x{} method={} state={} → {}b base64, total={:.0}ms",
+                result.w, result.h, result.method, result.window_state, b64.len(), t0.elapsed().as_millis());
+            b64
+        } else {
+            dlog!("capture_window: FAILED method={} state={} w={} h={}",
+                result.method, result.window_state, result.w, result.h);
+            String::new()
         }
     }
 }
