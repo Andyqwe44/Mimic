@@ -16,6 +16,7 @@ miniz_oxide = "0.8"
 chrono = "0.4"
 windows = { version = "0.58", features = [
     "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Accessibility",
     "Win32_Graphics_Gdi",
     "Win32_Graphics_Dwm",
     "Win32_Foundation",

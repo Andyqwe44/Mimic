@@ -1,0 +1,42 @@
+=== Game Agent Monitor v0.1.0 ===
+Session: 20260705_173834 | PID: 26716
+Log: C:\Users\Andyq\codes\tictactoe\log\agent_20260705_173834.log
+[17:38:34.301] Starting Tauri application...
+[17:38:35.751] Tauri setup complete, window created
+[17:38:49.592] highlight: hwnd=0
+[17:38:49.593] highlight: hwnd=0
+[17:38:49.594] highlight: hwnd=0
+[17:42:14.120] list_windows: 6 entries in 1ms
+[17:42:17.352] highlight: hwnd=0
+[17:42:17.361] highlight: hwnd=5703940
+[17:42:22.942] list_windows: 6 entries in 0ms
+[17:42:24.885] highlight: hwnd=0
+[17:42:24.896] highlight: hwnd=593648
+[17:42:26.594] list_windows: 6 entries in 0ms
+[17:42:27.809] highlight: hwnd=0
+[17:42:27.818] highlight: hwnd=69310
+[17:42:33.356] capture_window: hwnd=69310...
+[17:42:33.423]   scale=13ms PNG=50ms b64=0ms
+[17:42:33.423] capture: total=3ms encode=64ms method=GDI(GetWindowDC)
+[17:42:33.423] capture_window: 1000x875 @(63,63) method=GDI(GetWindowDC) size=3855 total=67ms
+[17:42:36.165] wgc: found exe at C:\Users\Andyq\codes\tictactoe\monitor_web\src-tauri\target\debug\..\..\..\..\capture\build\capture_wgc.exe
+[17:42:36.165] stream_start: hwnd=69310 port=9999 use_wgc=true
+[17:42:36.165] wgc: found exe at C:\Users\Andyq\codes\tictactoe\monitor_web\src-tauri\target\debug\..\..\..\..\capture\build\capture_wgc.exe
+[17:42:36.165] wgc: spawning C:\Users\Andyq\codes\tictactoe\monitor_web\src-tauri\target\debug\..\..\..\..\capture\build\capture_wgc.exe --stream --scale 1280 69310
+[17:42:36.167] tcp: listening on 127.0.0.1:9999
+[17:42:36.333]   WGC [wgc] init OK: 984x867
+[17:42:36.333]   WGC [wgc] 104147.032.901 warming up...
+[17:42:36.361]   WGC [wgc] 104147.061.112 warm-up OK: 984x867
+[17:42:36.363]   WGC [wgc] 104147.062.911 stream started, Ctrl+C to stop
+[17:42:46.380] wgc: 60 frames bmp=64344us
+[17:42:46.382]   WGC [wgc] 104157.081.553 60 frames in 10.02s = 6.0 FPS | avg cap=11us copy=31us readback=4465us total=4507us
+[17:42:53.504] wgc: 120 frames bmp=60726us
+[17:42:53.504] wgc: 120 frames in 17.3s = 7fps
+[17:42:53.505]   WGC [wgc] 104164.204.827 120 frames in 17.14s = 7.0 FPS | avg cap=11us copy=32us readback=4565us total=4609us
+[17:43:01.023] wgc: 180 frames bmp=65919us
+[17:43:01.024]   WGC [wgc] 104171.723.892 180 frames in 24.66s = 7.3 FPS | avg cap=11us copy=32us readback=4626us total=4669us
+[17:43:38.237] wgc: 240 frames bmp=61773us
+[17:43:38.237] wgc: 240 frames in 62.1s = 4fps
+[17:43:38.379]   WGC [wgc] 104209.078.998 240 frames in 62.02s = 3.9 FPS | avg cap=11us copy=32us readback=4653us total=4695us
+[17:43:43.292] stream_stop: signaled stop
+[17:43:43.293] tcp: broadcast thread exiting

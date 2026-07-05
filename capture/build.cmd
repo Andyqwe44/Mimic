@@ -20,3 +20,15 @@ if %ERRORLEVEL% EQU 0 (echo Build OK: capture\build\capture_stream.exe)
 
 cl.exe /EHsc /std:c++17 /I include /Fo"build\\" /Fe:build\capture_h264.exe src\capture_h264.cpp src\mf_encoder.cpp d3d11.lib dxgi.lib dwmapi.lib mfplat.lib mf.lib mfuuid.lib user32.lib gdi32.lib windowsapp.lib ws2_32.lib
 if %ERRORLEVEL% EQU 0 (echo Build OK: capture\build\capture_h264.exe)
+
+cl.exe /EHsc /std:c++17 /I include /Fo"build\\" /Fe:build\capture_wgc.exe src\capture_wgc.cpp src\capture_wgc_main.cpp d3d11.lib dxgi.lib user32.lib gdi32.lib windowsapp.lib
+if %ERRORLEVEL% EQU 0 (echo Build OK: capture\build\capture_wgc.exe)
+
+REM === Benchmark tools (examples/) ===
+pushd ..\examples
+if not exist "build" mkdir "build"
+cl.exe /EHsc /std:c++17 /I ..\capture\include /I ..\protocol /I ..\common\include /Fo"build\\" /Fe:build\wgc_bench_send.exe wgc_bench_send.cpp ..\capture\src\capture_wgc.cpp d3d11.lib dxgi.lib user32.lib gdi32.lib windowsapp.lib ws2_32.lib
+if %ERRORLEVEL% EQU 0 (echo Build OK: examples\build\wgc_bench_send.exe)
+rustc wgc_bench_recv.rs -o build\wgc_bench_recv.exe -C opt-level=3
+if %ERRORLEVEL% EQU 0 (echo Build OK: examples\build\wgc_bench_recv.exe)
+popd

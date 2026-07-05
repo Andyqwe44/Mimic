@@ -1,0 +1,21 @@
+[104147.032.901] warming up...
+[104147.061.112] warm-up OK: 984x867
+[104147.062.911] stream started, Ctrl+C to stop
+[104157.081.553] 60 frames in 10.02s = 6.0 FPS | avg cap=11us copy=31us readback=4465us total=4507us
+[104164.204.827] 120 frames in 17.14s = 7.0 FPS | avg cap=11us copy=32us readback=4565us total=4609us
+[104171.723.892] 180 frames in 24.66s = 7.3 FPS | avg cap=11us copy=32us readback=4626us total=4669us
+[104209.078.998] 240 frames in 62.02s = 3.9 FPS | avg cap=11us copy=32us readback=4653us total=4695us
+[120381.257.849] 300 frames in 16234.19s = 0.0 FPS | avg cap=10us copy=30us readback=4637us total=4677us
+[120393.972.154] 360 frames in 16246.91s = 0.0 FPS | avg cap=10us copy=29us readback=5041us total=5080us
+[120396.777.872] 420 frames in 16249.71s = 0.0 FPS | avg cap=10us copy=29us readback=5192us total=5230us
+[120407.421.639] 480 frames in 16260.36s = 0.0 FPS | avg cap=9us copy=27us readback=5206us total=5243us
+[120409.134.018] 540 frames in 16262.07s = 0.0 FPS | avg cap=9us copy=27us readback=5359us total=5395us
+[120410.738.959] 600 frames in 16263.68s = 0.0 FPS | avg cap=9us copy=27us readback=5525us total=5561us
+[120412.245.107] 660 frames in 16265.18s = 0.0 FPS | avg cap=9us copy=27us readback=5554us total=5590us
+[120413.748.366] 720 frames in 16266.69s = 0.0 FPS | avg cap=9us copy=27us readback=5554us total=5590us
+[120416.273.660] 780 frames in 16269.21s = 0.0 FPS | avg cap=9us copy=26us readback=5572us total=5608us
+[120419.289.538] 840 frames in 16272.23s = 0.1 FPS | avg cap=9us copy=26us readback=5380us total=5415us
+[120698.192.069] 900 frames in 16551.13s = 0.1 FPS | avg cap=9us copy=25us readback=5369us total=5403us
+[120755.300.817] 960 frames in 16608.24s = 0.1 FPS | avg cap=9us copy=25us readback=5305us total=5339us
+[120761.742.990] 1020 frames in 16614.68s = 0.1 FPS | avg cap=9us copy=25us readback=5235us total=5269us
+[120763.630.986] 1080 frames in 16616.57s = 0.1 FPS | avg cap=8us copy=25us readback=5208us total=5242us

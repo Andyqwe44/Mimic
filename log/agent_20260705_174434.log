@@ -1,0 +1,14 @@
+=== Game Agent Monitor v0.1.0 ===
+Session: 20260705_174434 | PID: 27436
+Log: C:\Users\Andyq\codes\tictactoe\log\agent_20260705_174434.log
+[17:44:34.223] Starting Tauri application...
+[17:44:35.072] Tauri setup complete, window created
+[17:44:45.562] highlight: hwnd=0
+[17:44:45.563] highlight: hwnd=0
+[17:44:45.564] highlight: hwnd=0
+[21:57:04.244] list_windows: 6 entries in 2ms
+[21:57:05.560] highlight: hwnd=0
+[21:57:05.571] highlight: hwnd=5703940
+[22:05:11.176] highlight: hwnd=0
+[22:05:11.177] highlight: hwnd=0
+[22:05:11.178] highlight: hwnd=0

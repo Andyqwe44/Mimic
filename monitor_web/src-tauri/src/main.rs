@@ -43,10 +43,24 @@ macro_rules! dlog {
     }
 }
 
+fn find_project_log_dir() -> std::path::PathBuf {
+    // Walk up from exe dir looking for existing log/ directory (at project root)
+    if let Ok(exe) = std::env::current_exe() {
+        let mut dir = exe.parent().unwrap_or(&exe).to_path_buf();
+        for _ in 0..8 {
+            let candidate = dir.join("log");
+            if candidate.is_dir() { return candidate; }
+            if !dir.pop() { break; }
+        }
+    }
+    // Fallback: create log/ in CWD
+    let d = std::path::PathBuf::from("log");
+    let _ = std::fs::create_dir_all(&d);
+    d
+}
+
 fn init_log(max_logs: usize) {
-    let log_dir = std::env::current_exe()
-        .map(|p| p.parent().unwrap_or(&p).to_path_buf())
-        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let log_dir = find_project_log_dir();
 
     // Create per-session log filename with timestamp
     let ts = chrono::Local::now().format("%Y%m%d_%H%M%S");
@@ -480,8 +494,186 @@ struct StreamState {
     running: Arc<AtomicBool>,
 }
 
-static STREAM: Mutex<Option<StreamState>> = Mutex::new(None);
-static STREAM_FRAME: Mutex<(String, i32, i32, String)> = Mutex::new((String::new(), 0, 0, String::new())); // b64, w, h, method
+// ── Yellow highlight overlay ──────────────────────────
+static OVERLAY_TARGET: Mutex<isize> = Mutex::new(0);
+static OVERLAY_RUNNING: AtomicBool = AtomicBool::new(false);
+static OVERLAY_BARS: Mutex<[isize; 4]> = Mutex::new([0, 0, 0, 0]);
+
+const BORDER_W: i32 = 3;
+const BORDER_INSET: i32 = 1;
+const YELLOW_COLOR: u32 = 0x0000FFFFu32;
+
+unsafe fn destroy_overlay_bars() {
+    let mut bars = OVERLAY_BARS.lock().unwrap();
+    for i in 0..4 {
+        if bars[i] != 0 {
+            let _ = windows::Win32::UI::WindowsAndMessaging::DestroyWindow(
+                windows::Win32::Foundation::HWND(std::ptr::with_exposed_provenance_mut::<std::ffi::c_void>(bars[i] as usize)));
+            bars[i] = 0;
+        }
+    }
+}
+
+unsafe fn reposition_overlay() {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SetWindowPos, GetWindowRect, IsWindow, IsIconic, IsWindowVisible,
+        ShowWindow, SWP_NOACTIVATE, SW_HIDE, SW_SHOWNOACTIVATE, GetSystemMetrics,
+        SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
+    };
+    use windows::Win32::Graphics::Gdi::{GetDC, ReleaseDC, CreateSolidBrush, FillRect, DeleteObject};
+    use windows::Win32::Foundation::{RECT, HWND, COLORREF};
+
+    let hwnd = *OVERLAY_TARGET.lock().unwrap();
+    if hwnd == 0 { return; }
+    let target = HWND(std::ptr::with_exposed_provenance_mut::<std::ffi::c_void>(hwnd as usize));
+
+    if !IsWindow(target).as_bool() { destroy_overlay_bars(); OVERLAY_RUNNING.store(false, Ordering::Relaxed); return; }
+
+    let bars = OVERLAY_BARS.lock().unwrap();
+    let bar_hwnds = [bars[0], bars[1], bars[2], bars[3]];
+    drop(bars);
+
+    if IsIconic(target).as_bool() || !IsWindowVisible(target).as_bool() {
+        for &b in &bar_hwnds { if b != 0 { let _ = ShowWindow(HWND(std::ptr::with_exposed_provenance_mut::<std::ffi::c_void>(b as usize)), SW_HIDE); } }
+        return;
+    }
+
+    let mut r = RECT::default();
+    if GetWindowRect(target, &mut r).is_err() { return; }
+    let w = r.right - r.left; let h = r.bottom - r.top;
+    if w <= BORDER_W * 2 || h <= BORDER_W * 2 { return; }
+
+    let sx = GetSystemMetrics(SM_XVIRTUALSCREEN); let sy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    let sw = GetSystemMetrics(SM_CXVIRTUALSCREEN); let sh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    let bx = (r.left + BORDER_INSET).max(sx); let by = (r.top + BORDER_INSET).max(sy);
+    let br = (r.left + w - BORDER_INSET).min(sx + sw); let bb = (r.top + h - BORDER_INSET).min(sy + sh);
+
+    let positions = [
+        (bx, by, br - bx, BORDER_W),
+        (bx, bb - BORDER_W, br - bx, BORDER_W),
+        (bx, by, BORDER_W, bb - by),
+        (br - BORDER_W, by, BORDER_W, bb - by),
+    ];
+    for i in 0..4 {
+        if bar_hwnds[i] != 0 {
+            let bar_h = HWND(std::ptr::with_exposed_provenance_mut::<std::ffi::c_void>(bar_hwnds[i] as usize));
+            let (px, py, pw, ph) = positions[i];
+            let _ = SetWindowPos(bar_h, target, px, py, pw, ph, SWP_NOACTIVATE);
+            let dc = GetDC(bar_h);
+            if !dc.0.is_null() {
+                let brush = CreateSolidBrush(COLORREF(YELLOW_COLOR));
+                let fill_r = RECT { left: 0, top: 0, right: pw, bottom: ph };
+                FillRect(dc, &fill_r, brush);
+                let _ = DeleteObject(brush); let _ = ReleaseDC(bar_h, dc);
+            }
+            let _ = ShowWindow(bar_h, SW_SHOWNOACTIVATE);
+        }
+    }
+}
+
+unsafe fn create_overlay_bars(hwnd: isize) {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, ShowWindow, SetWindowPos, GetSystemMetrics,
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_SHOWNOACTIVATE,
+        WS_EX_TRANSPARENT, WS_EX_TOOLWINDOW, WS_POPUP,
+        GetWindowRect, IsWindow,
+        SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
+    };
+    use windows::Win32::Graphics::Gdi::{GetDC, ReleaseDC, CreateSolidBrush, FillRect, DeleteObject};
+    use windows::Win32::Foundation::{RECT, HWND, COLORREF};
+
+    destroy_overlay_bars();
+    if hwnd == 0 { OVERLAY_RUNNING.store(false, Ordering::Relaxed); return; }
+
+    let target = HWND(std::ptr::with_exposed_provenance_mut::<std::ffi::c_void>(hwnd as usize));
+    if !IsWindow(target).as_bool() { OVERLAY_RUNNING.store(false, Ordering::Relaxed); return; }
+
+    let mut r = RECT::default();
+    if GetWindowRect(target, &mut r).is_err() { return; }
+    let w = r.right - r.left; let h = r.bottom - r.top;
+    if w <= BORDER_W * 2 || h <= BORDER_W * 2 { return; }
+
+    let sx = GetSystemMetrics(SM_XVIRTUALSCREEN); let sy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    let sw = GetSystemMetrics(SM_CXVIRTUALSCREEN); let sh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    let bx = (r.left + BORDER_INSET).max(sx); let by = (r.top + BORDER_INSET).max(sy);
+    let br = (r.left + w - BORDER_INSET).min(sx + sw); let bb = (r.top + h - BORDER_INSET).min(sy + sh);
+
+    let create_bar = |cx: i32, cy: i32, cw: i32, ch: i32| -> isize {
+        match CreateWindowExW(
+            WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW,
+            windows::core::w!("STATIC"), windows::core::w!(""), WS_POPUP,
+            cx, cy, cw.max(1), ch.max(1), None, None, None, None,
+        ) {
+            Ok(h) => {
+                let dc = GetDC(h);
+                if !dc.0.is_null() {
+                    let brush = CreateSolidBrush(COLORREF(YELLOW_COLOR));
+                    FillRect(dc, &RECT{left:0,top:0,right:cw,bottom:ch}, brush);
+                    let _ = DeleteObject(brush); let _ = ReleaseDC(h, dc);
+                }
+                let _ = ShowWindow(h, SW_SHOWNOACTIVATE);
+                let _ = SetWindowPos(h, target, 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
+                std::mem::transmute_copy(&h)
+            }
+            Err(_) => 0,
+        }
+    };
+
+    let mut bars = OVERLAY_BARS.lock().unwrap();
+    bars[0] = create_bar(bx, by, br - bx, BORDER_W);
+    bars[1] = create_bar(bx, bb - BORDER_W, br - bx, BORDER_W);
+    bars[2] = create_bar(bx, by, BORDER_W, bb - by);
+    bars[3] = create_bar(br - BORDER_W, by, BORDER_W, bb - by);
+    *OVERLAY_TARGET.lock().unwrap() = hwnd;
+    OVERLAY_RUNNING.store(true, Ordering::Relaxed);
+}
+
+fn start_overlay_tracker() {
+    std::thread::spawn(|| unsafe {
+        use windows::Win32::UI::Accessibility::{
+            SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK,
+        };
+        use windows::Win32::UI::WindowsAndMessaging::{
+            GetMessageW, DispatchMessageW, MSG,
+            EVENT_SYSTEM_MOVESIZEEND, EVENT_OBJECT_LOCATIONCHANGE,
+            WINEVENT_OUTOFCONTEXT,
+        };
+        let hook = SetWinEventHook(
+            EVENT_SYSTEM_MOVESIZEEND, EVENT_OBJECT_LOCATIONCHANGE,
+            None, Some(overlay_win_event_proc), 0, 0, WINEVENT_OUTOFCONTEXT,
+        );
+        let mut msg = MSG::default();
+        while GetMessageW(&mut msg, None, 0, 0).as_bool() { let _ = DispatchMessageW(&msg); }
+        let _ = UnhookWinEvent(hook);
+    });
+}
+
+unsafe extern "system" fn overlay_win_event_proc(
+    _hook: windows::Win32::UI::Accessibility::HWINEVENTHOOK, _event: u32,
+    hwnd: windows::Win32::Foundation::HWND, _id_object: i32, _id_child: i32,
+    _event_thread: u32, _event_time: u32,
+) {
+    let target = *OVERLAY_TARGET.lock().unwrap();
+    if target != 0 && hwnd.0 as isize == target { reposition_overlay(); }
+}
+
+#[tauri::command]
+fn highlight_window(hwnd: u64) {
+    unsafe { create_overlay_bars(hwnd as isize); }
+    dlog!("highlight: hwnd={}", hwnd);
+}
+
+static STREAM: Mutex<Option<StreamState>> = Mutex::new(None);/// BGRA→RGBA for frontend Canvas. Swaps R↔B in-place.
+fn bgra_to_rgba(pixels: &[u8]) -> Vec<u8> {
+    let mut rgba = pixels.to_vec();
+    for i in (0..rgba.len()).step_by(4) {
+        rgba.swap(i, i + 2); // B↔R, G and A stay
+    }
+    rgba
+}
+
+/// BGRA pixels (raw), w, h, method. No BMP/base64 until poll time.
+static STREAM_FRAME: Mutex<(Vec<u8>, i32, i32, String)> = Mutex::new((Vec::new(), 0, 0, String::new()));
 // Raw BGRA pixels for TCP clients (scaled, uncompressed).
 static RAW_FRAME: Mutex<(Vec<u8>, i32, i32)> = Mutex::new((Vec::new(), 0, 0));
 
@@ -617,6 +809,135 @@ fn bgra_to_bmp_uri(pixels: &[u8], w: i32, h: i32) -> String {
     format!("data:image/bmp;base64,{}", base64_encode(&bmp))
 }
 
+/// Resolve path to capture_wgc.exe relative to the Tauri binary.
+fn find_wgc_exe() -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let exe_dir = exe.parent().unwrap_or(&exe);
+
+    // Try multiple paths and names (capture_wgc.exe or capture_wgc2.exe)
+    let names = ["capture_wgc.exe", "capture_wgc2.exe"];
+    let bases = [
+        exe_dir.join("..").join("..").join("..").join("..").join("capture").join("build"),
+        exe_dir.join("..").join("capture").join("build"),
+        exe_dir.to_path_buf(),
+    ];
+
+    for base in &bases {
+        for name in &names {
+            let p = base.join(name);
+            if p.exists() {
+                dlog!("wgc: found exe at {}", p.display());
+                return Some(p);
+            }
+        }
+    }
+    dlog!("wgc: exe not found in any candidate path");
+    None
+}
+
+// ── WGC capture subprocess ─────────────────────────────
+/// Spawn capture_wgc.exe, read BGRA frames from stdout, feed into
+/// STREAM_FRAME / RAW_FRAME / stream-tick pipeline.
+fn run_wgc_stream(
+    hwnd: u64,
+    app: tauri::AppHandle,
+    running: Arc<AtomicBool>,
+) {
+    let exe = match find_wgc_exe() {
+        Some(p) => p,
+        None => { dlog!("wgc: capture_wgc.exe not found, aborting"); return; }
+    };
+
+    dlog!("wgc: spawning {} --stream --scale 1280 {}", exe.display(), hwnd);
+
+    let mut child = match Command::new(&exe)
+        .arg(hwnd.to_string())
+        .arg("--stream")
+        .arg("--scale").arg("1280")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => { dlog!("wgc: spawn failed: {}", e); return; }
+    };
+
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+
+    // Stderr reader — log to agent_*.log
+    thread::spawn(move || {
+        for line in BufReader::new(stderr).lines() {
+            if let Ok(l) = line { if !l.is_empty() { dlog!("  WGC {}", l); } }
+        }
+    });
+
+    // Frame reader — stdout: [ts:8][w:4][h:4][ch:4][reserved:4][pixels...]
+    let mut reader = BufReader::new(stdout);
+    let mut frames: u64 = 0;
+    let fps_t0 = Instant::now();
+
+    while running.load(Ordering::Relaxed) {
+        // Read 24-byte frame header
+        let mut hdr = [0u8; 24];
+        if reader.read_exact(&mut hdr).is_err() { break; }
+
+        let _ts = u64::from_le_bytes(hdr[0..8].try_into().unwrap());
+        let w = i32::from_le_bytes(hdr[8..12].try_into().unwrap());
+        let h = i32::from_le_bytes(hdr[12..16].try_into().unwrap());
+        let ch = i32::from_le_bytes(hdr[16..20].try_into().unwrap());
+
+        if w <= 0 || h <= 0 || ch <= 0 { continue; }
+        let px_size = (w * h * ch) as usize;
+        if px_size > 100_000_000 { dlog!("wgc: absurd frame {}x{}x{}, aborting", w, h, ch); break; }
+
+        let mut pixels = vec![0u8; px_size];
+        if reader.read_exact(&mut pixels).is_err() { break; }
+
+        // Timestamp: per-frame timing to log
+        let t0 = Instant::now();
+
+        // Pack raw BGRA for TCP broadcast
+        let payload = payload::bgra::pack(&pixels, w as u32, h as u32, ch as u32);
+        if let Ok(mut raw) = RAW_FRAME.lock() {
+            *raw = (payload, w, h);
+        }
+
+        // Raw RGBA for frontend Canvas (BGRA→RGBA swap)
+        let rgba = bgra_to_rgba(&pixels);
+        if let Ok(mut state) = STREAM_FRAME.lock() {
+            *state = (rgba, w, h, "WGC".to_string());
+        }
+
+        let _ = app.emit("stream-tick", serde_json::json!({"method": "WGC"}));
+        frames += 1;
+
+        if frames % 60 == 0 {
+            let bmp_us = t0.elapsed().as_micros();
+            dlog!("wgc: {} frames bmp={}us", frames, bmp_us);
+        }
+
+        // FPS log
+        if frames > 0 && frames % 120 == 0 {
+            let elapsed = fps_t0.elapsed().as_secs_f64();
+            dlog!("wgc: {} frames in {:.1}s = {:.0}fps", frames, elapsed, frames as f64 / elapsed);
+        }
+    }
+
+    // Cleanup
+    let _ = writeln!(stdin, "q");
+    let _ = stdin.flush();
+    drop(stdin);
+    // Give subprocess 500ms to clean up, then kill
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    let _ = child.kill();
+    let _ = child.wait();
+    dlog!("wgc: stream exited after {} frames", frames);
+}
+
 #[tauri::command]
 fn capture_stream_start(app: tauri::AppHandle, hwnd: u64, tcp_port: Option<u16>) -> Result<String, String> {
     let _ = capture_stream_stop();
@@ -626,12 +947,28 @@ fn capture_stream_start(app: tauri::AppHandle, hwnd: u64, tcp_port: Option<u16>)
     let running = Arc::new(AtomicBool::new(true));
     let running_clone = running.clone();
 
-    dlog!("stream_start: hwnd={} port={} (Rust-native)", hwnd, port);
+    // Try WGC first for window capture (hwnd != 0, exe exists)
+    let use_wgc = hwnd != 0 && find_wgc_exe().is_some();
 
-    // Start TCP broadcast server
+    dlog!("stream_start: hwnd={} port={} use_wgc={}", hwnd, port, use_wgc);
+
+    // Start TCP broadcast server (works for both WGC and GDI)
     let tcp_running = running.clone();
     thread::spawn(move || { tcp_broadcast_thread(port, tcp_running); });
 
+    if use_wgc {
+        // ── WGC path: subprocess-based GPU capture ──
+        // Emit method tag immediately so frontend shows "WGC" right away
+        let _ = app.emit("stream-tick", serde_json::json!({"method": "WGC"}));
+
+        let wgc_running = running.clone();
+        let wgc_app = app.clone();
+        thread::spawn(move || { run_wgc_stream(hwnd, wgc_app, wgc_running); });
+        *STREAM.lock().unwrap() = Some(StreamState { running });
+        return Ok("started (wgc)".into());
+    }
+
+    // ── GDI fallback path: Rust-native multi-method ──
     thread::spawn(move || {
         // --- First frame: detect best method ---
         let detect = unsafe { capture_window_internal(hwnd) };
@@ -647,9 +984,9 @@ fn capture_stream_start(app: tauri::AppHandle, hwnd: u64, tcp_port: Option<u16>)
 
         // Use first frame pixels
         if !detect.pixels.is_empty() {
-            let uri = bgra_to_bmp_uri(&detect.pixels, w, h);
+            let rgba = bgra_to_rgba(&detect.pixels);
             if let Ok(mut state) = STREAM_FRAME.lock() {
-                *state = (uri, w, h, method.clone());
+                *state = (rgba, w, h, method.clone());
             }
             let _ = app.emit("stream-tick", serde_json::json!({"method": &method}));
         }
@@ -684,22 +1021,19 @@ fn capture_stream_start(app: tauri::AppHandle, hwnd: u64, tcp_port: Option<u16>)
                 } else {
                     let t_pack = Instant::now();
                     let payload = payload::bgra::pack(&pixels, w as u32, h as u32, 4);
+                    let rgba = bgra_to_rgba(&pixels);
                     let pack_us = t_pack.elapsed().as_micros();
-
-                    let t_bmp = Instant::now();
-                    let uri = bgra_to_bmp_uri(&pixels, w, h);
-                    let bmp_us = t_bmp.elapsed().as_micros();
 
                     if let Ok(mut raw) = RAW_FRAME.lock() {
                         *raw = (payload, w, h);
                     }
                     prev_pixels = pixels;
                     if let Ok(mut state) = STREAM_FRAME.lock() {
-                        *state = (uri, w, h, method.clone());
+                        *state = (rgba, w, h, method.clone());
                     }
 
                     if frames % 30 == 0 {
-                        dlog!("stream timing: cap={}us pack={}us bmp={}us", cap_us, pack_us, bmp_us);
+                        dlog!("stream timing: cap={}us pack={}us", cap_us, pack_us);
                     }
                 }
                 let _ = app.emit("stream-tick", serde_json::json!({"method": &method}));
@@ -741,7 +1075,16 @@ fn capture_stream_start(app: tauri::AppHandle, hwnd: u64, tcp_port: Option<u16>)
 #[tauri::command]
 fn stream_poll() -> String {
     if let Ok(state) = STREAM_FRAME.lock() {
-        if !state.0.is_empty() { return state.0.clone(); }
+        let (ref pixels, w, h, ref method) = *state;
+        if !pixels.is_empty() {
+            let b64 = base64_encode(pixels);
+            return serde_json::json!({
+                "p": b64,
+                "w": w,
+                "h": h,
+                "m": method
+            }).to_string();
+        }
     }
     String::new()
 }
@@ -983,12 +1326,16 @@ fn main() {
     init_log(5);  // keep max 5 log files
     dlog!("Starting Tauri application...");
 
+    // Start overlay position tracker
+    start_overlay_tracker();
+
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             list_windows, list_processes,
             capture_single, capture_window,
             capture_stream_start, capture_stream_stop, stream_poll,
-            h264_stream_start, h264_stream_stop, h264_poll, h264_init_ready
+            h264_stream_start, h264_stream_stop, h264_poll, h264_init_ready,
+            highlight_window
         ])
         .setup(|_app| {
             dlog!("Tauri setup complete, window created");

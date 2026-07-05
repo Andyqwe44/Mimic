@@ -1,0 +1,10 @@
+[103755.861.423] warming up...
+[103755.890.893] warm-up OK: 1800x1020
+[103755.899.023] stream started, Ctrl+C to stop
+[103765.267.482] 60 frames in 9.37s = 6.4 FPS | avg cap=11us copy=35us readback=8330us total=8376us
+[103773.943.567] 120 frames in 18.04s = 6.7 FPS | avg cap=12us copy=35us readback=8452us total=8499us
+[103782.941.622] 180 frames in 27.04s = 6.7 FPS | avg cap=11us copy=35us readback=8598us total=8644us
+[103791.823.669] 240 frames in 35.92s = 6.7 FPS | avg cap=11us copy=35us readback=8629us total=8675us
+[103801.806.810] 300 frames in 45.91s = 6.5 FPS | avg cap=11us copy=35us readback=8673us total=8719us
+[103811.512.623] 360 frames in 55.61s = 6.5 FPS | avg cap=11us copy=35us readback=8883us total=8929us
+[103819.145.004] 420 frames in 63.25s = 6.6 FPS | avg cap=12us copy=35us readback=9192us total=9238us
