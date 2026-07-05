@@ -9,22 +9,17 @@ Python for AI model training/inference.
 ## Architecture
 
 ```
-┌─ monitor_web (Tauri 2) ────────────────────────────────┐
-│  React (TypeScript + Tailwind)  ←→  Rust (IPC)        │
-│       UI 界面                   │  Win32 API 直调      │
-│                                  │  TCP server :9999    │
-└──────────────────┬───────────────┴─────────────────────┘
+┌─ monitor_web (Tauri 2) ──────────────────────────────────┐
+│  React (TypeScript + Tailwind)  ←→  Rust (IPC)          │
+│       MXU-style UI               │  Win32 API 直调       │
+│       Dashboard/Monitor/Log       │  TCP server :9999     │
+└──────────────────┬────────────────┴──────────────────────┘
                    │
      ┌─────────────┼──────────────┐
      ▼             ▼              ▼
   Rust            Rust           TCP :9999
-  EnumWindows     GDI Capture    (agent.exe / Python)
-  (窗口枚举)       (单帧+流)       binary frames
-                    │
-          ┌────────┼────────┐
-          ▼        ▼        ▼
-    GetWindowDC  PrintWindow  ScreenBitBlt
-    品红哨兵检测  纯色检测   自动回退链
+  EnumWindows     GDI + WGC      (agent.exe / Python)
+  (0ms)           (多方法回退)     binary frames
 ```
 
 ## Project Structure
@@ -32,138 +27,142 @@ Python for AI model training/inference.
 ```
 tictactoe/
 ├── protocol/                    # Wire format — shared across C++/Rust/Python
-│   ├── protocol.h               C/C++ constants + header helpers
-│   ├── protocol.rs              Rust: PayloadType enum, build/parse header
-│   └── protocol.py              Python: PayloadType IntEnum, header struct
-│
+│   ├── protocol.h / .rs / .py
 ├── common/                      # Shared C++ modules
-│   ├── include/                 types.hpp, signals.hpp
+│   ├── include/                 types.hpp, stream_protocol.hpp
 │   ├── payload/bgra.hpp         BGRA pixel frame pack/unpack
-│   └── transport/
-│       ├── pipe.hpp             PipeSender/PipeReceiver (stdout/stdin)
-│       └── tcp.hpp              TcpSender broadcast server
-│
+│   └── transport/               pipe.hpp, tcp.hpp
 ├── capture/                     # C++ screen capture tools
-│   ├── src/                     capture_dxgi.cpp, capture_h264.cpp, mf_encoder.cpp, ...
-│   ├── include/                 capture.hpp, mf_encoder.hpp, preprocess.hpp
-│   └── build.cmd                MSVC build (all .exe in build/)
-│
+│   ├── src/
+│   │   ├── capture_dxgi.cpp     DXGI Desktop Duplication backend
+│   │   ├── capture_single.cpp   Single-frame screenshot
+│   │   ├── capture_stream.cpp   Stream with frame-differ
+│   │   ├── capture_h264.cpp     H.264 GPU encode (broken)
+│   │   ├── capture_wgc.cpp      WGC FramePool library (GPU, 7ms/frame)
+│   │   └── capture_wgc_main.cpp WGC standalone CLI (single/stream modes)
+│   ├── include/
+│   │   ├── capture.hpp          ICaptureBackend (DXGI + GDI)
+│   │   └── capture_wgc.hpp      WGC FramePool API
+│   └── build.cmd                MSVC build
 ├── monitor_web/                 # Tauri 2 + React desktop app
 │   ├── src/
-│   │   ├── App.tsx              Main UI (Tooltip/IconBtn/ActionBtn components)
-│   │   ├── index.css            Tailwind + CSS variables + scrollbar-gutter
-│   │   └── main.tsx             React entry
+│   │   └── App.tsx              Main UI (MXU-style, Dashboard/Screenshot/Log)
 │   └── src-tauri/
-│       ├── src/
-│       │   ├── main.rs          Rust backend (capture, stream, TCP, IPC)
-│       │   ├── fmp4.rs          fMP4 ISOBMFF builder (H.264 MSE, future)
-│       │   ├── protocol.rs      include!(shared protocol/protocol.rs)
-│       │   ├── payload/bgra.rs  BGRA frame pack/unpack
-│       │   └── transport/pipe.rs Frame send/recv over pipe
-│       ├── Cargo.toml           tauri, windows, serde, chrono, miniz_oxide
-│       └── tauri.conf.json      1200x780 window, devUrl:1420
-│
+│       └── src/main.rs          Rust backend (WGC subprocess, overlay, TCP)
 ├── model/                       # Python
-│   ├── payload/bgra.py          BGRA frame pack/unpack + StreamClient
-│   └── stream_protocol.py       (legacy, being migrated to protocol/)
-│
-└── examples/                    # End-to-end protocol examples
-    ├── hello_cpp_send.cpp       C++ pipe → Rust "hello world" ✓ tested
-    ├── hello_rust_recv.rs
-    ├── hello_tcp_send.cpp       C++ TCP → Python
-    └── hello_python_recv.py
+├── examples/                    # Protocol examples + Benchmark
+│   ├── wgc_bench_send.cpp       WGC→TCP benchmark (C++)
+│   ├── wgc_bench_recv.rs        TCP→file benchmark (Rust)
+│   └── run_bench.bat
+└── log/                         # Unified logs
+    ├── agent_*.log               Rust (Tauri main process)
+    └── wgc_*.log                 C++ (WGC subprocess)
 ```
 
 ## Wire Protocol (protocol/)
 
 ```
-Frame: [magic:4 "FRAM"][payload_size:4 LE][type_tag:4 LE][payload_body]
+Frame: [magic:4 "FRAM"][body_size:4 LE][type_tag:4 LE][body: body_size bytes]
 
-type_tag:
-  0 = NONE          (unchanged frame / heartbeat)
-  1 = BGRA_FRAME    [w:4][h:4][ch:4][reserved:4][pixels: w*h*ch]
-  2 = H264_STREAM   (future)
-  3 = CONTROL_MSG   (future JSON/text)
+type_tag 1 (BGRA): [w:4][h:4][ch:4][reserved:4][pixels: w*h*ch]
 
-Transport constants: DEFAULT_TCP_PORT=9999, MAGIC=0x4D415246, FRAME_HEADER_SIZE=12
+DEFAULT_TCP_PORT=9999, MAGIC=0x4D415246, FRAME_HEADER_SIZE=12
 ```
 
-## Layered Architecture (解耦原则)
-
-```
-应用层 (payload/)       ← 知道 BGRA/H264 格式, pack/unpack
-    ↓ 只依赖
-协议层 (protocol/)      ← 只有常量: magic, type tags, header 结构
-    ↑ 只依赖
-传输层 (transport/)     ← 只搬运字节, 不管内容: send(type_tag, bytes) / recv()
-```
-
-transport 不 import payload。payload 不 import transport。加新格式只加 type_tag + payload 文件。
+Note: `body_size` = body bytes only (NOT including type_tag). Matches Rust `build_header(payload.len(), type_tag)`.
 
 ## Build Commands
 
 ```bash
-# C++ modules
-cd capture  && build.cmd    # all tools
-
-# Tauri monitor (dev: HMR hot reload on frontend)
+cd capture  && build.cmd          # C++ tools (capture_wgc.exe + others)
 cd monitor_web
-npm install
-npm run tauri dev            # Vite HMR + Rust debug (slow, frontend only)
-npm run tauri build          # Release .exe (fast, production)
-
-# Python
-pip install torch numpy opencv-python
+npm install && npm run tauri dev  # Vite HMR + Cargo watch
+npm run tauri build               # Release .exe
 ```
 
-## Capture Methods (Rust-native, no subprocess)
+## Capture Methods
 
-**Stream preview** — multi-method fallback:
-1. `GetWindowDC + BitBlt` (~2-5ms) — fast, fails for occluded/minimized
-2. `PrintWindow(PW_RENDERFULLCONTENT)` (~15-30ms) — magenta sentinel detection
-3. `ScreenBitBlt` at window coords (~2-5ms) — last resort
+### WGC (Windows.Graphics.Capture) — Window capture
 
-**Single-frame** — same 3-method chain, returns PNG base64 + window position JSON.
+GPU-accelerated FramePool. ~7ms/frame (140+ FPS capable).
+- Works for occluded/background windows (NOT minimized)
+- Event-driven: frames only produced when content changes
+- `capture_stream_start` tries WGC subprocess first for hwnd≠0
+- Falls back to GDI if `capture_wgc.exe` not found or fails
+- Triple-buffered staging textures for GPU/CPU overlap
+- C++ writes per-frame timing to `log/wgc_*.log`
 
-**TCP stream** — raw BGRA frames broadcast on `127.0.0.1:9999` when preview is active.
-Protocol: `[magic:4][size:4][type_tag:4][w:4][h:4][ch:4][0:4][pixels]`
+### GDI — Desktop / fallback
 
-## Key Performance Numbers
+3-method chain: `GetWindowDC → PrintWindow(magenta sentinel) → ScreenBitBlt`
 
-| Metric | Old (exe spawn) | New (Rust-native) |
-|--------|-----------------|-------------------|
-| Window list | 5000ms | 0ms |
-| Single capture | 5000ms | 8-37ms |
-| Stream capture | ~30ms/frame | 2-30ms/frame |
-| BGRA pack | N/A | ~12μs |
-| BMP+base64 | ~5ms | ~0.5ms |
+### DXGI Desktop Duplication — Desktop only
 
-## GPU H.264 Pipeline (capture_h264.exe)
+Full desktop capture at monitor refresh rate. Used via `bench_send.exe 0`.
 
-Status: **encoder init fails on AMD GPU** — MFT returns 0 input types.
-Tried: MFT_MESSAGE_SET_D3D_MANAGER, D3D11_AWARE, codec props, multiple input formats.
-All attempts return MF_E_INVALIDMEDIATYPE. Fallback: BMP streaming via Rust GDI.
+## Frontend (App.tsx)
 
-Architecture when working:
-```
-FramePool/WGC → MF H.264 HW Encoder → [size:4][NAL data] → stdout + TCP :9998
-```
+Single-file React app. Key components:
+- `TopBar` — MXU-style tabs: Dashboard | Monitor | Log + Start/Stop + Theme + Settings
+- `ConnectionPanel` — Fixed-width layout, `justify-between`. Title(144px)+X(32px) left, Select right. IP(184px) left, Port(80px) right
+- `ScreenshotPanel` — Canvas rendering (BGRA→RGBA, no BMP). Dynamic `aspectRatio` from screen resolution. Play/Stop streaming + Camera single-shot
+- `LogPanel` — Reversed log list, max 100 entries, clear button
+- `DashboardView` — System info, Capture Pipeline, Update (check + source selector), Resources
+- `SettingsPage` — `SettingsCard` collapsible cards: Connection, Theme, Model, Update, Log, Project
+- `WindowPickerModal` — Window/desktop/process selection with search
+
+### MXU-style design patterns
+- Cards: `bg-bg-secondary rounded-xl ring-1 ring-inset ring-border overflow-hidden`
+- Header: `<div role="button">` with icon + title + status + chevron
+- Expand/collapse: `grid` animation (`grid-template-rows: 1fr ↔ 0fr`)
+- Action buttons: individual `e.stopPropagation()`, chevron without (allows toggle)
+- TopBar tabs: `border-b-[3px]` active indicator, icons + labels
+
+### Right panel sizing
+- Default width: 324px, min: 324px, max: 400px
+- Drag resize capped by `Math.max(324, Math.min(400, w))`
+
+## Rust Backend (main.rs)
+
+### Key commands
+- `list_windows` / `list_processes` — Win32 enumeration (0ms)
+- `capture_window` / `capture_single` — Single-frame GDI chain
+- `capture_stream_start/stop` — Stream preview (WGC or GDI)
+- `stream_poll` — Returns JSON `{p: base64, w, h, m: method}` for Canvas
+- `highlight_window` — Yellow border overlay on target window
+- `screen_info` — Returns `{w, h}` for screen resolution
+- `h264_stream_start/stop` — H.264 GPU encode (broken on AMD)
+
+### WGC integration
+`capture_stream_start(hwnd)` checks `find_wgc_exe()` → spawns `capture_wgc.exe --stream --scale 1280` → reads BGRA frames from stdout. Falls back to GDI if exe not found or hwnd=0.
+
+### Yellow border overlay
+- 4 thin STATIC popup windows (top/bottom/left/right, 3px, yellow GDI FillRect)
+- `SetWinEventHook(EVENT_SYSTEM_MOVESIZEEND)` — event-driven, fires on mouse release
+- Z-order: `SetWindowPos(h, target)` — follows target, covered when target is covered
+- Inset: `BORDER_INSET=1` shrinks border inward for tight fit
+- Clamped to screen edges for maximized windows
+
+### Frame pipeline
+- WGC: BGRA pixels → `bgra_to_rgba()` (swap R↔B) → store in `STREAM_FRAME`
+- `stream_poll()`: base64-encode raw RGBA → JSON → frontend Canvas ImageData
+- GDI: same pipeline, no BMP conversion needed
+- TCP broadcast: raw BGRA frames on `127.0.0.1:9999` for external consumers
+
+## C++ File Logging
+
+`capture_wgc_main.cpp` writes `wgc_log()` to both stderr and `../../log/wgc_*.log`.
+Format: `[seconds.ms.us] message`. Falls back to same directory if `log/` unreachable.
+
+Rust `init_log()` walks up from exe dir looking for existing `log/` directory.
+If found (at project root), writes `agent_*.log` there.
 
 ## Known Issues
 
-1. **MF H.264 encoder**: AMD CLSID ADC9BC80 rejects all input types — GPU driver issue
-2. **DXGI desktop**: returns solid black (virtual display adapter) — GDI fallback used
-3. **process_list.exe**: still 5s spawn (low priority, Process tab rarely used)
-4. **Preview timing logs**: cap_us/pack_us/bmp_us every 30 frames in agent_*.log
-5. **Single-frame timing**: total_ms + encode_ms per capture in agent_*.log
-
-## Stream Debug Log
-
-```
-stream timing: cap=3500us pack=12us bmp=450us    ← every 30 frames
-capture: total=14ms encode=6ms method=PrintWindow  ← single-frame
-stream: detected method=PrintWindow state=normal 1920x1080
-capture: GetWindowDC → solid(0,0,0)
-capture: PrintWindow → magenta sentinel detected
-capture: ALL methods failed for hwnd=xxx state=minimized
-```
+1. **MF H.264 encoder**: AMD CLSID ADC9BC80 rejects all input types
+2. **DXGI desktop**: returns solid black on virtual display adapters
+3. **process_list.exe**: 5s spawn (low priority)
+4. **Yellow border color**: GDI FillRect on STATIC — repaints white on window invalidation. Tracker repaints on every reposition, but may flicker
+5. **WGC init latency**: ~300ms for first frame after subprocess spawn
+6. **WGC FPS**: Limited by window content change rate. Static window = 0-5 FPS. Dynamic = 60+ FPS. This is by design (event-driven)
+7. **Subprocess cleanup**: WGC subprocess killed 500ms after stream stop. Occasionally leaves orphan `capture_wgc.exe` processes
