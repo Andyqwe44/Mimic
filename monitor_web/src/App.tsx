@@ -600,9 +600,10 @@ function LogPanel({ compact }: { compact?: boolean }) {
         </div>
         <div className="flex items-center gap-0.5">
           <Tooltip text="清空日志">
-            <button onClick={e => { e.stopPropagation(); gLogs = []; gLogListeners.forEach(f => f()) }}
-              className="p-1 rounded-md text-text-secondary hover:text-error hover:bg-bg-tertiary transition-colors" onClick={e => { e.stopPropagation(); addLog('Action: clear logs'); gLogs = []; gLogListeners.forEach(f => f()) }}>
+            <button onClick={e => { e.stopPropagation(); addLog('Action: clear logs'); gLogs = []; gLogListeners.forEach(f => f()) }}
+              className="p-1 rounded-md text-text-secondary hover:text-error hover:bg-bg-tertiary transition-colors">
               <Trash2 className="w-3.5 h-3.5" />
+            </button>
           </Tooltip>
           <ChevronDown className={`w-4 h-4 text-text-muted transition-transform duration-150 ${expanded?'rotate-180':''}`} />
         </div>
