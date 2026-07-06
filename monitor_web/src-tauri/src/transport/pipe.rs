@@ -1,6 +1,7 @@
 //! transport/pipe.rs — send/receive frames over stdin/stdout pipe.
 //!
 //! Depends on: protocol::protocol (for PayloadType, build_header, parse_header).
+#![allow(dead_code)]
 
 use crate::protocol::{self, PayloadType};
 use std::io::{self, Read, Write};
@@ -12,12 +13,13 @@ pub fn send_frame(writer: &mut impl Write, type_tag: PayloadType, payload: &[u8]
     if !payload.is_empty() { writer.write_all(payload)?; }
     writer.flush()
 }
-#![allow(dead_code)]
 
 /// Max sane payload size (256 MiB). Reject larger as likely corrupt header.
+#[allow(dead_code)]
 const MAX_PAYLOAD_SIZE: u32 = 256 * 1024 * 1024;
 
 /// Read a frame from a reader (stdin, file, etc.). Returns (type_tag, payload) or None on EOF.
+#[allow(dead_code)]
 pub fn recv_frame(reader: &mut impl Read) -> io::Result<Option<(PayloadType, Vec<u8>)>> {
     let mut hdr = [0u8; protocol::FRAME_HEADER_SIZE];
     if reader.read_exact(&mut hdr).is_err() { return Ok(None); }

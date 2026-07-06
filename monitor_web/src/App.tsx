@@ -1004,6 +1004,36 @@ export default function App() {
 
   useEffect(() => { measureLayout() }, [])
 
+  // Initial layout check — resize event doesn't fire on startup. If all panels
+  // expanded overflow the right panel, collapse L → S → C until they fit.
+  useEffect(() => {
+    const check = () => {
+      measureLayout()
+      const el = rightPanelRef.current; if (!el) return
+      const kids = el.querySelectorAll(':scope > div')
+      let kidsH = 0
+      for (let i = 0; i < 3; i++) kidsH += (kids[i] as HTMLElement).offsetHeight
+      const overflow = kidsH + GAP - el.clientHeight
+      if (overflow > 4) {
+        if (logExpandedRef.current) {
+          addLog(`[Layout] init overflow ${overflow}px → auto-collapse log`)
+          setLogExpanded(false)
+          setTimeout(check, 250) // re-check after CSS animation
+        } else if (screenshotExpandedRef.current) {
+          addLog(`[Layout] init overflow ${overflow}px → auto-collapse screenshot`)
+          setScreenshotExpanded(false)
+          setTimeout(check, 250)
+        } else if (connectionExpandedRef.current) {
+          addLog(`[Layout] init overflow ${overflow}px → auto-collapse connection`)
+          setConnectionExpanded(false)
+        }
+      }
+      prevClientH.current = el.clientHeight
+    }
+    const t = setTimeout(check, 400)
+    return () => clearTimeout(t)
+  }, [])
+
   // Resize event → measure actual kidsH, compare against clientHeight
   useEffect(() => {
     const onResize = () => {

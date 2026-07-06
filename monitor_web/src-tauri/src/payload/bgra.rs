@@ -3,8 +3,7 @@
 //! Payload body: [w:4 LE][h:4 LE][ch:4 LE][reserved:4][pixels: w*h*ch bytes]
 //! Some items kept for cross-language protocol parity (Python, C++).
 
-#![allow(dead_code)]
-
+#[allow(dead_code)]
 pub struct BgraFrame {
     pub width: u32,
     pub height: u32,
@@ -26,6 +25,7 @@ pub fn pack(pixels: &[u8], w: u32, h: u32, ch: u32) -> Vec<u8> {
 }
 
 /// Unpack payload bytes → BgraFrame.
+#[allow(dead_code)]
 pub fn unpack(payload: &[u8]) -> Option<BgraFrame> {
     if payload.len() < HEADER_SIZE { return None; }
     let w  = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
