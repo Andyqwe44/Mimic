@@ -149,5 +149,4 @@ L2: 策略推理 — z + 动作历史 → Transformer → 动作 tokens。
 
 ## 已知限制
 
-- C++ capture 代码仍有部分重复（DXGI 4×, GDI 4×）。WGC 已统一到共享 `WgcCapture` 库，公共辅助已抽取到 `common/include/capture_helpers.hpp`。
 - 覆盖窗口崩溃时可能残留（黄色边框 STATIC 窗口无父窗口清理）。

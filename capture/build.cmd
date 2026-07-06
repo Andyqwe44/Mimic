@@ -12,13 +12,13 @@ if %ERRORLEVEL% EQU 0 (echo Build OK: capture\build\window_list.exe)
 cl.exe /EHsc /std:c++17 /Fo"build\\" /Fe:build\process_list.exe src\process_list.cpp user32.lib
 if %ERRORLEVEL% EQU 0 (echo Build OK: capture\build\process_list.exe)
 
-cl.exe /EHsc /std:c++17 /Fo"build\\" /Fe:build\capture_single.exe src\capture_single.cpp d3d11.lib dxgi.lib windowscodecs.lib user32.lib gdi32.lib ole32.lib
+cl.exe /EHsc /std:c++17 /I include /Fo"build\\" /Fe:build\capture_single.exe src\capture_single.cpp src\capture_dxgi.cpp d3d11.lib dxgi.lib dwmapi.lib user32.lib gdi32.lib
 if %ERRORLEVEL% EQU 0 (echo Build OK: capture\build\capture_single.exe)
 
-cl.exe /EHsc /std:c++17 /I include /Fo"build\\" /Fe:build\capture_stream.exe src\capture_stream.cpp d3d11.lib dxgi.lib dwmapi.lib user32.lib gdi32.lib windowsapp.lib
+cl.exe /EHsc /std:c++17 /I include /Fo"build\\" /Fe:build\capture_stream.exe src\capture_stream.cpp src\capture_dxgi.cpp d3d11.lib dxgi.lib dwmapi.lib user32.lib gdi32.lib windowsapp.lib
 if %ERRORLEVEL% EQU 0 (echo Build OK: capture\build\capture_stream.exe)
 
-cl.exe /EHsc /std:c++17 /I include /Fo"build\\" /Fe:build\capture_h264.exe src\capture_h264.cpp src\mf_encoder.cpp d3d11.lib dxgi.lib dwmapi.lib mfplat.lib mf.lib mfuuid.lib user32.lib gdi32.lib windowsapp.lib ws2_32.lib
+cl.exe /EHsc /std:c++17 /I include /Fo"build\\" /Fe:build\capture_h264.exe src\capture_h264.cpp src\capture_dxgi.cpp src\mf_encoder.cpp d3d11.lib dxgi.lib dwmapi.lib mfplat.lib mf.lib mfuuid.lib user32.lib gdi32.lib windowsapp.lib ws2_32.lib
 if %ERRORLEVEL% EQU 0 (echo Build OK: capture\build\capture_h264.exe)
 
 cl.exe /EHsc /std:c++17 /I include /Fo"build\\" /Fe:build\capture_wgc.exe src\capture_wgc.cpp src\capture_wgc_main.cpp d3d11.lib dxgi.lib user32.lib gdi32.lib windowsapp.lib

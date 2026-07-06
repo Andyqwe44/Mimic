@@ -1,14 +1,8 @@
 /**
- * DXGI Desktop Duplication Capture Backend
+ * DXGI Desktop Duplication + GDI Capture Backends
  *
- * Uses D3D11 + IDXGIOutputDuplication for low-latency (1-2ms)
- * GPU-accelerated screen capture. Requires Windows 8+.
- *
- * Flow:
- *   1. D3D11CreateDevice -> ID3D11Device + ID3D11DeviceContext
- *   2. Enumerate adapters -> IDXGIOutput1 -> DuplicateOutput()
- *   3. Per-frame: AcquireNextFrame -> CopyResource(staging) -> Map -> read
- *   4. Handle DXGI_ERROR_ACCESS_LOST (mode changes) by reinitializing
+ * DxgiCapture: GPU-accelerated, configurable (skip virtual adapters, solid-output detection).
+ * GdiCapture: CPU fallback.
  */
 #include "capture.hpp"
 
@@ -22,6 +16,9 @@
 #include <cstdio>
 #include <cstring>
 #include <chrono>
+
+#include "../../common/include/capture_helpers.hpp"
+namespace ch = capture_helpers;
 
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")
@@ -45,7 +42,6 @@ bool clamp_region(int& x, int& y, int& w, int& h, int limit_w, int limit_h) {
 bool find_window_rect(const wchar_t* title, Rect& out) {
     HWND hwnd = FindWindowW(nullptr, title);
     if (!hwnd) {
-        // Partial title match
         hwnd = FindWindowW(nullptr, nullptr);
         while (hwnd) {
             wchar_t buf[256];
@@ -67,21 +63,18 @@ bool find_window_rect(const wchar_t* title, Rect& out) {
 
 class DxgiCapture : public ICaptureBackend {
 public:
+    DxgiCapture() = default;
+    explicit DxgiCapture(const DxgiOptions& opts) : opts_(opts) {}
+
     const char* name() const override { return "DXGI Desktop Duplication"; }
 
     bool init() override {
         if (initialized_) return true;
 
         HRESULT hr = D3D11CreateDevice(
-            nullptr,                    // default adapter
-            D3D_DRIVER_TYPE_HARDWARE,
-            nullptr,
-            0,                          // no flags
-            nullptr, 0,                 // default feature level
-            D3D11_SDK_VERSION,
-            &d3d_device_,
-            nullptr,
-            &d3d_context_);
+            nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0,
+            nullptr, 0, D3D11_SDK_VERSION,
+            &d3d_device_, nullptr, &d3d_context_);
 
         if (FAILED(hr)) {
             fprintf(stderr, "DXGI: D3D11CreateDevice failed (0x%08lX)\n", hr);
@@ -100,32 +93,23 @@ public:
 
         HRESULT hr = desk_dup_->AcquireNextFrame(16, &frame_info, &desktop_resource);
         if (hr == DXGI_ERROR_WAIT_TIMEOUT)
-            return false;  // no new frame
+            return false;
         if (hr == DXGI_ERROR_ACCESS_LOST) {
-            // Display mode changed, need to recreate
             cleanup_dup();
             if (!init_duplication()) return false;
             return capture(out, region);
         }
         if (FAILED(hr)) return false;
 
-        // Get the GPU texture
         ID3D11Texture2D* src_texture = nullptr;
-        hr = desktop_resource->QueryInterface(__uuidof(ID3D11Texture2D),
-                                               (void**)&src_texture);
+        hr = desktop_resource->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&src_texture);
         desktop_resource->Release();
-        if (FAILED(hr)) {
-            desk_dup_->ReleaseFrame();
-            return false;
-        }
+        if (FAILED(hr)) { desk_dup_->ReleaseFrame(); return false; }
 
         D3D11_TEXTURE2D_DESC src_desc;
         src_texture->GetDesc(&src_desc);
 
-        // Create staging texture if needed
-        if (!staging_tex_ ||
-            staging_width_ != src_desc.Width ||
-            staging_height_ != src_desc.Height) {
+        if (!staging_tex_ || staging_width_ != src_desc.Width || staging_height_ != src_desc.Height) {
             staging_tex_.Reset();
             D3D11_TEXTURE2D_DESC staging_desc = {};
             staging_desc.Width = src_desc.Width;
@@ -138,21 +122,15 @@ public:
             staging_desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
 
             hr = d3d_device_->CreateTexture2D(&staging_desc, nullptr, &staging_tex_);
-            if (FAILED(hr)) {
-                src_texture->Release();
-                desk_dup_->ReleaseFrame();
-                return false;
-            }
+            if (FAILED(hr)) { src_texture->Release(); desk_dup_->ReleaseFrame(); return false; }
             staging_width_ = src_desc.Width;
             staging_height_ = src_desc.Height;
         }
 
-        // Copy GPU -> staging
         d3d_context_->CopyResource(staging_tex_.Get(), src_texture);
         src_texture->Release();
         desk_dup_->ReleaseFrame();
 
-        // Map and read
         D3D11_MAPPED_SUBRESOURCE mapped = {};
         hr = d3d_context_->Map(staging_tex_.Get(), 0, D3D11_MAP_READ, 0, &mapped);
         if (FAILED(hr)) return false;
@@ -161,16 +139,13 @@ public:
         int full_h = (int)staging_height_;
         int row_pitch = (int)mapped.RowPitch;
 
-        // Determine capture region
         int cap_x = region ? region->x : 0;
         int cap_y = region ? region->y : 0;
         int cap_w = region ? region->w : full_w;
         int cap_h = region ? region->h : full_h;
 
-        // Clamp to screen bounds
         if (!clamp_region(cap_x, cap_y, cap_w, cap_h, full_w, full_h)) return false;
 
-        // BGRA format: 4 bytes per pixel
         out.width = cap_w;
         out.height = cap_h;
         out.channels = 4;
@@ -184,6 +159,18 @@ public:
         }
 
         d3d_context_->Unmap(staging_tex_.Get(), 0);
+
+        // Solid-output detection: if enabled and output is uniform, retry next
+        if (opts_.skip_solid_outputs && ch::is_solid_color(out.data.data(), out.data.size())) {
+            // Specifically check black (virtual display hallmark)
+            bool is_black = (out.data[0] == 0 && out.data[1] == 0 && out.data[2] == 0);
+            // Try next output
+            if (try_next_output()) {
+                return capture(out, region);  // retry with new output
+            }
+            if (is_black) return false;  // no more outputs, black frame is useless
+        }
+
         return true;
     }
 
@@ -200,39 +187,143 @@ public:
 
 private:
     bool init_duplication() {
-        // Get DXGI device
         IDXGIDevice* dxgi_device = nullptr;
-        HRESULT hr = d3d_device_->QueryInterface(__uuidof(IDXGIDevice),
-                                                   (void**)&dxgi_device);
+        HRESULT hr = d3d_device_->QueryInterface(__uuidof(IDXGIDevice), (void**)&dxgi_device);
         if (FAILED(hr)) return false;
 
-        // Get adapter
         IDXGIAdapter* adapter = nullptr;
         hr = dxgi_device->GetAdapter(&adapter);
         dxgi_device->Release();
         if (FAILED(hr)) return false;
 
-        // Get output (monitor)
-        IDXGIOutput* output = nullptr;
-        hr = adapter->EnumOutputs(0, &output);
+        // Get DXGI factory for adapter enumeration
+        IDXGIFactory1* factory = nullptr;
+        if (opts_.skip_virtual_adapters) {
+            CreateDXGIFactory1(__uuidof(IDXGIFactory1), (void**)&factory);
+        }
+
+        bool found = false;
+        IDXGIAdapter* current_adapter = adapter;
+        UINT adapter_idx = 0;
+
+        do {
+            // Check adapter name for virtual/remote/indirect
+            if (opts_.skip_virtual_adapters && current_adapter) {
+                DXGI_ADAPTER_DESC adesc;
+                if (SUCCEEDED(current_adapter->GetDesc(&adesc))) {
+                    if (wcsstr(adesc.Description, L"Virtual") ||
+                        wcsstr(adesc.Description, L"Remote") ||
+                        wcsstr(adesc.Description, L"Indirect")) {
+                        fprintf(stderr, "DXGI: skip adapter %u: %S\n", adapter_idx, adesc.Description);
+                        goto next_adapter;
+                    }
+                }
+            }
+
+            // Try outputs on this adapter
+            {
+                IDXGIOutput* output = nullptr;
+                for (UINT oi = 0; current_adapter && SUCCEEDED(current_adapter->EnumOutputs(oi, &output)); oi++) {
+                    // Check output dimensions
+                    if (opts_.min_output_width > 0 || opts_.min_output_height > 0) {
+                        DXGI_OUTPUT_DESC odesc;
+                        if (SUCCEEDED(output->GetDesc(&odesc))) {
+                            int ow = odesc.DesktopCoordinates.right - odesc.DesktopCoordinates.left;
+                            int oh = odesc.DesktopCoordinates.bottom - odesc.DesktopCoordinates.top;
+                            if (!odesc.AttachedToDesktop || !odesc.Monitor ||
+                                (opts_.min_output_width > 0 && ow < opts_.min_output_width) ||
+                                (opts_.min_output_height > 0 && oh < opts_.min_output_height)) {
+                                output->Release(); output = nullptr;
+                                continue;
+                            }
+                        }
+                    }
+
+                    IDXGIOutput1* output1 = nullptr;
+                    hr = output->QueryInterface(__uuidof(IDXGIOutput1), (void**)&output1);
+                    output->Release();
+                    if (FAILED(hr)) continue;
+
+                    hr = output1->DuplicateOutput(d3d_device_.Get(), &desk_dup_);
+                    output1->Release();
+                    if (SUCCEEDED(hr)) {
+                        found = true;
+                        current_output_idx_ = oi;
+                        break;
+                    }
+                }
+            }
+
+            if (found) break;
+
+next_adapter:
+            // Release previous adapter's resources
+            if (current_adapter && current_adapter != adapter) {
+                current_adapter->Release();
+            }
+
+            // Try next adapter (only when virtual-skip is enabled)
+            if (opts_.skip_virtual_adapters && factory) {
+                adapter_idx++;
+                current_adapter = nullptr;
+                if (factory->EnumAdapters(adapter_idx, &current_adapter) == DXGI_ERROR_NOT_FOUND) {
+                    break;  // no more adapters
+                }
+            } else {
+                break;  // only try first adapter
+            }
+        } while (!found);
+
+        // Clean up the original adapter we got from the device
         adapter->Release();
-        if (FAILED(hr)) return false;
+        if (factory) factory->Release();
 
-        // Get IDXGIOutput1 for duplication
-        IDXGIOutput1* output1 = nullptr;
-        hr = output->QueryInterface(__uuidof(IDXGIOutput1), (void**)&output1);
-        output->Release();
-        if (FAILED(hr)) return false;
-
-        hr = output1->DuplicateOutput(d3d_device_.Get(), &desk_dup_);
-        output1->Release();
-        if (FAILED(hr)) {
-            fprintf(stderr, "DXGI: DuplicateOutput failed (0x%08lX)\n", hr);
+        if (!found) {
+            fprintf(stderr, "DXGI: DuplicateOutput failed on all outputs\n");
             return false;
         }
 
         initialized_ = true;
         return true;
+    }
+
+    /// Try next output on same adapter. Returns true if switched successfully.
+    bool try_next_output() {
+        if (!d3d_device_) return false;
+
+        IDXGIDevice* dxgi_device = nullptr;
+        if (FAILED(d3d_device_->QueryInterface(__uuidof(IDXGIDevice), (void**)&dxgi_device))) return false;
+
+        IDXGIAdapter* adapter = nullptr;
+        HRESULT hr = dxgi_device->GetAdapter(&adapter);
+        dxgi_device->Release();
+        if (FAILED(hr)) return false;
+
+        // Release current duplication
+        if (desk_dup_) { desk_dup_->Release(); desk_dup_ = nullptr; }
+        staging_tex_.Reset();
+
+        // Try next output
+        bool found = false;
+        IDXGIOutput* output = nullptr;
+        for (UINT oi = current_output_idx_ + 1; SUCCEEDED(adapter->EnumOutputs(oi, &output)); oi++) {
+            IDXGIOutput1* output1 = nullptr;
+            hr = output->QueryInterface(__uuidof(IDXGIOutput1), (void**)&output1);
+            output->Release();
+            if (FAILED(hr)) continue;
+
+            hr = output1->DuplicateOutput(d3d_device_.Get(), &desk_dup_);
+            output1->Release();
+            if (SUCCEEDED(hr)) {
+                found = true;
+                current_output_idx_ = oi;
+                fprintf(stderr, "DXGI: switched to output %u\n", oi);
+                break;
+            }
+        }
+
+        adapter->Release();
+        return found;
     }
 
     bool reinit_dup() {
@@ -250,9 +341,10 @@ private:
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> d3d_context_;
     IDXGIOutputDuplication* desk_dup_ = nullptr;
     Microsoft::WRL::ComPtr<ID3D11Texture2D>     staging_tex_;
-    UINT staging_width_ = 0;
-    UINT staging_height_ = 0;
+    UINT staging_width_ = 0, staging_height_ = 0;
+    UINT current_output_idx_ = 0;
     bool initialized_ = false;
+    DxgiOptions opts_;
 };
 
 // ==================== GDI Fallback ====================
@@ -287,14 +379,14 @@ public:
         BITMAPINFOHEADER bi = {};
         bi.biSize = sizeof(BITMAPINFOHEADER);
         bi.biWidth = cap_w;
-        bi.biHeight = -cap_h;  // top-down
+        bi.biHeight = -cap_h;
         bi.biPlanes = 1;
         bi.biBitCount = 32;
         bi.biCompression = BI_RGB;
 
         out.width = cap_w;
         out.height = cap_h;
-        out.channels = 4;  // BGRA
+        out.channels = 4;
         out.data.resize(cap_w * cap_h * 4);
         out.timestamp_us = capture_now_us();
 
@@ -318,7 +410,11 @@ public:
 // ==================== Factory ====================
 
 std::unique_ptr<ICaptureBackend> create_capture_backend() {
-    auto dxgi = std::make_unique<DxgiCapture>();
+    return create_capture_backend(DxgiOptions{});
+}
+
+std::unique_ptr<ICaptureBackend> create_capture_backend(const DxgiOptions& opts) {
+    auto dxgi = std::make_unique<DxgiCapture>(opts);
     if (dxgi->init()) return dxgi;
 
     fprintf(stderr, "DXGI unavailable, falling back to GDI\n");

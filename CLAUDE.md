@@ -181,5 +181,4 @@ If found (at project root), writes `agent_*.log` there.
 5. **WGC init latency**: ~300ms for first frame after subprocess spawn
 6. **WGC FPS**: Limited by window content change rate. Static window = 0-5 FPS. Dynamic = 60+ FPS. This is by design (event-driven)
 7. **Subprocess cleanup**: WGC subprocess killed 500ms after stream stop. Occasionally leaves orphan `capture_wgc.exe` processes
-8. **C++ code duplication**: WGC FramePool copied 2× (capture_stream, capture_h264 now use shared WgcCapture lib; 1 variant remains inline). DXGI/GDI capture still duplicated across capture/*.cpp. Further consolidation planned.
-9. **Overlay orphan risk**: Yellow overlay STATIC windows may persist if app crashes without `destroy_overlay_bars()` cleanup.
+8. **Overlay orphan risk**: Yellow overlay STATIC windows may persist if app crashes without `destroy_overlay_bars()` cleanup.

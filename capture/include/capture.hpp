@@ -19,6 +19,14 @@ struct FrameBuffer {
     uint64_t timestamp_us = 0;
 };
 
+/// Configuration for DXGI capture backend
+struct DxgiOptions {
+    bool skip_virtual_adapters = false;   // skip "Virtual"/"Remote"/"Indirect"
+    bool skip_solid_outputs = false;      // skip outputs returning solid-color frames
+    int  min_output_width  = 0;           // 0 = no minimum
+    int  min_output_height = 0;
+};
+
 class ICaptureBackend {
 public:
     virtual ~ICaptureBackend() = default;
@@ -44,6 +52,9 @@ public:
  * Tries DXGI first, falls back to GDI.
  */
 std::unique_ptr<ICaptureBackend> create_capture_backend();
+
+/** Factory with DXGI options (skip virtual adapters, solid-output detection, etc.) */
+std::unique_ptr<ICaptureBackend> create_capture_backend(const DxgiOptions& opts);
 
 /** High-precision timestamp in microseconds */
 uint64_t capture_now_us();

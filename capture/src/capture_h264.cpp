@@ -3,7 +3,7 @@
  *
  * Usage:   capture_h264.exe <hwnd>
  *          hwnd=0 → desktop (DXGI Desktop Duplication, skip virtual displays)
- *          hwnd≠0 → window (FramePool/WGC GPU → PrintWindow fallback)
+ *          hwnd≠0 → window (WGC FramePool → PrintWindow fallback)
  *
  * Output protocol (binary stdout, LE):
  *   Line 1: method name (text) + '\n'
@@ -13,7 +13,6 @@
  * TCP: listens on localhost:9998, same protocol as stdout.
  * Stdin: "q\n" → quit.  Stderr: debug/log info.
  */
-
 #ifndef WIN32_LEAN_AND_MEAN
   #define WIN32_LEAN_AND_MEAN
 #endif
@@ -24,11 +23,6 @@
 #include <d3d11.h>
 #include <dxgi1_2.h>
 #include <wrl/client.h>
-#include <winrt/Windows.Graphics.Capture.h>
-#include <winrt/Windows.Graphics.DirectX.Direct3D11.h>
-#include <winrt/Windows.Foundation.h>
-#include <windows.graphics.capture.interop.h>
-#include <windows.graphics.directx.direct3d11.interop.h>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -54,22 +48,16 @@
 #include "../../common/include/capture_helpers.hpp"
 
 using Microsoft::WRL::ComPtr;
-namespace wgc = winrt::Windows::Graphics::Capture;
-namespace wf = winrt::Windows::Foundation;
-
 namespace ch = capture_helpers;
 static std::atomic<bool> g_running{true};
 
-// -----------------------------------------------------------
-// Scale BGRA (nearest neighbor, max 640px, 16-aligned for H.264 encoder)
-// -----------------------------------------------------------
+// ── H.264-specific scale (16px alignment required by encoder) ──
 static const int MAX_DIM = 640;
 static const int ALIGN = 16;
-
 static int align_down(int v) { return (v / ALIGN) * ALIGN; }
 
-static void scale_bgra(const uint8_t* src, int sw, int sh,
-                       std::vector<uint8_t>& dst, int& dw, int& dh) {
+static void scale_bgra_h264(const uint8_t* src, int sw, int sh,
+                            std::vector<uint8_t>& dst, int& dw, int& dh) {
     float s = (float)MAX_DIM / (float)sw;
     if (s >= 1.0f) {
         dw = align_down(sw); dh = align_down(sh);
@@ -80,20 +68,16 @@ static void scale_bgra(const uint8_t* src, int sw, int sh,
     if (dw < 64) dw = 64; if (dh < 64) dh = 64;
     dst.resize(dw * dh * 4);
     for (int y = 0; y < dh; y++) {
-        int sy = (int)(y / s);
-        if (sy >= sh) sy = sh - 1;
+        int sy = (int)(y / s); if (sy >= sh) sy = sh - 1;
         for (int x = 0; x < dw; x++) {
-            int sx = (int)(x / s);
-            if (sx >= sw) sx = sw - 1;
+            int sx = (int)(x / s); if (sx >= sw) sx = sw - 1;
             memcpy(dst.data() + (y * dw + x) * 4, src + (sy * sw + sx) * 4, 4);
         }
     }
 }
 
-// -----------------------------------------------------------
-// DXGI Desktop Capture — FIXED skip virtual displays
-// -----------------------------------------------------------
-static bool dxgi_capture_fixed(ComPtr<ID3D11Device> dev, ComPtr<ID3D11DeviceContext> ctx,
+// ── DXGI capture on shared device (needed because H.264 encoder shares the device) ──
+static bool dxgi_capture_shared(ComPtr<ID3D11Device> dev, ComPtr<ID3D11DeviceContext> ctx,
                                 std::vector<uint8_t>& pixels, int& w, int& h) {
     ComPtr<IDXGIFactory1> factory;
     if (FAILED(CreateDXGIFactory1(__uuidof(IDXGIFactory1), (void**)factory.GetAddressOf())))
@@ -109,11 +93,9 @@ static bool dxgi_capture_fixed(ComPtr<ID3D11Device> dev, ComPtr<ID3D11DeviceCont
             wcsstr(adesc.Description, L"Remote") ||
             wcsstr(adesc.Description, L"Indirect")) {
             fprintf(stderr, "[dxgi] skip adapter %u: %S\n", ai, adesc.Description);
-            adapter1.Reset();
-            continue;
+            adapter1.Reset(); continue;
         }
 
-        // Try outputs on this adapter
         ComPtr<IDXGIOutput> output;
         for (UINT oi = 0; adapter1->EnumOutputs(oi, output.GetAddressOf()) != DXGI_ERROR_NOT_FOUND; oi++) {
             DXGI_OUTPUT_DESC odesc;
@@ -136,9 +118,7 @@ static bool dxgi_capture_fixed(ComPtr<ID3D11Device> dev, ComPtr<ID3D11DeviceCont
             IDXGIOutputDuplication* dup = nullptr;
             if (FAILED(output1->DuplicateOutput(dev.Get(), &dup))) { output.Reset(); continue; }
 
-            // Try acquiring a frame
-            IDXGIResource* res = nullptr;
-            DXGI_OUTDUPL_FRAME_INFO fi = {};
+            IDXGIResource* res = nullptr; DXGI_OUTDUPL_FRAME_INFO fi = {};
             HRESULT acq = dup->AcquireNextFrame(30, &fi, &res);
             if (FAILED(acq)) { dup->Release(); output.Reset(); continue; }
 
@@ -146,11 +126,9 @@ static bool dxgi_capture_fixed(ComPtr<ID3D11Device> dev, ComPtr<ID3D11DeviceCont
             res->QueryInterface(__uuidof(ID3D11Texture2D), (void**)src.GetAddressOf());
             res->Release();
 
-            D3D11_TEXTURE2D_DESC desc;
-            src->GetDesc(&desc);
+            D3D11_TEXTURE2D_DESC desc; src->GetDesc(&desc);
             int fw = (int)desc.Width, fh = (int)desc.Height;
 
-            // Copy to staging
             D3D11_TEXTURE2D_DESC sd = {};
             sd.Width = desc.Width; sd.Height = desc.Height; sd.MipLevels = 1;
             sd.ArraySize = 1; sd.Format = desc.Format; sd.SampleDesc.Count = 1;
@@ -174,7 +152,7 @@ static bool dxgi_capture_fixed(ComPtr<ID3D11Device> dev, ComPtr<ID3D11DeviceCont
 
             // Solid black check using shared helper
             if (ch::is_solid_color(pixels.data(), pixels.size())) {
-                // Check if it's specifically black (is_solid_color only checks uniformity)
+                // Specifically black = virtual display
                 if (pixels[0] == 0 && pixels[1] == 0 && pixels[2] == 0) {
                     fprintf(stderr, "[dxgi] solid black → skip output %u\n", oi);
                     pixels.clear(); output.Reset(); continue;
@@ -190,9 +168,7 @@ static bool dxgi_capture_fixed(ComPtr<ID3D11Device> dev, ComPtr<ID3D11DeviceCont
     return false;
 }
 
-// -----------------------------------------------------------
-// GDI desktop fallback
-// -----------------------------------------------------------
+// ── GDI desktop fallback (shared) ─────────────────────────
 static bool gdi_desk(std::vector<uint8_t>& p, int& w, int& h) {
     HDC dc = GetDC(nullptr); if (!dc) return false;
     w = GetSystemMetrics(SM_CXSCREEN); h = GetSystemMetrics(SM_CYSCREEN);
@@ -200,8 +176,7 @@ static bool gdi_desk(std::vector<uint8_t>& p, int& w, int& h) {
     HBITMAP bmp = CreateCompatibleBitmap(dc, w, h);
     SelectObject(mem, bmp);
     BitBlt(mem, 0, 0, w, h, dc, 0, 0, SRCCOPY);
-    BITMAPINFOHEADER bi = {};
-    bi.biSize = sizeof(bi); bi.biWidth = w; bi.biHeight = -h;
+    BITMAPINFOHEADER bi = {}; bi.biSize = sizeof(bi); bi.biWidth = w; bi.biHeight = -h;
     bi.biPlanes = 1; bi.biBitCount = 32; bi.biCompression = BI_RGB;
     p.resize(w * h * 4);
     GetDIBits(mem, bmp, 0, h, p.data(), (BITMAPINFO*)&bi, DIB_RGB_COLORS);
@@ -209,9 +184,7 @@ static bool gdi_desk(std::vector<uint8_t>& p, int& w, int& h) {
     return true;
 }
 
-// -----------------------------------------------------------
-// PrintWindow fallback
-// -----------------------------------------------------------
+// ── PrintWindow fallback ──────────────────────────────────
 static bool print_window_cap(HWND hwnd, std::vector<uint8_t>& cur, int& w, int& h, RECT& wr) {
     int ww = wr.right - wr.left, wh = wr.bottom - wr.top;
     if (ww <= 0 || wh <= 0) return false;
@@ -238,12 +211,10 @@ static bool print_window_cap(HWND hwnd, std::vector<uint8_t>& cur, int& w, int& 
     return true;
 }
 
-// ── WGC capture (shared library, not inline copy) ─────────
+// ── WGC capture (shared library) ──────────────────────────
 static wgc::WgcCapture g_wgc;
 
-// -----------------------------------------------------------
-// TCP broadcast server
-// -----------------------------------------------------------
+// ── TCP server ────────────────────────────────────────────
 struct TcpServer {
     SOCKET listen_sock = INVALID_SOCKET;
     std::vector<SOCKET> clients;
@@ -257,9 +228,8 @@ static void tcp_accept_loop() {
     while (g_tcp.running) {
         SOCKET client = accept(g_tcp.listen_sock, nullptr, nullptr);
         if (client == INVALID_SOCKET) {
-            if (!g_tcp.running) break;  // socket closed → exit
-            Sleep(100);
-            continue;
+            if (!g_tcp.running) break;
+            Sleep(100); continue;
         }
         u_long mode = 0; ioctlsocket(client, FIONBIO, &mode);
         {
@@ -271,30 +241,23 @@ static void tcp_accept_loop() {
 }
 
 static bool tcp_start(uint16_t port) {
-    WSADATA wsa;
-    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
-        fprintf(stderr, "[tcp] WSAStartup failed\n"); return false;
-    }
+    WSADATA wsa; if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return false;
     g_tcp.listen_sock = socket(AF_INET, SOCK_STREAM, 0);
     if (g_tcp.listen_sock == INVALID_SOCKET) return false;
     int opt = 1;
     setsockopt(g_tcp.listen_sock, SOL_SOCKET, SO_REUSEADDR, (char*)&opt, sizeof(opt));
     sockaddr_in addr = {};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
+    addr.sin_family = AF_INET; addr.sin_port = htons(port);
     addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-    if (bind(g_tcp.listen_sock, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
-        fprintf(stderr, "[tcp] bind failed: %d\n", WSAGetLastError()); return false;
-    }
-    if (listen(g_tcp.listen_sock, 5) == SOCKET_ERROR) {
-        fprintf(stderr, "[tcp] listen failed: %d\n", WSAGetLastError()); return false;
-    }
+    if (bind(g_tcp.listen_sock, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR)
+    { fprintf(stderr, "[tcp] bind failed: %d\n", WSAGetLastError()); return false; }
+    if (listen(g_tcp.listen_sock, 5) == SOCKET_ERROR)
+    { fprintf(stderr, "[tcp] listen failed: %d\n", WSAGetLastError()); return false; }
     fprintf(stderr, "[tcp] listening on 127.0.0.1:%u\n", port);
     g_tcp.accept_thread = std::thread(tcp_accept_loop);
     return true;
 }
 
-// Send all bytes, looping to handle short writes
 static bool tcp_send_all(SOCKET s, const char* data, int len) {
     int sent = 0;
     while (sent < len) {
@@ -306,82 +269,62 @@ static bool tcp_send_all(SOCKET s, const char* data, int len) {
     return true;
 }
 
-/** Broadcast [size:4 LE][h264_data] to all TCP clients. size=0 signals unchanged frame. */
 static void tcp_broadcast_frame(const std::vector<uint8_t>& h264_data) {
     uint32_t sz = (uint32_t)h264_data.size();
-    uint8_t hdr[4];
-    ch::w32_le(hdr, sz);
-
+    uint8_t hdr[4]; ch::w32_le(hdr, sz);
     std::lock_guard<std::mutex> lk(g_tcp.mtx);
     auto it = g_tcp.clients.begin();
     while (it != g_tcp.clients.end()) {
         bool ok = tcp_send_all(*it, (char*)hdr, 4);
         if (ok && sz > 0) ok = tcp_send_all(*it, (char*)h264_data.data(), (int)sz);
         if (!ok) {
-            closesocket(*it);
-            it = g_tcp.clients.erase(it);
+            closesocket(*it); it = g_tcp.clients.erase(it);
             fprintf(stderr, "[tcp] client disconnected (%zu remain)\n", g_tcp.clients.size());
-        } else {
-            ++it;
-        }
+        } else { ++it; }
     }
 }
 
 static void tcp_stop() {
     g_tcp.running = false;
-    // Close socket first to unblock accept() in worker thread
-    if (g_tcp.listen_sock != INVALID_SOCKET) {
-        closesocket(g_tcp.listen_sock);
-        g_tcp.listen_sock = INVALID_SOCKET;
-    }
+    if (g_tcp.listen_sock != INVALID_SOCKET) { closesocket(g_tcp.listen_sock); g_tcp.listen_sock = INVALID_SOCKET; }
     if (g_tcp.accept_thread.joinable()) g_tcp.accept_thread.join();
     for (auto c : g_tcp.clients) closesocket(c);
     g_tcp.clients.clear();
     WSACleanup();
 }
 
-// -----------------------------------------------------------
-// stdin quit thread
-// -----------------------------------------------------------
 static void stdin_thread() {
-    char c;
-    while (g_running && fread(&c, 1, 1, stdin) > 0 && c != 'q') {}
+    char c; while (g_running && fread(&c, 1, 1, stdin) > 0 && c != 'q') {}
     g_running = false;
 }
 
-// -----------------------------------------------------------
-// main
-// -----------------------------------------------------------
+// ── main ────────────────────────────────────────────────
 int main(int argc, char* argv[]) {
     winrt::init_apartment(winrt::apartment_type::multi_threaded);
-    _setmode(_fileno(stdout), _O_BINARY);
-    _setmode(_fileno(stdin), _O_BINARY);
+    _setmode(_fileno(stdout), _O_BINARY); _setmode(_fileno(stdin), _O_BINARY);
 
     HWND hwnd = (HWND)0;
     if (argc > 1) hwnd = (HWND)(ULONG_PTR)_strtoui64(argv[1], nullptr, 10);
     bool desk = (hwnd == 0 || hwnd == GetDesktopWindow());
     fprintf(stderr, "[h264] hwnd=%p desktop=%d\n", hwnd, (int)desk);
 
-    // ── Create D3D11 device ──────────────────────────────
+    // Create D3D11 device (shared with H.264 encoder)
     ComPtr<ID3D11Device> device;
     ComPtr<ID3D11DeviceContext> ctx;
     HRESULT hr = D3D11CreateDevice(
         nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
         D3D11_CREATE_DEVICE_BGRA_SUPPORT,
         nullptr, 0, D3D11_SDK_VERSION, &device, nullptr, &ctx);
-    if (FAILED(hr)) {
-        fprintf(stderr, "[h264] D3D11CreateDevice failed: 0x%08lX\n", hr);
-        return 1;
-    }
+    if (FAILED(hr)) { fprintf(stderr, "[h264] D3D11CreateDevice failed: 0x%08lX\n", hr); return 1; }
 
-    // ── Init capture source ──────────────────────────────
+    // Init capture source
     const char* method = "GDI+H264";
-    bool use_fp = false;
+    bool use_wgc = false;
     RECT wr = {};
 
     if (!desk) {
-        use_fp = g_wgc.init(hwnd);
-        if (use_fp) {
+        use_wgc = g_wgc.init(hwnd);
+        if (use_wgc) {
             method = "FramePool+H264";
         } else {
             fprintf(stderr, "[h264] WGC failed, PrintWindow fallback\n");
@@ -391,7 +334,7 @@ int main(int argc, char* argv[]) {
         }
     } else {
         std::vector<uint8_t> t; int tw = 0, th = 0;
-        if (dxgi_capture_fixed(device, ctx, t, tw, th)) {
+        if (dxgi_capture_shared(device, ctx, t, tw, th)) {
             method = "DXGI+H264";
             fprintf(stderr, "[h264] desktop DXGI OK\n");
         } else {
@@ -399,22 +342,20 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // ── Handshake ────────────────────────────────────────
+    // Handshake
     fprintf(stdout, "%s\n", method); fflush(stdout);
     fprintf(stderr, "[h264] method=%s\n", method);
 
-    // ── Init MF H.264 encoder (deferred until first frame for size) ──
+    // Init MF H.264 encoder (deferred until first frame for size)
     MfH264Encoder encoder;
     bool encoder_ok = false;
     int enc_w = 0, enc_h = 0;
 
-    // ── Start TCP server ─────────────────────────────────
+    // Start TCP + stdin
     tcp_start(9998);
-
-    // ── Start stdin listener ─────────────────────────────
     std::thread(stdin_thread).detach();
 
-    // ── Main capture loop ────────────────────────────────
+    // Main capture loop
     std::vector<uint8_t> prev_h264;
     int frames = 0, skipped = 0;
     LARGE_INTEGER freq, t0, t1;
@@ -426,21 +367,22 @@ int main(int argc, char* argv[]) {
         std::vector<uint8_t> cur;
         bool ok = false;
 
-        // ── Capture ────────────────────────────────────
-        if (use_fp) {
+        // Capture
+        if (use_wgc) {
             wgc::WgcFrame wf;
             ok = g_wgc.capture(wf);
             if (ok) { cur = std::move(wf.pixels); w = wf.width; h = wf.height; }
             else { Sleep(1); continue; }
         } else if (desk) {
-            if (strcmp(method, "DXGI+H264") == 0) ok = dxgi_capture_fixed(device, ctx, cur, w, h);
+            if (strcmp(method, "DXGI+H264") == 0)
+                ok = dxgi_capture_shared(device, ctx, cur, w, h);
             if (!ok) ok = gdi_desk(cur, w, h);
         } else {
             ok = print_window_cap(hwnd, cur, w, h, wr);
             if (!ok) {
                 // DXGI crop fallback
                 std::vector<uint8_t> full; int fw = 0, fh = 0;
-                if (dxgi_capture_fixed(device, ctx, full, fw, fh)) {
+                if (dxgi_capture_shared(device, ctx, full, fw, fh)) {
                     int cx = wr.left > 0 ? wr.left : 0;
                     int cy = wr.top > 0 ? wr.top : 0;
                     int ww = wr.right - wr.left, wh = wr.bottom - wr.top;
@@ -457,81 +399,68 @@ int main(int argc, char* argv[]) {
                 }
             }
         }
+
         if (!ok || w <= 0 || h <= 0) { Sleep(1); continue; }
 
-        // ── Scale BGRA to max 640px ────────────────────
+        // Scale (H.264-specific 16px alignment)
         std::vector<uint8_t> scaled;
         int sw = 0, sh = 0;
-        scale_bgra(cur.data(), w, h, scaled, sw, sh);
+        scale_bgra_h264(cur.data(), w, h, scaled, sw, sh);
 
-        // ── Init/Reinit encoder if size changed ─────────
-        if (!encoder_ok || enc_w != sw || enc_h != sh) {
-            encoder.shutdown();
-            encoder_ok = encoder.init(device, sw, sh, 60, 5000000);
-            if (!encoder_ok) {
-                fprintf(stderr, "[h264] encoder init failed!\n");
-                break;
-            }
+        // Init encoder on first frame
+        if (!encoder_ok) {
+            encoder_ok = encoder.init(device.Get(), ctx.Get(), sw, sh);
+            if (!encoder_ok) { fprintf(stderr, "[h264] encoder init failed\n"); break; }
             enc_w = sw; enc_h = sh;
-            encoder.request_keyframe();
+            fprintf(stderr, "[h264] encoder init OK %dx%d\n", enc_w, enc_h);
+        }
+        if (sw != enc_w || sh != enc_h) {
+            fprintf(stderr, "[h264] size changed %dx%d → %dx%d, skip frame\n", enc_w, enc_h, sw, sh);
+            continue;
         }
 
-        // ── Upload BGRA → GPU texture → encode ─────────
-        D3D11_TEXTURE2D_DESC tex_desc = {};
-        tex_desc.Width = (UINT)sw;
-        tex_desc.Height = (UINT)sh;
-        tex_desc.MipLevels = 1;
-        tex_desc.ArraySize = 1;
-        tex_desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-        tex_desc.SampleDesc.Count = 1;
-        tex_desc.Usage = D3D11_USAGE_DEFAULT;
-        tex_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-
-        D3D11_SUBRESOURCE_DATA init_data = {};
-        init_data.pSysMem = scaled.data();
-        init_data.SysMemPitch = sw * 4;
-
-        ComPtr<ID3D11Texture2D> bgra_tex;
-        hr = device->CreateTexture2D(&tex_desc, &init_data, &bgra_tex);
-        if (FAILED(hr)) { Sleep(1); continue; }
-
-        // ── Encode ─────────────────────────────────────
+        // H.264 encode
         std::vector<uint8_t> h264_data;
-        bool got_output = encoder.encode(bgra_tex, h264_data);
+        if (!encoder.encode_frame(scaled.data(), h264_data)) {
+            fprintf(stderr, "[h264] encode failed\n"); continue;
+        }
 
-        if (got_output && !h264_data.empty()) {
-            // Frame differ on H.264 data
-            if (h264_data.size() == prev_h264.size() &&
-                memcmp(h264_data.data(), prev_h264.data(), h264_data.size()) == 0) {
-                // size=0 → unchanged frame
-                uint32_t sz = 0;
-                fwrite(&sz, 4, 1, stdout); fflush(stdout);
-                tcp_broadcast_frame({});  // empty vector → sends size=0 header
-                skipped++;
-            } else {
-                uint32_t sz = (uint32_t)h264_data.size();
-                fwrite(&sz, 4, 1, stdout);
-                fwrite(h264_data.data(), 1, sz, stdout);
-                fflush(stdout);
-                tcp_broadcast_frame(h264_data);
-                prev_h264.swap(h264_data);
-                frames++;
-            }
+        if (h264_data.empty()) { skipped++; continue; }
+
+        // Frame differ on H.264 data
+        bool unchanged = prev_h264.size() == h264_data.size()
+                      && ch::frames_equal(prev_h264.data(), h264_data.data(), h264_data.size());
+
+        uint32_t sz = unchanged ? 0 : (uint32_t)h264_data.size();
+        fwrite(&sz, 4, 1, stdout);
+        if (!unchanged) {
+            fwrite(h264_data.data(), 1, sz, stdout);
+            prev_h264 = std::move(h264_data);
+            frames++;
+        } else { skipped++; }
+        fflush(stdout);
+
+        // TCP broadcast
+        if (unchanged) {
+            uint32_t zero = 0;
+            uint8_t zhdr[4]; ch::w32_le(zhdr, zero);
+            std::lock_guard<std::mutex> lk(g_tcp.mtx);
+            for (auto& c : g_tcp.clients) { send(c, (char*)zhdr, 4, 0); }
+        } else {
+            tcp_broadcast_frame(prev_h264);
         }
 
         // FPS log
-        if (frames > 0 && frames % 60 == 0) {
+        if (frames > 0 && frames % 120 == 0) {
             QueryPerformanceCounter(&t1);
             double elapsed = (double)(t1.QuadPart - t0.QuadPart) / freq.QuadPart;
-            fprintf(stderr, "[h264] %d frames in %.2fs = %.1f fps (method=%s)\n",
-                frames, elapsed, frames / elapsed, method);
+            fprintf(stderr, "[h264] %d frames in %.1fs = %.1f fps\n",
+                frames, elapsed, frames / elapsed);
         }
-        if (!got_output) Sleep(1);
     }
 
-    // ── Cleanup ──────────────────────────────────────────
     encoder.shutdown();
-    framepool_shutdown();
+    g_wgc.shutdown();
     tcp_stop();
     fprintf(stderr, "[h264] exit: %d frames, %d skipped\n", frames, skipped);
     return 0;
