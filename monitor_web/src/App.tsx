@@ -530,7 +530,7 @@ function LogPanel({ compact }: { compact?: boolean }) {
   // Full-card mode (Log tab): each file is a standalone card like SettingsCard
   if (!compact) {
     return (
-      <div className="flex-1 overflow-y-auto p-6 space-y-3">
+      <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-3">
         {/* Current session card */}
         <div className="bg-bg-secondary rounded-xl ring-1 ring-inset ring-border overflow-hidden">
           <div className="flex items-center justify-between px-3 py-2">
@@ -857,7 +857,7 @@ export default function App() {
               </div>
             </div>
           )}
-          {tab === 'Log' && <div className="flex-1"><LogPanel /></div>}
+          {tab === 'Log' && <LogPanel />}
           {tab === 'Settings' && <SettingsPage forceMethod={forceMethod} setForceMethod={setForceMethod} />}
           <BottomBar running={running} fps={0} lat={0} />
         </div>
