@@ -506,7 +506,7 @@ function addLog(msg: string) { gLogs = [...gLogs, { ts: new Date().toLocaleTimeS
 // ═══ Log Panel ───
 type HistoryFile = { name: string; lines: string[] }
 
-function LogPanel() {
+function LogPanel({ compact }: { compact?: boolean }) {
   const [expanded, setExpanded] = useState(true)
   const [logs, setLogs] = useState(gLogs)
   const [historyFiles, setHistoryFiles] = useState<HistoryFile[]>([])
@@ -525,8 +525,70 @@ function LogPanel() {
     })()
   }, [historyLoaded])
 
-  const currentReversed = [...logs].reverse().slice(0, 50)
+  const currentReversed = [...logs].reverse().slice(0, compact ? 50 : 200)
 
+  // Full-card mode (Log tab): each file is a standalone card like SettingsCard
+  if (!compact) {
+    return (
+      <div className="flex-1 overflow-y-auto p-6 space-y-3">
+        {/* Current session card */}
+        <div className="bg-bg-secondary rounded-xl ring-1 ring-inset ring-border overflow-hidden">
+          <div className="flex items-center justify-between px-3 py-2">
+            <div className="flex items-center gap-2">
+              <FileText className="w-4 h-4 text-accent" />
+              <span className="text-sm font-medium text-text-primary">Current Session</span>
+              <span className="text-xs text-text-muted">({currentReversed.length})</span>
+            </div>
+            <Tooltip text="清空当前日志"><button onClick={() => { gLogs = []; gLogListeners.forEach(f => f()) }}
+              className="p-1 rounded-md text-text-secondary hover:text-error hover:bg-bg-tertiary transition-colors"><Trash2 className="w-3.5 h-3.5" /></button></Tooltip>
+          </div>
+          <div className="border-t border-border" />
+          <div className="max-h-[400px] overflow-y-auto p-4 font-mono text-xs space-y-0.5">
+            {currentReversed.length === 0
+              ? <div className="text-text-muted text-center py-4">No current logs</div>
+              : currentReversed.map((l, i) => (
+                  <div key={`cur-${i}`} className="text-text-secondary"><span className="text-text-muted">[{l.ts}]</span> {l.msg}</div>
+                ))
+            }
+          </div>
+        </div>
+
+        {/* History file cards */}
+        {historyFiles.map((f, fi) => {
+          const open = openFiles.has(fi)
+          return (
+            <div key={f.name} className="bg-bg-secondary rounded-xl ring-1 ring-inset ring-border overflow-hidden">
+              <div role="button" tabIndex={0} onClick={() => { const s = new Set(openFiles); open ? s.delete(fi) : s.add(fi); setOpenFiles(s) }}
+                onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){(e.currentTarget as HTMLElement).click()}}}
+                className="w-full flex items-center justify-between px-3 py-2 hover:bg-bg-hover cursor-pointer transition-colors outline-none">
+                <div className="flex items-center gap-2 min-w-0">
+                  <FileText className="w-4 h-4 text-text-muted shrink-0" />
+                  <span className="text-sm font-medium text-text-primary truncate">{f.name}</span>
+                  <span className="text-xs text-text-muted shrink-0">{f.lines.length} lines</span>
+                </div>
+                <ChevronDown className={`w-4 h-4 text-text-muted transition-transform duration-150 shrink-0 ${open?'rotate-180':''}`} />
+              </div>
+              {open && (
+                <>
+                  <div className="border-t border-border" />
+                  <div className="max-h-[400px] overflow-y-auto p-4 font-mono text-xs space-y-0.5">
+                    {f.lines.map((l, i) => (
+                      <div key={i} className="text-text-muted">{l}</div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )
+        })}
+        {currentReversed.length === 0 && historyFiles.length === 0 && (
+          <div className="flex items-center justify-center py-12 text-sm text-text-muted">No logs yet</div>
+        )}
+      </div>
+    )
+  }
+
+  // Compact mode (right sidebar): current session + tile list
   return (
     <div className="bg-bg-secondary rounded-xl ring-1 ring-inset ring-border overflow-hidden flex flex-col min-h-0">
       <div role="button" tabIndex={0} onClick={() => setExpanded(!expanded)} onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){(e.currentTarget as HTMLElement).click()}}}
@@ -551,7 +613,6 @@ function LogPanel() {
         <div className="overflow-hidden min-h-0">
           <div className="border-t border-border" />
           <div className="h-[260px] overflow-y-auto flex flex-col">
-            {/* Current session */}
             {currentReversed.length > 0 && (
               <div className="px-3 pt-2 pb-1">
                 <div className="text-xs text-text-muted font-medium mb-1">Current Session</div>
@@ -562,7 +623,6 @@ function LogPanel() {
                 </div>
               </div>
             )}
-            {/* History tiles */}
             {historyFiles.map((f, fi) => {
               const open = openFiles.has(fi)
               return (
@@ -825,7 +885,7 @@ export default function App() {
               </div>
             </div>
           )}
-          {tab === 'Log' && <div className="flex-1 overflow-hidden px-6"><LogPanel /></div>}
+          {tab === 'Log' && <div className="flex-1 overflow-hidden"><LogPanel /></div>}
           {tab === 'Settings' && <SettingsPage forceMethod={forceMethod} setForceMethod={setForceMethod} />}
           <BottomBar running={running} fps={0} lat={0} />
         </div>
@@ -841,7 +901,7 @@ export default function App() {
               setSelWindow({ title: ' Entire Desktop', category: 'desktop', hwnd: 0 })
               addLog('Disconnected, back to desktop')
             }} />
-            <LogPanel />
+            <LogPanel compact />
             <ScreenshotPanel selWin={selWindow} screenRatio={screenRatio} forceMethod={forceMethod} setForceMethod={setForceMethod} />
           </div>
         )}
