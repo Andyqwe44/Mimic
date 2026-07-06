@@ -56,7 +56,7 @@ function ThemeBtn() {
   const [dark, setDark] = useState(false)
   return (
     <Tooltip text={dark ? "切换亮色主题" : "切换暗色主题"}>
-      <button onClick={() => { setDark(!dark); document.documentElement.classList.toggle('dark', !dark) }}
+      <button onClick={() => { const d = !dark; setDark(d); document.documentElement.classList.toggle('dark', d); addLog(`Theme: ${d ? 'dark' : 'light'}`) }}
         className="p-2 rounded-md hover:bg-bg-hover transition-colors">
         {dark ? <Sun className="w-4 h-4 text-text-secondary" /> : <Moon className="w-4 h-4 text-text-secondary" />}
       </button>
@@ -111,7 +111,7 @@ function TopBar({ tab, setTab, running, onStart, onStop }: {
     <div className="flex items-center h-10 bg-bg-secondary border-b border-border select-none shrink-0">
       <div className="flex-1 flex items-center h-full overflow-x-auto">
         {tabs.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)}
+          <button key={t.id} onClick={() => { setTab(t.id); addLog(`Tab: ${t.label}`) }}
             className={`group flex items-center gap-1.5 h-full px-3 cursor-pointer border-r border-border min-w-[100px] transition-colors
               ${t.id === tab ? 'bg-bg-primary text-accent border-b-[3px] border-b-accent' : 'bg-bg-tertiary text-text-secondary hover:bg-bg-hover border-b-[3px] border-b-transparent'}`}>
             {t.icon}
@@ -121,12 +121,12 @@ function TopBar({ tab, setTab, running, onStart, onStop }: {
       </div>
       <div className="flex items-center gap-1 px-2">
         {running
-          ? <ActionBtn icon={<Square className="w-3.5 h-3.5" />} label="Stop" title="停止所有运行中的任务" variant="danger" onClick={onStop} />
-          : <ActionBtn icon={<Play className="w-3.5 h-3.5" />} label="Start" title="启动agent任务" variant="primary" onClick={onStart} />
+          ? <ActionBtn icon={<Square className="w-3.5 h-3.5" />} label="Stop" title="停止所有运行中的任务" variant="danger" onClick={() => { onStop(); addLog('Action: Stop') }} />
+          : <ActionBtn icon={<Play className="w-3.5 h-3.5" />} label="Start" title="启动agent任务" variant="primary" onClick={() => { onStart(); addLog('Action: Start') }} />
         }
         <div className="mx-1 h-4 w-px bg-border" />
         <ThemeBtn />
-        <IconBtn title="设置" icon={<Settings className="w-4 h-4" />} onClick={() => setTab('Settings')} />
+        <IconBtn title="设置" icon={<Settings className="w-4 h-4" />} onClick={() => { setTab('Settings'); addLog('Tab: Settings') }} />
       </div>
     </div>
   )
@@ -601,9 +601,8 @@ function LogPanel({ compact }: { compact?: boolean }) {
         <div className="flex items-center gap-0.5">
           <Tooltip text="清空日志">
             <button onClick={e => { e.stopPropagation(); gLogs = []; gLogListeners.forEach(f => f()) }}
-              className="p-1 rounded-md text-text-secondary hover:text-error hover:bg-bg-tertiary transition-colors">
+              className="p-1 rounded-md text-text-secondary hover:text-error hover:bg-bg-tertiary transition-colors" onClick={e => { e.stopPropagation(); addLog('Action: clear logs'); gLogs = []; gLogListeners.forEach(f => f()) }}>
               <Trash2 className="w-3.5 h-3.5" />
-            </button>
           </Tooltip>
           <ChevronDown className={`w-4 h-4 text-text-muted transition-transform duration-150 ${expanded?'rotate-180':''}`} />
         </div>
@@ -674,7 +673,7 @@ function SettingsPage({ forceMethod, setForceMethod }: { forceMethod: string; se
         <div className="flex items-center gap-3 mb-2"><label className="text-sm text-text-secondary w-28 shrink-0">Server Host</label><Tooltip text="AI模型服务器地址"><input defaultValue="127.0.0.1" className="flex-1 h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent" /></Tooltip></div>
         <div className="flex items-center gap-3 mb-2"><label className="text-sm text-text-secondary w-28 shrink-0">Server Port</label><Tooltip text="AI模型服务端口"><input defaultValue="9999" className="flex-1 h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent" /></Tooltip></div>
         <div className="flex items-center gap-3 mb-2"><label className="text-sm text-text-secondary w-28 shrink-0">Capture FPS</label><Tooltip text="截屏预览帧率"><input defaultValue="20" className="w-20 h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent" /></Tooltip></div>
-        <div className="flex items-center gap-3"><label className="text-sm text-text-secondary w-28 shrink-0">Method</label><Tooltip text="显式选择捕获技术方案，选 Auto 则自动回退"><select value={forceMethod} onChange={e => setForceMethod(e.target.value)} className="flex-1 h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent cursor-pointer">{methods.map(m => <option key={m.v} value={m.v}>{m.l}</option>)}</select></Tooltip></div>
+        <div className="flex items-center gap-3"><label className="text-sm text-text-secondary w-28 shrink-0">Method</label><Tooltip text="显式选择捕获技术方案，选 Auto 则自动回退"><select value={forceMethod} onChange={e => { setForceMethod(e.target.value); addLog(`Setting: capture method = ${e.target.value}`) }} className="flex-1 h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent cursor-pointer">{methods.map(m => <option key={m.v} value={m.v}>{m.l}</option>)}</select></Tooltip></div>
       </SettingsCard>
 
       <SettingsCard icon={<Sun className="w-4 h-4 text-text-secondary" />} title="Theme">
@@ -857,7 +856,7 @@ export default function App() {
               </div>
             </div>
           )}
-          {tab === 'Log' && <div className="flex-1 overflow-hidden"><LogPanel /></div>}
+          {tab === 'Log' && <div className="flex-1"><LogPanel /></div>}
           {tab === 'Settings' && <SettingsPage forceMethod={forceMethod} setForceMethod={setForceMethod} />}
           <BottomBar running={running} fps={0} lat={0} />
         </div>
