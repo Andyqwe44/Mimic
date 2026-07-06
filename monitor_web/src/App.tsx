@@ -504,33 +504,28 @@ let gLogListeners: (() => void)[] = []
 function addLog(msg: string) { gLogs = [...gLogs, { ts: new Date().toLocaleTimeString(), msg }]; gLogListeners.forEach(f => f()) }
 
 // ═══ Log Panel ───
+type HistoryFile = { name: string; lines: string[] }
+
 function LogPanel() {
   const [expanded, setExpanded] = useState(true)
   const [logs, setLogs] = useState(gLogs)
-  const [historyLines, setHistoryLines] = useState<string[]>([])
+  const [historyFiles, setHistoryFiles] = useState<HistoryFile[]>([])
   const [historyLoaded, setHistoryLoaded] = useState(false)
+  const [openFiles, setOpenFiles] = useState<Set<number>>(new Set())
   useEffect(() => { const fn = () => setLogs([...gLogs]); gLogListeners.push(fn); return () => { gLogListeners = gLogListeners.filter(f => f !== fn) } }, [])
 
-  // Load historical logs on mount
   useEffect(() => {
     if (historyLoaded) return
     ;(async () => {
       try {
-        const files = await invoke<{name:string;lines:string[]}[]>('read_logs', { maxFiles: 5 })
-        const allLines: string[] = []
-        for (const f of files) {
-          allLines.push(`── ${f.name} ──`)
-          for (const l of f.lines) allLines.push(l)
-        }
-        setHistoryLines(allLines)
+        const files = await invoke<HistoryFile[]>('read_logs', { maxFiles: 5 })
+        setHistoryFiles(files)
       } catch (_) {}
       setHistoryLoaded(true)
     })()
   }, [historyLoaded])
 
-  const currentReversed = [...logs].reverse().slice(0, 100)
-  const currentCount = currentReversed.length
-  const histCount = historyLines.length
+  const currentReversed = [...logs].reverse().slice(0, 50)
 
   return (
     <div className="bg-bg-secondary rounded-xl ring-1 ring-inset ring-border overflow-hidden flex flex-col min-h-0">
@@ -539,7 +534,7 @@ function LogPanel() {
         <div className="flex items-center gap-2">
           <FileText className="w-4 h-4 text-text-secondary" />
           <span className="text-sm font-medium text-text-primary">Log</span>
-          <span className="text-xs text-text-muted">{currentCount + histCount}</span>
+          <span className="text-xs text-text-muted">{currentReversed.length + historyFiles.length}</span>
         </div>
         <div className="flex items-center gap-0.5">
           <Tooltip text="清空日志">
@@ -555,24 +550,45 @@ function LogPanel() {
         style={{ gridTemplateRows: expanded ? '1fr' : '0fr' }}>
         <div className="overflow-hidden min-h-0">
           <div className="border-t border-border" />
-          <div className="h-[200px] overflow-y-auto p-4 flex flex-col">
-            {currentCount === 0 && histCount === 0 ? (
-              <div className="flex items-center justify-center h-full text-sm text-text-muted">No logs</div>
-            ) : (
-              <div className="space-y-0.5 font-mono text-xs text-text-secondary pt-1">
-                {/* Current session (newest first) */}
-                {currentReversed.map((l, i) => (
-                  <div key={`cur-${i}`}><span className="text-text-muted">[{l.ts}]</span> {l.msg}</div>
-                ))}
-                {/* Separator */}
-                {histCount > 0 && currentCount > 0 && (
-                  <div className="text-text-muted text-xs pt-2 pb-1 border-t border-border mt-1">─ History ─</div>
-                )}
-                {/* Historical logs */}
-                {historyLines.map((l, i) => (
-                  <div key={`hist-${i}`} className={l.startsWith('── ') ? 'text-accent text-xs pt-1' : 'text-text-muted'}>{l}</div>
-                ))}
+          <div className="h-[260px] overflow-y-auto flex flex-col">
+            {/* Current session */}
+            {currentReversed.length > 0 && (
+              <div className="px-3 pt-2 pb-1">
+                <div className="text-xs text-text-muted font-medium mb-1">Current Session</div>
+                <div className="space-y-0.5 font-mono text-xs">
+                  {currentReversed.map((l, i) => (
+                    <div key={`cur-${i}`} className="text-text-secondary"><span className="text-text-muted">[{l.ts}]</span> {l.msg}</div>
+                  ))}
+                </div>
               </div>
+            )}
+            {/* History tiles */}
+            {historyFiles.map((f, fi) => {
+              const open = openFiles.has(fi)
+              return (
+                <div key={f.name} className="border-t border-border">
+                  <div role="button" tabIndex={0} onClick={() => { const s = new Set(openFiles); open ? s.delete(fi) : s.add(fi); setOpenFiles(s) }}
+                    onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){(e.currentTarget as HTMLElement).click()}}}
+                    className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-bg-hover cursor-pointer transition-colors outline-none">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <FileText className="w-3 h-3 text-text-muted shrink-0" />
+                      <span className="text-xs text-text-secondary truncate">{f.name}</span>
+                      <span className="text-xs text-text-muted">({f.lines.length})</span>
+                    </div>
+                    <ChevronDown className={`w-3 h-3 text-text-muted transition-transform duration-150 shrink-0 ${open?'rotate-180':''}`} />
+                  </div>
+                  {open && (
+                    <div className="px-3 pb-2 font-mono text-xs space-y-0.5 max-h-[160px] overflow-y-auto">
+                      {f.lines.map((l, i) => (
+                        <div key={i} className="text-text-muted">{l}</div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+            {currentReversed.length === 0 && historyFiles.length === 0 && (
+              <div className="flex items-center justify-center h-full text-sm text-text-muted">No logs</div>
             )}
           </div>
         </div>
