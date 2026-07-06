@@ -120,11 +120,24 @@ Full desktop capture at monitor refresh rate. Used via `bench_send.exe 0`.
 Single-file React app. Key components:
 - `TopBar` — MXU-style tabs: Dashboard | Monitor | Log + Start/Stop + Theme + Settings
 - `ConnectionPanel` — Fixed-width layout, `justify-between`. Title(144px)+X(32px) left, Select right. IP(184px) left, Port(80px) right
-- `ScreenshotPanel` — Canvas rendering (BGRA→RGBA, no BMP). Dynamic `aspectRatio` from screen resolution. Play/Stop streaming + Camera single-shot
-- `LogPanel` — Reversed log list, max 100 entries, clear button
+- `ScreenshotPanel` — Canvas rendering (BGRA→RGBA, no BMP). Dynamic `aspectRatio` from screen resolution. Play/Stop streaming + Camera single-shot. Capture method selector in header.
+- `LogPanel` — Dual mode: compact right-sidebar shows current session (max 100); Log tab shows full-card layout with historical files from disk via `read_logs`
 - `DashboardView` — System info, Capture Pipeline, Update (check + source selector), Resources
-- `SettingsPage` — `SettingsCard` collapsible cards: Connection, Theme, Model, Update, Log, Project
+- `SettingsPage` — `SettingsCard` collapsible cards: Connection (with capture method selector), Theme, Model, Update, Log, Project
 - `WindowPickerModal` — Window/desktop/process selection with search
+
+### Capture method selector
+User can explicitly choose capture method in Settings → Connection:
+- `Auto` — current fallback chain (WGC → GetWindowDC → PrintWindow → ScreenBitBlt)
+- `WGC` — GPU FramePool (stream via subprocess, single-frame via `--single`)
+- `DXGI` — desktop GDI BitBlt
+- `GDI` — GetWindowDC only, no solid-color check
+- `PrintWindow` / `ScreenBlt` — single method, no fallback
+
+Method flows as single variable `forceMethod` through: App state → ScreenshotPanel props → invoke calls → Rust backend. All user actions logged via `addLog()`.
+
+### User action logging
+Every interaction logged: tab switches, Start/Stop, theme toggle, method selection, capture preview, screenshot, clear logs. Log tab loads historical `agent_*.log` files as full-card tiles via `read_logs` Rust command.
 
 ### MXU-style design patterns
 - Cards: `bg-bg-secondary rounded-xl ring-1 ring-inset ring-border overflow-hidden`
@@ -141,15 +154,18 @@ Single-file React app. Key components:
 
 ### Key commands
 - `list_windows` / `list_processes` — Win32 enumeration (0ms)
-- `capture_window` / `capture_single` — Single-frame GDI chain
-- `capture_stream_start/stop` — Stream preview (WGC or GDI)
+- `capture_window(hwnd, method)` — Single-frame. Auto uses 3-method chain; explicit method bypasses fallback
+- `capture_stream_start(app, hwnd, tcp_port, method)` — Stream preview. WGC subprocess or GDI loop. Explicit method forces specific capture path.
 - `stream_poll` — Returns JSON `{p: base64, w, h, m: method}` for Canvas
 - `highlight_window` — Yellow border overlay on target window
 - `screen_info` — Returns `{w, h}` for screen resolution
+- `read_logs(max_files)` — Reads newest N `agent_*.log` files, returns `[{name, lines}]`
 - `h264_stream_start/stop` — H.264 GPU encode (broken on AMD)
 
 ### WGC integration
-`capture_stream_start(hwnd)` checks `find_wgc_exe()` → spawns `capture_wgc.exe --stream --scale 1280` → reads BGRA frames from stdout. Falls back to GDI if exe not found or hwnd=0.
+Stream: `capture_stream_start(hwnd, method="wgc")` spawns `capture_wgc.exe --stream --scale 1280` → reads BGRA frames from stdout.
+Single-frame: `capture_window(hwnd, method="wgc")` spawns `capture_wgc.exe --single --scale 1280` → reads one frame.
+Falls back to GDI if exe not found and method is "auto". If method explicitly "wgc" and exe missing → returns error.
 
 ### Yellow border overlay
 - 4 thin STATIC popup windows (top/bottom/left/right, 3px, yellow GDI FillRect)

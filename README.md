@@ -89,13 +89,23 @@ npm run tauri build                      # 生产 .exe
 ### 页面
 - **Dashboard** — 系统信息、采集管线、更新检查、资源配置
 - **Monitor** — Agent 控制（Start/Stop）
-- **Log** — 实时日志流（最近100条）
-- **Settings** — 连接、主题、模型、日志可折叠卡片
+- **Log** — 当前会话 + 历史日志文件磁贴（每个 `agent_*.log` 独立卡片，可折叠）
+- **Settings** — 连接（含捕获方法选择器）、主题、模型、日志可折叠卡片
 
 ### 右侧控制栏 (MXU-style)
 - **Connection** — 窗口选择 + IP/Port，固定宽度布局
-- **Log** — 可折叠实时日志，带清空按钮
-- **Screenshot** — 实时预览（Canvas RGBA 直显），单帧截图，动态屏幕比例
+- **Log** — 紧凑模式：当前会话日志（最近100条）+ 清空按钮
+- **Screenshot** — 实时预览（Canvas RGBA 直显）+ 捕获方法选择器 + 单帧截图，动态屏幕比例
+
+### 捕获方法
+设置 → Connection → Method 可显式选择：
+- **Auto** — 自动回退链（WGC → GetWindowDC → PrintWindow → ScreenBitBlt）
+- **WGC** — GPU FramePool（流用 `--stream`，单帧用 `--single`）
+- **DXGI** — 桌面 GDI BitBlt
+- **GDI** / **PrintWindow** / **ScreenBlt** — 单一方法，无回退，无纯色检测
+
+### 用户操作日志
+所有交互记录到前端 Log：Tab 切换、Start/Stop、主题、方法选择、截图/预览。Log 标签页通过 `read_logs` 加载历史 `agent_*.log` 文件，每个文件为独立可折叠磁贴。
 
 ## 截图技术
 
@@ -150,3 +160,4 @@ L2: 策略推理 — z + 动作历史 → Transformer → 动作 tokens。
 ## 已知限制
 
 - 覆盖窗口崩溃时可能残留（黄色边框 STATIC 窗口无父窗口清理）。
+- WGC 单帧截图通过子进程 `--single` 实现，首次调用有 ~300ms 启动延迟。
