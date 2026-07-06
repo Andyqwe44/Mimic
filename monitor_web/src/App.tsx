@@ -51,12 +51,6 @@ function Tooltip({ text, children }: { text: string; children: React.ReactElemen
 const MIN_LEFT_WIDTH = 360
 const DEFAULT_RIGHT_WIDTH = 324
 
-// ═══ Shared log state ───
-type LogEntry = { ts: string; msg: string }
-let gLogs: LogEntry[] = []
-let gLogListeners: (() => void)[] = []
-function addLog(msg: string) { gLogs = [...gLogs, { ts: new Date().toLocaleTimeString(), msg }]; gLogListeners.forEach(f => f()) }
-
 // ═══ Theme btn ───
 function ThemeBtn() {
   const [dark, setDark] = useState(false)
@@ -503,12 +497,41 @@ function ScreenshotPanel({ selWin, screenRatio, forceMethod, setForceMethod }: {
 }
 
 
+// ═══ Shared log state ───
+type LogEntry = { ts: string; msg: string }
+let gLogs: LogEntry[] = []
+let gLogListeners: (() => void)[] = []
+function addLog(msg: string) { gLogs = [...gLogs, { ts: new Date().toLocaleTimeString(), msg }]; gLogListeners.forEach(f => f()) }
+
 // ═══ Log Panel ───
 function LogPanel() {
   const [expanded, setExpanded] = useState(true)
   const [logs, setLogs] = useState(gLogs)
+  const [historyLines, setHistoryLines] = useState<string[]>([])
+  const [historyLoaded, setHistoryLoaded] = useState(false)
   useEffect(() => { const fn = () => setLogs([...gLogs]); gLogListeners.push(fn); return () => { gLogListeners = gLogListeners.filter(f => f !== fn) } }, [])
-  const reversed = [...logs].reverse()
+
+  // Load historical logs on mount
+  useEffect(() => {
+    if (historyLoaded) return
+    ;(async () => {
+      try {
+        const files = await invoke<{name:string;lines:string[]}[]>('read_logs', { maxFiles: 5 })
+        const allLines: string[] = []
+        for (const f of files) {
+          allLines.push(`── ${f.name} ──`)
+          for (const l of f.lines) allLines.push(l)
+        }
+        setHistoryLines(allLines)
+      } catch (_) {}
+      setHistoryLoaded(true)
+    })()
+  }, [historyLoaded])
+
+  const currentReversed = [...logs].reverse().slice(0, 100)
+  const currentCount = currentReversed.length
+  const histCount = historyLines.length
+
   return (
     <div className="bg-bg-secondary rounded-xl ring-1 ring-inset ring-border overflow-hidden flex flex-col min-h-0">
       <div role="button" tabIndex={0} onClick={() => setExpanded(!expanded)} onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){(e.currentTarget as HTMLElement).click()}}}
@@ -516,7 +539,7 @@ function LogPanel() {
         <div className="flex items-center gap-2">
           <FileText className="w-4 h-4 text-text-secondary" />
           <span className="text-sm font-medium text-text-primary">Log</span>
-          <span className="text-xs text-text-muted">{logs.length}</span>
+          <span className="text-xs text-text-muted">{currentCount + histCount}</span>
         </div>
         <div className="flex items-center gap-0.5">
           <Tooltip text="清空日志">
@@ -532,13 +555,22 @@ function LogPanel() {
         style={{ gridTemplateRows: expanded ? '1fr' : '0fr' }}>
         <div className="overflow-hidden min-h-0">
           <div className="border-t border-border" />
-          <div className="h-[180px] overflow-y-auto p-4 flex flex-col">
-            {reversed.length === 0 ? (
+          <div className="h-[200px] overflow-y-auto p-4 flex flex-col">
+            {currentCount === 0 && histCount === 0 ? (
               <div className="flex items-center justify-center h-full text-sm text-text-muted">No logs</div>
             ) : (
-              <div className="space-y-1 font-mono text-xs text-text-secondary pt-1">
-                {reversed.slice(0, 100).map((l, i) => (
-                  <div key={i}><span className="text-text-muted">[{l.ts}]</span> {l.msg}</div>
+              <div className="space-y-0.5 font-mono text-xs text-text-secondary pt-1">
+                {/* Current session (newest first) */}
+                {currentReversed.map((l, i) => (
+                  <div key={`cur-${i}`}><span className="text-text-muted">[{l.ts}]</span> {l.msg}</div>
+                ))}
+                {/* Separator */}
+                {histCount > 0 && currentCount > 0 && (
+                  <div className="text-text-muted text-xs pt-2 pb-1 border-t border-border mt-1">─ History ─</div>
+                )}
+                {/* Historical logs */}
+                {historyLines.map((l, i) => (
+                  <div key={`hist-${i}`} className={l.startsWith('── ') ? 'text-accent text-xs pt-1' : 'text-text-muted'}>{l}</div>
                 ))}
               </div>
             )}

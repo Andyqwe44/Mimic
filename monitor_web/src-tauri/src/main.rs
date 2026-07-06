@@ -1434,6 +1434,41 @@ fn screen_info() -> serde_json::Value {
     }
 }
 
+#[derive(Clone, Serialize)]
+struct LogFile { name: String, lines: Vec<String> }
+
+#[tauri::command]
+fn read_logs(max_files: usize) -> Vec<LogFile> {
+    let log_dir = find_project_log_dir();
+    let mut result = Vec::new();
+
+    if let Ok(entries) = std::fs::read_dir(&log_dir) {
+        let mut log_files: Vec<_> = entries
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with("agent_") && e.file_name().to_string_lossy().ends_with(".log"))
+            .collect();
+        // Sort by modification time, newest first
+        log_files.sort_by_key(|e| {
+            e.metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+        });
+        log_files.reverse(); // newest first
+        log_files.truncate(max_files);
+
+        for entry in log_files {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if let Ok(content) = std::fs::read_to_string(entry.path()) {
+                let lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+                if !lines.is_empty() {
+                    result.push(LogFile { name, lines });
+                }
+            }
+        }
+    }
+    result
+}
+
 fn main() {
     init_log(5);  // keep max 5 log files
     dlog!("Starting Tauri application...");
@@ -1447,7 +1482,7 @@ fn main() {
             capture_single, capture_window,
             capture_stream_start, capture_stream_stop, stream_poll,
             h264_stream_start, h264_stream_stop, h264_poll, h264_init_ready,
-            highlight_window, screen_info
+            highlight_window, screen_info, read_logs
         ])
         .setup(|_app| {
             dlog!("Tauri setup complete, window created");
