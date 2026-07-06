@@ -349,14 +349,13 @@ function ConnectionPanel({ onSelect, onDisconnect }: { onSelect: (w: WindowInfo)
 }
 
 // ═══ Screenshot Panel ───
-function ScreenshotPanel({ selWin, screenRatio }: { selWin?: WindowInfo; screenRatio: number }) {
+function ScreenshotPanel({ selWin, screenRatio, forceMethod, setForceMethod }: { selWin?: WindowInfo; screenRatio: number; forceMethod: string; setForceMethod: (m: string) => void }) {
   const [expanded, setExpanded] = useState(true)
   const [previewing, setPreviewing] = useState(false)
   const [imgSrc, setImgSrc] = useState('')       // single-frame PNG (Camera btn)
   const [imgStyle, setImgStyle] = useState<React.CSSProperties>({})
   const [fps, setFps] = useState(0)
   const [capMethod, setCapMethod] = useState('')
-  const [forceMethod, setForceMethod] = useState('auto')
   const previewingRef = useRef(false)
   const framesRef = useRef(0)
   const lastFpsRef = useRef(Date.now())
@@ -451,18 +450,7 @@ function ScreenshotPanel({ selWin, screenRatio }: { selWin?: WindowInfo; screenR
           {previewing && <span className="text-xs text-accent">{fps} FPS</span>}
           {capMethod && !previewing && <span className="text-xs text-success">{capMethod}</span>}
         </div>
-        <div className="flex items-center gap-1.5">
-          <Tooltip text="选择捕获技术方案">
-            <select value={forceMethod} onChange={e => { e.stopPropagation(); setForceMethod(e.target.value) }}
-              className="h-6 rounded-md border border-border bg-bg-primary px-1.5 text-xs text-text-secondary outline-none cursor-pointer hover:border-accent transition-colors">
-              <option value="auto">Auto</option>
-              <option value="wgc">WGC</option>
-              <option value="dxgi">DXGI</option>
-              <option value="gdi">GDI</option>
-              <option value="printwindow">PrintWindow</option>
-              <option value="screenbitblt">ScreenBlt</option>
-            </select>
-          </Tooltip>
+        <div className="flex items-center gap-0.5">
           <Tooltip text="单帧截图">
             <button onClick={e => { e.stopPropagation(); (async () => {
               const hwnd = selWin?.hwnd ?? 0;
@@ -542,11 +530,11 @@ function LogPanel() {
         style={{ gridTemplateRows: expanded ? '1fr' : '0fr' }}>
         <div className="overflow-hidden min-h-0">
           <div className="border-t border-border" />
-          <div className="h-[180px] overflow-y-auto p-3 flex flex-col">
+          <div className="h-[180px] overflow-y-auto p-4 flex flex-col">
             {reversed.length === 0 ? (
               <div className="flex items-center justify-center h-full text-sm text-text-muted">No logs</div>
             ) : (
-              <div className="space-y-1 font-mono text-xs text-text-secondary pt-0.5">
+              <div className="space-y-1 font-mono text-xs text-text-secondary pt-1">
                 {reversed.slice(0, 100).map((l, i) => (
                   <div key={i}><span className="text-text-muted">[{l.ts}]</span> {l.msg}</div>
                 ))}
@@ -586,16 +574,25 @@ function SettingsCard({ icon, title, defaultExpanded, children }: {
 }
 
 // ═══ Settings Page ═══
-function SettingsPage() {
+function SettingsPage({ forceMethod, setForceMethod }: { forceMethod: string; setForceMethod: (m: string) => void }) {
   const colors = ['#3B82F6','#8B5CF6','#EC4899','#F59E0B','#10B981','#EF4444']
   const [accent, setAccent] = useState('#3B82F6')
+  const methods = [
+    { v: 'auto',          l: 'Auto (auto-detect)' },
+    { v: 'wgc',           l: 'WGC (GPU FramePool)' },
+    { v: 'dxgi',          l: 'DXGI (Desktop Duplication)' },
+    { v: 'gdi',           l: 'GDI (GetWindowDC)' },
+    { v: 'printwindow',   l: 'PrintWindow' },
+    { v: 'screenbitblt',  l: 'Screen BitBlt' },
+  ]
   return (
     <div className="flex-1 overflow-y-auto p-6 space-y-3">
       <SettingsCard icon={<MonitorUp className="w-4 h-4 text-text-secondary" />} title="Connection">
         <div className="flex items-center gap-3 mb-2"><label className="text-sm text-text-secondary w-28 shrink-0">Window Title</label><Tooltip text="要捕获的游戏窗口标题"><input defaultValue="Tic Tac Toe" className="flex-1 h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent" /></Tooltip></div>
         <div className="flex items-center gap-3 mb-2"><label className="text-sm text-text-secondary w-28 shrink-0">Server Host</label><Tooltip text="AI模型服务器地址"><input defaultValue="127.0.0.1" className="flex-1 h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent" /></Tooltip></div>
         <div className="flex items-center gap-3 mb-2"><label className="text-sm text-text-secondary w-28 shrink-0">Server Port</label><Tooltip text="AI模型服务端口"><input defaultValue="9999" className="flex-1 h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent" /></Tooltip></div>
-        <div className="flex items-center gap-3"><label className="text-sm text-text-secondary w-28 shrink-0">Capture FPS</label><Tooltip text="截屏预览帧率"><input defaultValue="20" className="w-20 h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent" /></Tooltip></div>
+        <div className="flex items-center gap-3 mb-2"><label className="text-sm text-text-secondary w-28 shrink-0">Capture FPS</label><Tooltip text="截屏预览帧率"><input defaultValue="20" className="w-20 h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent" /></Tooltip></div>
+        <div className="flex items-center gap-3"><label className="text-sm text-text-secondary w-28 shrink-0">Method</label><Tooltip text="显式选择捕获技术方案，选 Auto 则自动回退"><select value={forceMethod} onChange={e => setForceMethod(e.target.value)} className="flex-1 h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent cursor-pointer">{methods.map(m => <option key={m.v} value={m.v}>{m.l}</option>)}</select></Tooltip></div>
       </SettingsCard>
 
       <SettingsCard icon={<Sun className="w-4 h-4 text-text-secondary" />} title="Theme">
@@ -722,6 +719,7 @@ export default function App() {
   const isResizing = useRef(false)
   const [selWindow, setSelWindow] = useState<WindowInfo>({ title: ' Entire Desktop', category: 'desktop', hwnd: 0 })
   const [screenRatio, setScreenRatio] = useState(16/9)
+  const [forceMethod, setForceMethod] = useState('auto')
 
   useEffect(() => {
     (async () => {
@@ -778,7 +776,7 @@ export default function App() {
             </div>
           )}
           {tab === 'Log' && <div className="flex-1 overflow-hidden px-6"><LogPanel /></div>}
-          {tab === 'Settings' && <SettingsPage />}
+          {tab === 'Settings' && <SettingsPage forceMethod={forceMethod} setForceMethod={setForceMethod} />}
           <BottomBar running={running} fps={0} lat={0} />
         </div>
         <Tooltip text={rightCollapsed ? "向右拖拽展开面板" : "拖拽调整面板宽度，向右拖到底可折叠"}>
@@ -794,7 +792,7 @@ export default function App() {
               addLog('Disconnected, back to desktop')
             }} />
             <LogPanel />
-            <ScreenshotPanel selWin={selWindow} screenRatio={screenRatio} />
+            <ScreenshotPanel selWin={selWindow} screenRatio={screenRatio} forceMethod={forceMethod} setForceMethod={setForceMethod} />
           </div>
         )}
       </div>
