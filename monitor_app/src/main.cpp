@@ -70,12 +70,14 @@ struct WebMessageHandler : ComCallbackBase<ICoreWebView2WebMessageReceivedEventH
 static HWND                  g_hwnd = nullptr;
 static ComPtr<ICoreWebView2Controller> g_webviewController;
 static ComPtr<ICoreWebView2> g_webview;
+static ComPtr<ICoreWebView2Environment12> g_env12;
+static ComPtr<ICoreWebView2_17> g_webview17;
 static bool                  g_dev_mode = false;
 
 static constexpr int  DEFAULT_W  = 1280;
 static constexpr int  DEFAULT_H  = 720;
 static constexpr PCWSTR TITLE   = L"Game Agent Monitor";
-static constexpr int  DEV_PORT  = 5173;
+static constexpr int  DEV_PORT  = 1420;
 static constexpr int  PROD_PORT = 8888;
 
 // ── Remaining fwd declarations (referenced before definition) ──
@@ -86,6 +88,7 @@ HRESULT InitWebView2(HWND hwnd);
 int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR lpCmdLine, _In_ int nCmdShow)
 {
     g_dev_mode = (std::string(lpCmdLine).find("--dev") != std::string::npos);
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
     WNDCLASSEXW wc = {};
     wc.cbSize        = sizeof(WNDCLASSEXW);
@@ -154,12 +157,18 @@ HRESULT InitWebView2(HWND hwnd)
         new EnvCreatedHandler([hwnd](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
             if (FAILED(result)) return result;
 
+            // Capture SharedBuffer interfaces
+            env->QueryInterface(IID_PPV_ARGS(&g_env12));
+
             return env->CreateCoreWebView2Controller(hwnd,
                 new ControllerCreatedHandler([hwnd](HRESULT result, ICoreWebView2Controller* ctrl) -> HRESULT {
                     if (FAILED(result)) return result;
 
                     g_webviewController = ctrl;
                     g_webviewController->get_CoreWebView2(&g_webview);
+
+                    // Capture ICoreWebView2_17 for PostSharedBufferToScript
+                    g_webview->QueryInterface(IID_PPV_ARGS(&g_webview17));
 
                     // Register WebMessage handler (replaces Tauri invoke)
                     g_webview->add_WebMessageReceived(new WebMessageHandler(), nullptr);
@@ -179,6 +188,19 @@ HRESULT InitWebView2(HWND hwnd)
                     return S_OK;
                 }));
         }));
+}
+
+// ── SharedBuffer helper (exposed to commands.cpp) ──────────
+void shared_buffer_push_frame(const uint8_t* bgra, int w, int h) {
+    if (!g_env12 || !g_webview17) return;
+    size_t size = (size_t)w * h * 4;
+    ComPtr<ICoreWebView2SharedBuffer> buf;
+    if (FAILED(g_env12->CreateSharedBuffer((UINT)size, &buf))) return;
+    BYTE* dst = nullptr;
+    if (FAILED(buf->get_Buffer(&dst)) || !dst) return;
+    memcpy(dst, bgra, size);
+    buf->Close();
+    g_webview17->PostSharedBufferToScript(buf.Get(), COREWEBVIEW2_SHARED_BUFFER_ACCESS_READ_ONLY, L"{}");
 }
 
 // ── WebMessage bridge (replaces Tauri invoke) ───────────────

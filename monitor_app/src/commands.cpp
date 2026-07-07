@@ -4,8 +4,12 @@
  * WebMessage JSON → dispatch_command → FFI/lib calls → JSON response.
  */
 #define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include "commands.h"
 #include "json_helper.h"
+#include "mjpeg_server.h"
 #include "../../logger/logger.h"
 #include "../../capture/include/capture_methods.h"
 #include "../../capture/include/capture_wgc_ffi.h"
@@ -24,6 +28,9 @@
 #include <cstring>
 
 using Microsoft::WRL::ComPtr;
+
+// Shared by main.cpp — pushed from stream thread
+extern void shared_buffer_push_frame(const uint8_t* bgra, int w, int h);
 
 static constexpr int MAX_PX = 3840 * 2160 * 4;
 
@@ -290,6 +297,82 @@ static std::mutex g_stream_frame_mutex;
 static std::vector<uint8_t> g_stream_frame_pixels;
 static int g_stream_frame_w = 0, g_stream_frame_h = 0;
 
+// ── TCP broadcast server (port 9999, wire protocol) ──────
+static std::mutex g_tcp_mutex;
+static std::vector<SOCKET> g_tcp_clients;
+static SOCKET g_tcp_listen = INVALID_SOCKET;
+static std::thread g_tcp_accept_thread;
+static std::atomic<bool> g_tcp_running{false};
+
+static void tcp_accept_loop() {
+    while (g_tcp_running) {
+        SOCKET c = accept(g_tcp_listen, nullptr, nullptr);
+        if (c == INVALID_SOCKET) {
+            if (g_tcp_running) { Sleep(100); continue; }
+            else break;
+        }
+        int flag = 1;
+        setsockopt(c, IPPROTO_TCP, TCP_NODELAY, (const char*)&flag, sizeof(flag));
+        std::lock_guard<std::mutex> lk(g_tcp_mutex);
+        g_tcp_clients.push_back(c);
+    }
+}
+
+static bool tcp_server_start() {
+    WSADATA wsa;
+    WSAStartup(MAKEWORD(2, 2), &wsa);
+    g_tcp_listen = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (g_tcp_listen == INVALID_SOCKET) return false;
+    int reuse = 1;
+    setsockopt(g_tcp_listen, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse));
+    sockaddr_in addr = {};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(9999);
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (bind(g_tcp_listen, (sockaddr*)&addr, sizeof(addr)) != 0) { closesocket(g_tcp_listen); return false; }
+    listen(g_tcp_listen, SOMAXCONN);
+    g_tcp_running = true;
+    g_tcp_accept_thread = std::thread(tcp_accept_loop);
+    LOG("cmd", "TCP server started on port 9999");
+    return true;
+}
+
+static void tcp_server_stop() {
+    g_tcp_running = false;
+    if (g_tcp_listen != INVALID_SOCKET) { closesocket(g_tcp_listen); g_tcp_listen = INVALID_SOCKET; }
+    if (g_tcp_accept_thread.joinable()) g_tcp_accept_thread.join();
+    std::lock_guard<std::mutex> lk(g_tcp_mutex);
+    for (auto s : g_tcp_clients) closesocket(s);
+    g_tcp_clients.clear();
+    WSACleanup();
+}
+
+static void tcp_broadcast_frame(const uint8_t* bgra, int w, int h) {
+    // Wire protocol: magic(4) + body_size(4 LE) + type_tag(4 LE) + body
+    // type_tag 1 = BGRA: w(4)+h(4)+ch(4)+reserved(4)+pixels(w*h*ch)
+    uint32_t magic = 0x4D415246; // "FRAM"
+    uint32_t body_size = 16 + (uint32_t)(w * h * 4); // 12 header + pixels
+    uint32_t type_tag = 1;
+    uint32_t zero = 0;
+
+    char hdr[12];
+    memcpy(hdr, &magic, 4);
+    memcpy(hdr + 4, &body_size, 4);
+    memcpy(hdr + 8, &type_tag, 4);
+
+    uint32_t frame_hdr[4] = {(uint32_t)w, (uint32_t)h, 4u, 0u};
+
+    std::lock_guard<std::mutex> lk(g_tcp_mutex);
+    for (auto it = g_tcp_clients.begin(); it != g_tcp_clients.end(); ) {
+        if (send(*it, hdr, 12, 0) == SOCKET_ERROR ||
+            send(*it, (const char*)frame_hdr, 16, 0) == SOCKET_ERROR ||
+            send(*it, (const char*)bgra, w * h * 4, 0) == SOCKET_ERROR) {
+            closesocket(*it);
+            it = g_tcp_clients.erase(it);
+        } else { ++it; }
+    }
+}
+
 static std::string cmd_capture_stream_stop(); // fwd decl for cmd_capture_stream_start
 
 static std::string cmd_capture_stream_start(uint64_t hwnd, const std::string& method, const std::string& transport) {
@@ -311,7 +394,11 @@ static std::string cmd_capture_stream_start(uint64_t hwnd, const std::string& me
             int w, h, ch;
             int size = wgc_stream_read(g_stream_handle, buf.data(), MAX_PX, &w, &h, &ch);
             if (size > 0) {
-                // Store frame for stream_poll
+                // Push via SharedBuffer (zero-copy), MJPEG (fallback), TCP (agents)
+                shared_buffer_push_frame(buf.data(), w, h);
+                mjpeg_server_push_frame(buf.data(), w, h);
+                tcp_broadcast_frame(buf.data(), w, h);
+                // Store frame for stream_poll (Canvas fallback)
                 std::lock_guard<std::mutex> lk(g_stream_frame_mutex);
                 g_stream_frame_pixels.assign(buf.data(), buf.data() + (size_t)size);
                 g_stream_frame_w = w;
@@ -389,6 +476,58 @@ static std::string cmd_debug_dump_frames(bool enable) {
     return R"({"ok":true})";
 }
 
+// ── highlight_window (yellow overlay) ─────────────────────
+static HWND g_overlay_bars[4] = {};
+static constexpr int BORDER_W = 3;
+
+static void destroy_overlay() {
+    for (auto& hw : g_overlay_bars) {
+        if (hw) { DestroyWindow(hw); hw = nullptr; }
+    }
+}
+
+static std::string cmd_highlight_window(uint64_t hwnd_u64) {
+    destroy_overlay();
+    HWND target = (HWND)(uintptr_t)hwnd_u64;
+    if (!target || !IsWindow(target)) return R"({"ok":false})";
+
+    RECT r;
+    if (!GetWindowRect(target, &r)) return R"({"ok":false})";
+    int bw = BORDER_W;
+    int iw = r.right - r.left;
+    int ih = r.bottom - r.top;
+
+    HINSTANCE hi = GetModuleHandle(nullptr);
+    struct { int x, y, w, h; } pos[4] = {
+        {r.left - bw, r.top - bw, iw + bw*2, bw},         // top
+        {r.left - bw, r.bottom,      iw + bw*2, bw},       // bottom
+        {r.left - bw, r.top,          bw,        ih},       // left
+        {r.right,     r.top,          bw,        ih}        // right
+    };
+
+    for (int i = 0; i < 4; i++) {
+        g_overlay_bars[i] = CreateWindowExW(
+            WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TRANSPARENT,
+            L"STATIC", nullptr,
+            WS_POPUP | WS_VISIBLE,
+            pos[i].x, pos[i].y, pos[i].w, pos[i].h,
+            nullptr, nullptr, hi, nullptr);
+        if (g_overlay_bars[i]) {
+            SetLayeredWindowAttributes(g_overlay_bars[i], RGB(255,255,0), 180, LWA_ALPHA);
+            HDC dc = GetDC(g_overlay_bars[i]);
+            if (dc) {
+                HBRUSH br = CreateSolidBrush(RGB(255,255,0));
+                RECT fr = {0, 0, pos[i].w, pos[i].h};
+                FillRect(dc, &fr, br);
+                DeleteObject(br);
+                ReleaseDC(g_overlay_bars[i], dc);
+            }
+            ShowWindow(g_overlay_bars[i], SW_SHOWNOACTIVATE);
+        }
+    }
+    return R"({"ok":true})";
+}
+
 // ── Main dispatch ─────────────────────────────────────────
 std::string dispatch_command(const std::string& json) {
     std::string cmd = json_get_str(json, "cmd");
@@ -416,6 +555,9 @@ std::string dispatch_command(const std::string& json) {
     }
     else if (cmd == "debug_dump_frames") {
         result = cmd_debug_dump_frames(json_get_int(args, "enable") != 0);
+    }
+    else if (cmd == "highlight_window") {
+        result = cmd_highlight_window(json_get_uint64(args, "hwnd"));
     }
     else if (cmd == "screen_info") {
         int sw = GetSystemMetrics(SM_CXSCREEN);
@@ -449,6 +591,7 @@ void backend_init() {
     capture_log_init("agent", "0.2.0", "log/", 5, 5000);
     wgc_init_apartment();
     init_wic();
+    tcp_server_start();
     LOG("cmd", "backend init OK");
 }
 
@@ -460,6 +603,8 @@ void backend_shutdown() {
         if (g_stream_handle) { wgc_stream_stop(g_stream_handle); g_stream_handle = nullptr; }
     }
     LOG("cmd", "backend shutdown");
+    tcp_server_stop();
+    destroy_overlay();
     capture_log_flush();
     capture_log_shutdown();
     wgc_deinit_apartment();
