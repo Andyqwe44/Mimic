@@ -1,163 +1,128 @@
-# TicTacToe → 通用视觉游戏AI
+# Game Agent Monitor
 
-构建能**自己发现子任务**的通用视觉Agent。模型接口: **像素进, 动作出**。
+Desktop monitor for visual game AI — **pixels in, actions out**.
 
-## 架构
+## Architecture
 
 ```
-┌─ monitor_web (Tauri 2) ──────────────────────────────────┐
-│  React (TypeScript + Tailwind)  ←→  Rust (IPC)          │
-│       MXU-style UI               │  Win32 API 直调       │
-│       Dashboard / Screenshot/Log  │  TCP server :9999     │
-└──────────────────┬────────────────┴──────────────────────┘
-                   │
-     ┌─────────────┼──────────────┐
-     ▼             ▼              ▼
-  Rust            Rust           TCP :9999
-  EnumWindows     GDI Capt.      (agent.exe / Python)
-  (0ms)           + WGC GPU       binary frames
+┌─ monitor_app (C++ Win32) ───────────────────────────────────┐
+│  React UI (TypeScript + Tailwind)  ←→  C++ backend           │
+│  WebView2 browser control            WebMessage bridge        │
+│  Dashboard / Monitor / Log           SharedBuffer zero-copy   │
+│                                      MJPEG HTTP :9998         │
+│  Dev:  WebView2 → localhost:1420    TCP protocol :9999       │
+│  Prod: WebView2 → gam.local                                 │
+└──────────┬───────────────────────────────────────────────────┘
+           │
+    ┌──────┼────────┐
+    ▼      ▼        ▼
+  C++      C++      TCP :9999
+  capture  logger   (agent / Python)
+  WGC+DI  file+mem  binary frames
 ```
 
-## 项目结构
+**Zero Rust. Single MSVC command builds everything.**
+
+| Language | Role |
+|----------|------|
+| C++17 | Host: Win32 window, WebView2, capture, MJPEG, TCP, logging |
+| TypeScript/React | UI inside WebView2 (same code regardless of host) |
+| Python | AI model training/inference (separate process, TCP :9999) |
+
+## Quick Start
+
+### Prerequisites
+- Windows 10/11 with Visual Studio 2022 (C++ tools)
+- Node.js 18+, WebView2 Runtime (pre-installed on Win11)
+
+### Dev Mode
+
+```bash
+# 1. Build C++ static libs (first time only, re-run after C++ changes)
+cd logger   && build_logger_lib.cmd
+cd capture  && build_capture_lib.cmd
+
+# 2. Build C++ host
+cd monitor_app && build.cmd
+
+# 3. Start Vite dev server (terminal 1)
+cd monitor_web && npm install && npm run dev
+
+# 4. Launch GUI (terminal 2)
+cd monitor_app && build\monitor_app.exe --dev
+```
+
+### Production
+
+```bash
+cd monitor_web && npm run build          # → dist/
+cd monitor_app  && build.cmd             # → monitor_app.exe
+```
+
+Distribute `monitor_app.exe` + `monitor_web/dist/` together. No HTTP server — WebView2 uses `SetVirtualHostNameToFolderMapping` to load from disk.
+
+## Project Structure
 
 ```
 tictactoe/
-├── protocol/                  # 线格式 — C++/Rust/Python 共享
-│   ├── protocol.h / .rs / .py
-├── common/                    # C++ 共享模块
-│   ├── include/
-│   │   └── capture_helpers.hpp # 公共辅助 (ScaleBgra, IsSolidColor等)
-│   ├── payload/bgra.hpp       # BGRA 像素打包/解析
-│   └── transport/             # 传输层 (pipe, tcp)
-├── capture/                   # C++ 屏幕捕获
-│   ├── include/
-│   │   ├── capture_wgc.hpp    # WGC FramePool (GPU)
-│   │   └── capture.hpp        # DXGI + GDI 后端
-│   └── src/
-│       ├── capture_wgc.cpp    # WGC 库实现
-│       ├── capture_wgc_main.cpp # WGC CLI (单帧/流)
-│       └── capture_dxgi.cpp   # DXGI 后端
-├── monitor_web/               # Tauri 2 + React 监控面板
-│   ├── src/App.tsx            # 前端 (MXU-style UI)
-│   └── src-tauri/src/
-│       ├── main.rs            # Rust 后端
-│       ├── protocol.rs        # include! shared protocol
-│       └── payload/bgra.rs    # Rust 应用层
-├── model/                     # Python
-│   ├── action_space.py        # 动作词表 + 序列化
-│   ├── generic_agent.py       # VisionEncoder + Transformer ActionDecoder
-│   ├── hierarchical.py        # L1 感知 + L2 策略推理
-│   └── payload/bgra.py        # BGRA 像素打包/解析
-├── examples/                  # 端到端协议示例 + Benchmark
-│   ├── wgc_bench_send.cpp     # WGC → TCP 基准测试 (C++)
-│   ├── wgc_bench_recv.rs      # TCP → 文件 基准测试 (Rust)
-│   └── run_bench.bat          # 一键benchmark
-└── log/                       # 统一日志目录
-    ├── agent_*.log             # Rust (Tauri主进程)
-    └── wgc_*.log               # C++ (WGC子进程)
+├── logger/               C++ logging engine (capture_log_write_msg)
+├── capture/              C++ screen capture (per-method .lib)
+├── monitor_app/          C++ WebView2 host (main window + commands + MJPEG)
+│   └── dep/              WebView2 SDK
+├── monitor_web/          React frontend (Vite + TypeScript + Tailwind)
+├── protocol/             Wire format (C++/Python)
+├── model/                Python AI
+└── test/                 Benchmarks + frame viewer
 ```
 
-## 线协议 (protocol/)
+## Capture Methods
+
+| Method | .lib | Description |
+|--------|------|-------------|
+| WGC | wgc.lib | GPU FramePool, D3D11+WinRT, 60+ FPS |
+| DesktopBlt | desktop.lib | Full desktop capture |
+| GetWindowDC | gdi.lib | Window DC capture |
+| PrintWindow | pw.lib | WM_PRINT-based, magenta detection |
+| ScreenBitBlt | screen.lib | Virtual screen BitBlt |
+
+Fallback chain: DesktopBlt → GetWindowDC → PrintWindow → ScreenBitBlt
+
+## Transport Methods
+
+| Transport | Port | Description |
+|-----------|------|-------------|
+| SharedBuffer | COM | Zero-copy GPU→Canvas, main path |
+| MJPEG | 9998 | JPEG over HTTP multipart, fallback |
+| TCP | 9999 | Wire protocol, external agent/Python |
+
+## Wire Protocol (TCP :9999)
 
 ```
-Frame: [magic:4 "FRAM"][body_size:4 LE][type_tag:4 LE][body...]
+Frame: [magic:4 "FRAM"][body_size:4 LE][type_tag:4 LE][body]
 
 type_tag 1 (BGRA): [w:4][h:4][ch:4][reserved:4][pixels: w*h*ch]
-
-DEFAULT_TCP_PORT = 9999  |  MAGIC = 0x4D415246
 ```
 
-## 三层解耦
+## Features
 
-```
-应用层 (payload/)   ← pack/unpack BGRA/H264, 不碰传输
-协议层 (protocol/)  ← 只有常量和 type tags
-传输层 (transport/) ← send(type, bytes) / recv(), 不碰内容
-```
+- **Dashboard** — System info, capture pipeline status, update check
+- **Monitor** — Window/desktop capture, streaming preview, FPS counter
+- **Log** — Live in-memory ring buffer + disk log tiles
+- **Settings** — Connection, transport, theme, model, log config
+- **Window picker** — EnumWindows with search and window/desktop/process tabs
+- **Yellow overlay** — Visual highlight on selected capture target
+- **Single-frame** — WGC/GDI multi-method capture with PNG output
 
-## 构建
+## WGC Internals
 
-```bash
-cd capture     && build.cmd              # C++ 工具 (含 WGC)
-cd monitor_web
-npm install && npm run tauri dev         # 开发 (Vite HMR + Cargo watch)
-npm run tauri build                      # 生产 .exe
-```
+- MTA daemon thread (avoids STA conflict with WebView2)
+- DispatcherQueue per capture thread
+- Condition variable frame wait, 100ms timeout
+- Triple-buffered staging textures
+- `TryGetNextFrame` false → does NOT reset `frame_ready_` (race fix)
+- `signal_stop()` → non-blocking shutdown
+- Win11 borderless capture (`IsBorderRequired(false)`)
 
-## GUI 功能
+## License
 
-### 页面
-- **Dashboard** — 系统信息、采集管线、更新检查、资源配置
-- **Monitor** — Agent 控制（Start/Stop）
-- **Log** — 当前会话 + 历史日志文件磁贴（每个 `agent_*.log` 独立卡片，可折叠）
-- **Settings** — 连接（含捕获方法选择器）、主题、模型、日志可折叠卡片
-
-### 右侧控制栏 (MXU-style)
-- **Connection** — 窗口选择 + IP/Port，固定宽度布局
-- **Log** — 紧凑模式：当前会话日志（最近100条）+ 清空按钮
-- **Screenshot** — 实时预览（Canvas RGBA 直显）+ 捕获方法选择器 + 单帧截图，动态屏幕比例
-
-### 捕获方法
-设置 → Connection → Method 可显式选择：
-- **Auto** — 自动回退链（WGC → GetWindowDC → PrintWindow → ScreenBitBlt）
-- **WGC** — GPU FramePool（流用 `--stream`，单帧用 `--single`）
-- **DXGI** — 桌面 GDI BitBlt
-- **GDI** / **PrintWindow** / **ScreenBlt** — 单一方法，无回退，无纯色检测
-
-### 用户操作日志
-所有交互记录到前端 Log：Tab 切换、Start/Stop、主题、方法选择、截图/预览。Log 标签页通过 `read_logs` 加载历史 `agent_*.log` 文件，每个文件为独立可折叠磁贴。
-
-## 截图技术
-
-### WGC (Windows.Graphics.Capture)
-- GPU 加速 FramePool，7ms/帧（140+ FPS 能力）
-- 支持后台/遮挡窗口捕获
-- 事件驱动，窗口静止时 0% CPU
-- 三重缓冲 staging texture，GPU/CPU 流水线重叠
-
-### 单帧截图 (Camera)
-3 方法回退: `GetWindowDC → PrintWindow(品红检测) → ScreenBitBlt`
-
-### 实时预览 (Preview)
-- 窗口模式: WGC 子进程 → 管道 → Rust → Canvas 渲染
-- 桌面模式: DXGI Desktop Duplication → GDI 回退
-- BGRA → RGBA 直接转换，无 BMP/base64 格式开销
-- TCP :9999 广播帧（多客户端）
-- 时间戳: `cap=3500us copy=861us readback=6833us`
-
-### 黄色边框
-- 选中窗口后黄色框选叠加
-- `SetWinEventHook` 事件驱动跟踪（非轮询）
-- 鼠标释放时更新位置，窗口最小化时隐藏
-- Z-order 跟随目标窗口
-
-## 性能
-
-| 操作 | 老 (exe spawn) | 新 (Rust 直调 + WGC) |
-|------|---------------|---------------------|
-| 窗口列表 | 5000ms | 0ms |
-| 单帧截图 | 5000ms | 5-54ms |
-| WGC 采集 | N/A | 7ms (140+ FPS) |
-| BGRA 打包 | ~12μs | ~12μs |
-| BMP 编码 | 338ms | 0ms (Canvas RGBA) |
-
-## H.264 GPU (未来)
-`capture_h264.exe`: FramePool → MF H.264 硬件编码 → pipe/TCP。
-AMD 驱动不暴露 MF 编码器 (CLSID ADC9BC80 返回空类型)。
-
-## AI 模型
-
-### GenericAgent (L3 单体)
-CNN Encoder (Nature-style) → Transformer Decoder (自回归动作生成)。
-~0.8M–3M 参数。训练用因果 mask + teacher forcing。
-输入: 4×84×84 灰度帧栈 → 输出: 动作 token 序列。
-
-### HierarchicalAgent (L1+L2)
-L1: 感知专家 — 小 CNN 将像素压缩到 16-dim z（VAE 信息瓶颈）。
-L2: 策略推理 — z + 动作历史 → Transformer → 动作 tokens。
-端到端训练，Loss = L_task + γ*L_KL。
-
-## 已知限制
-
-- 覆盖窗口崩溃时可能残留（黄色边框 STATIC 窗口无父窗口清理）。
-- WGC 单帧截图通过子进程 `--single` 实现，首次调用有 ~300ms 启动延迟。
+MIT

@@ -6,8 +6,9 @@
 ## Project Vision
 
 Build self-organizing hierarchical visual game AI. Model interface: **pixels in, actions out**.
-C++ for all real-time work: capture + WebView2 GUI + MJPEG server + logging.
+C++ for all real-time work: capture + WebView2 GUI + MJPEG + TCP + logging.
 Python for AI model training/inference.
+v0.3.0 — pure C++ WebView2 host, zero Rust.
 
 ## Architecture (post-migration: pure C++ WebView2 host)
 
@@ -67,7 +68,7 @@ tictactoe/
 │   ├── include/                  Public headers
 │   ├── build.cmd                 Standalone exes
 │   └── build_capture_lib.cmd     Per-method .lib: common/wgc/gdi/pw/screen/desktop
-├── monitor_app/                  # C++ WebView2 host (REPLACES monitor_web/src-tauri/)
+├── monitor_app/                  # C++ WebView2 host (window + commands + MJPEG + TCP)
 │   ├── src/
 │   │   ├── main.cpp              Win32 window + WebView2 + message loop
 │   │   ├── commands.h/cpp        Command dispatch (list_windows, capture, log, stream)
