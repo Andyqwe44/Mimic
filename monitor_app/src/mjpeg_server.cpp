@@ -112,9 +112,9 @@ static void client_handler(Client* c) {
         int blen = snprintf(boundary, sizeof(boundary),
             "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %zu\r\n\r\n",
             jpeg.size());
-        send(c->sock, boundary, blen, 0);
-        send(c->sock, (const char*)jpeg.data(), (int)jpeg.size(), 0);
-        send(c->sock, "\r\n", 2, 0);
+        if (send(c->sock, boundary, blen, 0) == SOCKET_ERROR) break;
+        if (send(c->sock, (const char*)jpeg.data(), (int)jpeg.size(), 0) == SOCKET_ERROR) break;
+        if (send(c->sock, "\r\n", 2, 0) == SOCKET_ERROR) break;
 
         Sleep(16);
     }
@@ -162,10 +162,10 @@ bool mjpeg_server_start() {
 
     // Init Winsock
     WSADATA wsa;
-    WSAStartup(MAKEWORD(2, 2), &wsa);
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return false;
 
     g_listen = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (g_listen == INVALID_SOCKET) return false;
+    if (g_listen == INVALID_SOCKET) { WSACleanup(); return false; }
 
     int reuse = 1;
     setsockopt(g_listen, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse));
@@ -177,6 +177,7 @@ bool mjpeg_server_start() {
 
     if (bind(g_listen, (sockaddr*)&addr, sizeof(addr)) != 0) {
         closesocket(g_listen);
+        WSACleanup();
         return false;
     }
     listen(g_listen, SOMAXCONN);
@@ -189,6 +190,16 @@ bool mjpeg_server_start() {
 
 void mjpeg_server_stop() {
     g_running = false;
+
+    // Wait for clients to finish before releasing resources
+    {
+        std::lock_guard<std::mutex> lk(g_clients_mutex);
+        for (auto* c : g_clients) {
+            c->active = false;
+            if (c->sock != INVALID_SOCKET) closesocket(c->sock);
+        }
+    }
+    Sleep(50); // brief wait for client threads to notice g_running=false
 
     // Wake accept() by connecting to ourselves
     SOCKET poke = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);

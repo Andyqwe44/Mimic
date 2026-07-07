@@ -8,6 +8,14 @@
 #include <string>
 #include <cstdlib>
 
+inline uint64_t json_get_uint64(const std::string& json, const std::string& key) {
+    std::string s = "\"" + key + "\":";
+    size_t p = json.find(s);
+    if (p == std::string::npos) return 0;
+    p += s.length();
+    return strtoull(json.c_str() + p, nullptr, 10);
+}
+
 inline std::string json_get_str(const std::string& json, const std::string& key) {
     std::string s = "\"" + key + "\":\"";
     size_t p = json.find(s);

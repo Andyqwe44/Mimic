@@ -190,9 +190,11 @@ void capture_log_shutdown(void) {
 // ── THE ONE write function ───────────────────────────────
 void capture_log_write_msg(const char* tag, const char* msg) {
     auto ts = _timestamp();
+    char formatted[4096];
+    snprintf(formatted, sizeof(formatted), "[%s] %s", tag, msg);
     std::lock_guard<std::mutex> lk(g_mutex);
-    _write_file(ts, msg);
-    _write_ring(ts, msg);
+    _write_file(ts, formatted);
+    _write_ring(ts, formatted);
     fflush(g_file);
 }
 

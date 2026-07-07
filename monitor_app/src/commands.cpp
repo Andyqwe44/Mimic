@@ -255,11 +255,11 @@ static std::string frame_to_json(const CaptureResult& r, int x, int y, int sw, i
 
     std::string b64 = base64_encode(png.data(), png.size());
 
-    char buf[512];
-    snprintf(buf, sizeof(buf),
-        R"({"image":"%s","w":%d,"h":%d,"x":%d,"y":%d,"screen_w":%d,"screen_h":%d,"method":"%s"})",
-        b64.c_str(), r.w, r.h, x, y, sw, sh, r.method.c_str());
-    return buf;
+    std::string json = "{\"image\":\"" + b64 + "\",\"w\":" + std::to_string(r.w) +
+        ",\"h\":" + std::to_string(r.h) + ",\"x\":" + std::to_string(x) +
+        ",\"y\":" + std::to_string(y) + ",\"screen_w\":" + std::to_string(sw) +
+        ",\"screen_h\":" + std::to_string(sh) + ",\"method\":\"" + r.method + "\"}";
+    return json;
 }
 
 static std::string cmd_capture_window(uint64_t hwnd, const std::string& method) {
@@ -290,7 +290,12 @@ static std::mutex g_stream_frame_mutex;
 static std::vector<uint8_t> g_stream_frame_pixels;
 static int g_stream_frame_w = 0, g_stream_frame_h = 0;
 
+static std::string cmd_capture_stream_stop(); // fwd decl for cmd_capture_stream_start
+
 static std::string cmd_capture_stream_start(uint64_t hwnd, const std::string& method, const std::string& transport) {
+    // Stop any existing stream first
+    cmd_capture_stream_stop();
+
     HWND h = (HWND)(uintptr_t)hwnd;
     g_stream_handle = wgc_stream_start(h, 1280);
     if (!g_stream_handle) {
@@ -300,6 +305,7 @@ static std::string cmd_capture_stream_start(uint64_t hwnd, const std::string& me
     g_streaming = true;
 
     g_stream_thread = std::thread([transport]() {
+        CoInitializeEx(nullptr, COINIT_MULTITHREADED);
         std::vector<uint8_t> buf(MAX_PX);
         while (g_streaming) {
             int w, h, ch;
@@ -313,6 +319,7 @@ static std::string cmd_capture_stream_start(uint64_t hwnd, const std::string& me
             }
             Sleep(1);
         }
+        CoUninitialize();
     });
 
     LOG("cmd", "stream_start: hwnd=%llu method=%s transport=%s", (unsigned long long)hwnd, method.c_str(), transport.c_str());
@@ -324,6 +331,7 @@ static std::string cmd_capture_stream_stop() {
     if (g_stream_handle) {
         wgc_stream_signal_stop(g_stream_handle);
         if (g_stream_thread.joinable()) g_stream_thread.join();
+        wgc_stream_stop(g_stream_handle);
         g_stream_handle = nullptr;
     }
     LOG("cmd", "stream_stop");
@@ -340,9 +348,7 @@ static std::string cmd_read_logs(int max_files) {
     std::string files = fjson ? fjson : "[]";
     capture_log_free(fjson);
 
-    char buf[2048];
-    snprintf(buf, sizeof(buf), R"({"live":"%s","files":%s})", json_escape(live).c_str(), files.c_str());
-    return buf;
+    return "{\"live\":\"" + json_escape(live) + "\",\"files\":" + files + "}";
 }
 
 static std::string cmd_clear_log() {
@@ -393,10 +399,10 @@ std::string dispatch_command(const std::string& json) {
     if (cmd == "list_windows") result = cmd_list_windows();
     else if (cmd == "list_processes") result = cmd_list_processes();
     else if (cmd == "capture_window") {
-        result = cmd_capture_window(json_get_int(args, "hwnd"), json_get_str(args, "method"));
+        result = cmd_capture_window(json_get_uint64(args, "hwnd"), json_get_str(args, "method"));
     }
     else if (cmd == "capture_stream_start") {
-        result = cmd_capture_stream_start(json_get_int(args, "hwnd"),
+        result = cmd_capture_stream_start(json_get_uint64(args, "hwnd"),
             json_get_str(args, "method"), json_get_str(args, "transport"));
     }
     else if (cmd == "capture_stream_stop") result = cmd_capture_stream_stop();
@@ -406,7 +412,7 @@ std::string dispatch_command(const std::string& json) {
         result = cmd_log_ui_event(json_get_str(args, "event"), json_get_str(args, "detail"));
     }
     else if (cmd == "benchmark_methods") {
-        result = cmd_benchmark_methods(json_get_int(args, "hwnd"), json_get_str(args, "method"));
+        result = cmd_benchmark_methods(json_get_uint64(args, "hwnd"), json_get_str(args, "method"));
     }
     else if (cmd == "debug_dump_frames") {
         result = cmd_debug_dump_frames(json_get_int(args, "enable") != 0);
@@ -417,9 +423,9 @@ std::string dispatch_command(const std::string& json) {
         result = "{\"w\":" + std::to_string(sw) + ",\"h\":" + std::to_string(sh) + "}";
     }
     else if (cmd == "window_state") {
-        auto* hw = (HWND)(uintptr_t)json_get_int(args, "hwnd");
+        auto* hw = (HWND)(uintptr_t)json_get_uint64(args, "hwnd");
         const char* state = capture_query_window_state(hw);
-        result = std::string("{\"state\":\"") + (state ? state : "unknown") + "\"}";
+        result = "\"" + std::string(state ? state : "unknown") + "\"";
     }
     else if (cmd == "stream_poll") {
         // Return latest RGBA frame as base64 for Canvas fallback
@@ -451,10 +457,11 @@ void backend_shutdown() {
         g_streaming = false;
         if (g_stream_handle) wgc_stream_signal_stop(g_stream_handle);
         if (g_stream_thread.joinable()) g_stream_thread.join();
+        if (g_stream_handle) { wgc_stream_stop(g_stream_handle); g_stream_handle = nullptr; }
     }
+    LOG("cmd", "backend shutdown");
     capture_log_flush();
     capture_log_shutdown();
     wgc_deinit_apartment();
     g_wic = nullptr;
-    LOG("cmd", "backend shutdown OK");
 }
