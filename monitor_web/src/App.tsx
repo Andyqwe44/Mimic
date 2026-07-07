@@ -1,8 +1,48 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { Play, Square, Camera, Monitor, Settings, Moon, Sun, ChevronDown, FileText, Trash2, X, MonitorUp, Search, MonitorSmartphone, RefreshCw } from 'lucide-react'
-import { invoke } from '@tauri-apps/api/core'
-import { listen } from '@tauri-apps/api/event'
+// ── WebView2 WebMessage bridge (replaces Tauri invoke) ──
+type PendingCall = {
+  resolve: (value: any) => void;
+  reject: (reason: any) => void;
+  timer: ReturnType<typeof setTimeout>;
+};
+let _callId = 0;
+const _pending = new Map<number, PendingCall>();
+
+// Listen for responses from C++ host
+if (typeof (window as any).chrome?.webview !== 'undefined') {
+  (window as any).chrome.webview.addEventListener('message', (e: any) => {
+    try {
+      const msg = JSON.parse(e.data);
+      const pending = _pending.get(msg.id);
+      if (pending) {
+        clearTimeout(pending.timer);
+        _pending.delete(msg.id);
+        pending.resolve(msg.result);
+      }
+    } catch {}
+  });
+}
+
+// Replacement for invoke()
+function hostCall(cmd: string, args?: Record<string, any>): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const id = ++_callId;
+    const timer = setTimeout(() => {
+      _pending.delete(id);
+      reject(new Error(`hostCall timeout: ${cmd}`));
+    }, 30000);
+    _pending.set(id, { resolve, reject, timer });
+    try {
+      (window as any).chrome.webview.postMessage(JSON.stringify({ cmd, id, args: args || {} }));
+    } catch (e) {
+      clearTimeout(timer);
+      _pending.delete(id);
+      reject(e);
+    }
+  });
+}
 
 // ═══ Tooltip ── 300ms delay, portal to body, smart positioning ═══
 function Tooltip({ text, children }: { text: string; children: React.ReactElement }) {
@@ -166,7 +206,7 @@ function WindowPickerModal({ open, onClose, onSelect }: { open: boolean; onClose
   const loadWindows = async () => {
     setLoading(true)
     try {
-      const list = await invoke<WindowInfo[]>('list_windows')
+      const list = await hostCall('list_windows')
       setWindows(list)
       addLog(`[Window] loaded ${list.length} entries`)
     } catch {
@@ -178,7 +218,7 @@ function WindowPickerModal({ open, onClose, onSelect }: { open: boolean; onClose
   const loadProcesses = async () => {
     setLoading(true)
     try {
-      const list = await invoke<WindowInfo[]>('list_processes')
+      const list = await hostCall('list_processes')
       setProcesses(list)
       addLog(`[Window] processes ${list.length} entries`)
     } catch {
@@ -422,7 +462,7 @@ function ConnectionPanel({ onSelect, onDisconnect, forceMethod, setForceMethod, 
                     const hwnd = selWin?.hwnd ?? 0;
                     addLog('[Bench] testing methods...');
                     try {
-                      const json = await invoke<string>('benchmark_methods', { hwnd });
+                      const json = await hostCall('benchmark_methods', { hwnd });
                       const results = JSON.parse(json);
                       addLog(`[Bench] done: ${results.map((r:any) => `${r.method}:${r.single_ms}ms${r.ok?'✓':'✗'}`).join(', ')}`);
                       // Auto-select fastest OK method
@@ -531,7 +571,7 @@ function ScreenshotPanel({ selWin, screenRatio, forceMethod, transportMethod, wi
       previewingRef.current = false; setPreviewing(false); setFps(0); setCapMethod('')
       sharedBufActiveRef.current = false
       if (unlistenRef.current) { unlistenRef.current(); unlistenRef.current = null }
-      try { await invoke<string>('capture_stream_stop') } catch (_) {}
+      try { await hostCall('capture_stream_stop') } catch (_) {}
       setImgSrc('')
       addLog('[Preview] stopped')
     } else {
@@ -540,7 +580,7 @@ function ScreenshotPanel({ selWin, screenRatio, forceMethod, transportMethod, wi
         addLog(`[Preview] blocked: window minimized, ${forceMethod} cannot capture`); return
       }
       addLog(`[Preview] ${selWin?.title ?? 'desktop'} [${forceMethod}]`)
-      try { await invoke<string>('capture_stream_start', { hwnd, tcpPort: 9999, method: forceMethod, transport: transportMethod }) }
+      try { await hostCall('capture_stream_start', { hwnd, tcpPort: 9999, method: forceMethod, transport: transportMethod }) }
       catch (e) { addLog(`[Preview] start failed: ${e}`); return }
 
       // Auto-expand panel
@@ -559,15 +599,24 @@ function ScreenshotPanel({ selWin, screenRatio, forceMethod, transportMethod, wi
         sharedBufActiveRef.current = false
       }
 
-      // Listen for stream-tick for FPS counting only
-      const unlisten = await listen<{ method: string }>('stream-tick', (event) => {
+      // Listen for 'tick' messages from C++ host for FPS counting
+      const tickHandler = (e: any) => {
         if (!previewingRef.current) return
-        if (event.payload.method) setCapMethod(event.payload.method)
-        framesRef.current++
-        const now = Date.now(); const elapsed = now - lastFpsRef.current
-        if (elapsed >= 1000) { setFps(Math.round(framesRef.current * 1000 / elapsed)); framesRef.current = 0; lastFpsRef.current = now }
-      })
-      unlistenRef.current = unlisten
+        try {
+          const msg = JSON.parse(e.data)
+          if (msg.type === 'tick') {
+            if (msg.method) setCapMethod(msg.method)
+            framesRef.current++
+            const now = Date.now(); const elapsed = now - lastFpsRef.current
+            if (elapsed >= 1000) { setFps(Math.round(framesRef.current * 1000 / elapsed)); framesRef.current = 0; lastFpsRef.current = now }
+          }
+        } catch {}
+      }
+      const wv = (window as any).chrome?.webview
+      if (wv) {
+        wv.addEventListener('message', tickHandler)
+        unlistenRef.current = () => wv.removeEventListener('message', tickHandler)
+      }
     }
   }
 
@@ -576,7 +625,7 @@ function ScreenshotPanel({ selWin, screenRatio, forceMethod, transportMethod, wi
     previewingRef.current = false
     if (unlistenRef.current) { unlistenRef.current(); unlistenRef.current = null }
     // Stop backend stream to prevent resource leak
-    invoke<string>('capture_stream_stop').catch(() => {})
+    hostCall('capture_stream_stop').catch(() => {})
   } }, [])
 
   return (
@@ -599,7 +648,7 @@ function ScreenshotPanel({ selWin, screenRatio, forceMethod, transportMethod, wi
               addLog(`[Capture] ${METHOD_SHORT[forceMethod] || forceMethod} ${hwnd ? 'hwnd='+hwnd : 'desktop'}...`)
               const t0 = Date.now()
               try {
-                const json = await invoke<string>('capture_window', { hwnd, method: forceMethod })
+                const json = await hostCall('capture_window', { hwnd, method: forceMethod })
                 const elapsed = Date.now() - t0
                 if (applyCaptureJson(json)) {
                   try { const info = JSON.parse(json); addLog(`[Capture] OK (${elapsed}ms) [${info.method}]`) }
@@ -665,7 +714,7 @@ class LogManager {
   add(msg: string) {
     this.entries.push({ ts: timeStr(), msg })
     this.listeners.forEach(f => f())
-    invoke('log_ui_event', { msg }).catch(() => {})
+    hostCall('log_ui_event', { msg }).catch(() => {})
   }
 
   getAll(): LogEntry[] { return this.entries }
@@ -678,14 +727,14 @@ class LogManager {
   clear() {
     this.entries = []
     this.listeners.forEach(f => f())
-    invoke('clear_log').catch(() => {})
+    hostCall('clear_log').catch(() => {})
     // Start new session marker
     this.add('[Session] new session started (previous log archived)')
   }
 
   async loadHistory(maxFiles: number): Promise<HistoryFile[]> {
     try {
-      return await invoke<HistoryFile[]>('read_logs', { maxFiles })
+      return await hostCall('read_logs', { max_files: maxFiles })
     } catch { return [] }
   }
 }
@@ -959,7 +1008,7 @@ function DashboardView() {
   useEffect(() => {
     (async () => {
       try {
-        const si = await invoke<{w:number;h:number}>('screen_info')
+        const si = await hostCall('screen_info')
         setInfo(i => ({ ...i, screen: `${si.w}×${si.h}`, status: 'Ready' }))
       } catch (_) {}
     })()
@@ -1168,7 +1217,7 @@ export default function App() {
   useEffect(() => {
     (async () => {
       try {
-        const si = await invoke<{w:number;h:number}>('screen_info')
+        const si = await hostCall('screen_info')
         setScreenRatio(si.w / si.h)
       } catch (_) {}
     })()
@@ -1178,14 +1227,13 @@ export default function App() {
   useEffect(() => {
     (async () => {
       try {
-        await invoke('highlight_window', { hwnd: selWindow.hwnd })
+        await hostCall('highlight_window', { hwnd: selWindow.hwnd })
       } catch (_) {}
     })()
     return () => {
       (async () => {
         try {
-          const { invoke } = await import('@tauri-apps/api/core')
-          await invoke('highlight_window', { hwnd: 0 })
+          await hostCall('highlight_window', { hwnd: 0 })
         } catch (_) {}
       })()
     }
@@ -1195,7 +1243,7 @@ export default function App() {
   useEffect(() => {
     const poll = async () => {
       try {
-        const s = await invoke<string>('window_state', { hwnd: selWindow.hwnd })
+        const s = await hostCall('window_state', { hwnd: selWindow.hwnd })
         if (s !== lastWinStateRef.current) { lastWinStateRef.current = s; setWinState(s) }
       } catch (_) {}
     }

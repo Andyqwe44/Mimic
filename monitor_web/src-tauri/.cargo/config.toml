@@ -1,6 +1,0 @@
-# Link search paths for pre-built C++ static libs.
-# Run these before cargo build:
-#   logger\build_logger_lib.cmd
-#   capture\build_capture_lib.cmd
-[build]
-rustflags = ["-L", "native=../../capture/build", "-L", "native=../../logger/build"]
