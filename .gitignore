@@ -37,6 +37,10 @@ ai/logs/
 # Log files
 log/
 
+# Test artifacts
+test/frames/*.bgra
+test/video.mp4
+
 # Caveman compress backup
 *.original.md
 

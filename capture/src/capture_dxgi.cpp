@@ -199,7 +199,8 @@ private:
         // Get DXGI factory for adapter enumeration
         IDXGIFactory1* factory = nullptr;
         if (opts_.skip_virtual_adapters) {
-            CreateDXGIFactory1(__uuidof(IDXGIFactory1), (void**)&factory);
+            HRESULT fhr = CreateDXGIFactory1(__uuidof(IDXGIFactory1), (void**)&factory);
+            if (FAILED(fhr)) { factory = nullptr; }
         }
 
         bool found = false;
@@ -244,7 +245,7 @@ private:
                     output->Release();
                     if (FAILED(hr)) continue;
 
-                    hr = output1->DuplicateOutput(d3d_device_.Get(), &desk_dup_);
+                    hr = output1->DuplicateOutput(d3d_device_.Get(), desk_dup_.GetAddressOf());
                     output1->Release();
                     if (SUCCEEDED(hr)) {
                         found = true;
@@ -300,7 +301,7 @@ next_adapter:
         if (FAILED(hr)) return false;
 
         // Release current duplication
-        if (desk_dup_) { desk_dup_->Release(); desk_dup_ = nullptr; }
+        desk_dup_.Reset();
         staging_tex_.Reset();
 
         // Try next output
@@ -312,7 +313,7 @@ next_adapter:
             output->Release();
             if (FAILED(hr)) continue;
 
-            hr = output1->DuplicateOutput(d3d_device_.Get(), &desk_dup_);
+            hr = output1->DuplicateOutput(d3d_device_.Get(), desk_dup_.GetAddressOf());
             output1->Release();
             if (SUCCEEDED(hr)) {
                 found = true;
@@ -333,13 +334,13 @@ next_adapter:
 
     void cleanup_dup() {
         staging_tex_.Reset();
-        if (desk_dup_) { desk_dup_->Release(); desk_dup_ = nullptr; }
+        desk_dup_.Reset();
         initialized_ = false;
     }
 
     Microsoft::WRL::ComPtr<ID3D11Device>        d3d_device_;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> d3d_context_;
-    IDXGIOutputDuplication* desk_dup_ = nullptr;
+    Microsoft::WRL::ComPtr<IDXGIOutputDuplication> desk_dup_;
     Microsoft::WRL::ComPtr<ID3D11Texture2D>     staging_tex_;
     UINT staging_width_ = 0, staging_height_ = 0;
     UINT current_output_idx_ = 0;
@@ -356,11 +357,11 @@ public:
     bool init() override { return true; }
 
     bool capture(FrameBuffer& out, const Rect* region) override {
-        HDC hdc_screen = GetDC(nullptr);
+        HDC hdc_screen = CreateDCW(L"DISPLAY", nullptr, nullptr, nullptr);
         if (!hdc_screen) return false;
 
-        int screen_w = GetSystemMetrics(SM_CXSCREEN);
-        int screen_h = GetSystemMetrics(SM_CYSCREEN);
+        int screen_w = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+        int screen_h = GetSystemMetrics(SM_CYVIRTUALSCREEN);
 
         int cap_x = region ? region->x : 0;
         int cap_y = region ? region->y : 0;
@@ -396,7 +397,7 @@ public:
         SelectObject(hdc_mem, old_bmp);
         DeleteObject(hbitmap);
         DeleteDC(hdc_mem);
-        ReleaseDC(nullptr, hdc_screen);
+        DeleteDC(hdc_screen);
         return true;
     }
 

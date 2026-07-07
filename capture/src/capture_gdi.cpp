@@ -1,5 +1,7 @@
 /**
  * capture_gdi.cpp — FFI: GetWindowDC capture method.
+ * Captures window client area for consistency with PrintWindow.
+ * Uses DPI awareness context for correct coordinates on high-DPI displays.
  */
 #include "capture_methods.h"
 #include "capture_internal.h"
@@ -7,13 +9,16 @@
 #include <vector>
 
 int capture_gdi_getwindowdc(HWND hwnd, uint8_t* buf, int buf_size, int* w, int* h) {
-    RECT wr;
-    if (!GetWindowRect(hwnd, &wr)) return 0;
-    *w = wr.right - wr.left;
-    *h = wr.bottom - wr.top;
+    DpiGuard dpi(hwnd);
+
+    // Use client area (matching PrintWindow PW_CLIENTONLY)
+    RECT cr;
+    if (!GetClientRect(hwnd, &cr)) return 0;
+    *w = cr.right - cr.left;
+    *h = cr.bottom - cr.top;
     if (*w <= 0 || *h <= 0) return 0;
 
-    HDC dc = GetWindowDC(hwnd);
+    HDC dc = GetDC(hwnd);
     if (!dc) return 0;
     std::vector<uint8_t> pixels;
     bool ok = bitblt_bgra_full(dc, dc, *w, *h, pixels);

@@ -1,5 +1,8 @@
 /**
  * capture_pw.cpp — FFI: PrintWindow capture method.
+ * Uses PW_RENDERFULLCONTENT | PW_CLIENTONLY for client area.
+ * Magenta sentinel detects when PrintWindow doesn't render.
+ * DPI awareness context ensures correct rendering on high-DPI.
  */
 #include "capture_methods.h"
 #include "capture_internal.h"
@@ -7,10 +10,12 @@
 #include <vector>
 
 int capture_printwindow(HWND hwnd, uint8_t* buf, int buf_size, int* w, int* h) {
-    RECT wr;
-    if (!GetWindowRect(hwnd, &wr)) return 0;
-    *w = wr.right - wr.left;
-    *h = wr.bottom - wr.top;
+    DpiGuard dpi(hwnd);
+
+    RECT cr;
+    if (!GetClientRect(hwnd, &cr)) return 0;
+    *w = cr.right - cr.left;
+    *h = cr.bottom - cr.top;
     if (*w <= 0 || *h <= 0) return 0;
 
     HDC sdc = GetDC(nullptr);

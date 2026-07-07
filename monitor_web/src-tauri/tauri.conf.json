@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicedoc/schemas/main/tauri/config.schema.json",
   "productName": "Game Agent Monitor",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "com.andyqwe44.game-agent-monitor",
   "build": {
     "frontendDist": "../dist",

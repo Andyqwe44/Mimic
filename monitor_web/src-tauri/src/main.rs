@@ -22,25 +22,31 @@ extern "C" {
     fn capture_has_magenta(pixels: *const u8, len: i32) -> i32;
 
     // WGC capture methods
+    fn wgc_init_apartment();
+    fn wgc_deinit_apartment();
     fn wgc_stream_start(hwnd: isize, max_dim: i32) -> *mut std::ffi::c_void;
+    fn wgc_stream_start_monitor(hmon: isize, max_dim: i32) -> *mut std::ffi::c_void;
     fn wgc_stream_read(h: *mut std::ffi::c_void, buf: *mut u8, buf_size: i32,
                        out_w: *mut i32, out_h: *mut i32, out_ch: *mut i32) -> i32;
     fn wgc_stream_is_ok(h: *mut std::ffi::c_void) -> i32;
-    fn wgc_stream_stop(h: *mut std::ffi::c_void);
+    fn wgc_stream_signal_stop(h: *mut std::ffi::c_void);
     fn wgc_capture_single(hwnd: isize, buf: *mut u8, buf_size: i32,
                           out_w: *mut i32, out_h: *mut i32, out_ch: *mut i32) -> i32;
+    #[allow(dead_code)]
+    fn wgc_capture_single_monitor(hmon: isize, buf: *mut u8, buf_size: i32,
+                                  out_w: *mut i32, out_h: *mut i32, out_ch: *mut i32) -> i32;
 }
 
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::sync::Mutex;
+use std::sync::{Mutex, Arc, Barrier};
 use std::thread;
 use serde::Serialize;
 use tauri::Emitter;
 use std::time::Instant;
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetWindowTextW, GetWindowLongPtrW, IsWindowVisible,
-    GetDesktopWindow, GetWindow, GetWindowRect, GetSystemMetrics, IsWindow,
+    GetWindow, GetWindowRect, GetSystemMetrics,
     GW_OWNER, GWL_STYLE, GWL_EXSTYLE, WS_CAPTION, WS_EX_TOOLWINDOW,
     SM_CXSCREEN, SM_CYSCREEN,
 };
@@ -48,21 +54,31 @@ use windows::Win32::Foundation::{RECT, HWND, BOOL, TRUE, LPARAM};
 
 mod protocol;
 mod payload;
+mod mjpeg_server;
+mod h264_encoder;
 mod transport;
 
 // ── Session-based debug logging ──
 // Each launch creates a new log file: agent_20260704_174500.log, max 5 kept
+// In-memory buffer mirrors the file so read_logs() returns unified content.
 static LOG_FILE: Mutex<Option<std::fs::File>> = Mutex::new(None);
+static LOG_MEMORY: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new()); // [(ts, msg)]
 
 macro_rules! dlog {
-    ($($arg:tt)*) => {
+    ($($arg:tt)*) => {{
+        let ts = chrono::Local::now().format("%H:%M:%S%.3f").to_string();
+        let msg = format!($($arg)*);
         if let Ok(mut guard) = $crate::LOG_FILE.lock() {
             if let Some(ref mut f) = *guard {
-                let _ = writeln!(f, "[{}] {}", chrono::Local::now().format("%H:%M:%S%.3f"), format!($($arg)*));
-                let _ = f.flush(); // flush immediately so crash doesn't lose log
+                let _ = writeln!(f, "[{}] {}", ts, msg);
+                let _ = f.flush();
             }
         }
-    }
+        if let Ok(mut guard) = $crate::LOG_MEMORY.lock() {
+            guard.push((ts, msg));
+            if guard.len() > 5000 { guard.remove(0); }
+        }
+    }}
 }
 
 fn find_project_log_dir() -> std::path::PathBuf {
@@ -105,7 +121,7 @@ fn init_log(max_logs: usize) {
 
     match OpenOptions::new().create(true).append(true).open(&log_path) {
         Ok(f) => {
-            let _ = writeln!(&f, "=== Game Agent Monitor v0.1.0 ===");
+            let _ = writeln!(&f, "=== Game Agent Monitor v{} ===", env!("CARGO_PKG_VERSION"));
             let _ = writeln!(&f, "Session: {} | PID: {}", ts, std::process::id());
             let _ = writeln!(&f, "Log: {}", log_path.display());
             *LOG_FILE.lock().unwrap() = Some(f);
@@ -376,11 +392,11 @@ fn base64_encode(data: &[u8]) -> String {
 // ── Capture Stream (Rust-native, multi-method, BMP → frontend <img>) ──
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use std::net::{TcpListener, TcpStream};
 
 struct StreamState {
     running: Arc<AtomicBool>,
+    capture_thread: Option<std::thread::JoinHandle<()>>,
 }
 
 // ── Yellow highlight overlay ──────────────────────────
@@ -562,6 +578,7 @@ fn bgra_to_rgba(pixels: &[u8]) -> Vec<u8> {
 }
 
 /// Nearest-neighbor downscale BGRA → RGBA. Integer arithmetic, no f64.
+#[allow(dead_code)]
 fn scale_bgra_to_rgba(pixels: &[u8], w: i32, h: i32, max_dim: i32) -> (Vec<u8>, i32, i32) {
     let max_src = w.max(h);
     if max_src <= max_dim {
@@ -598,6 +615,7 @@ fn scale_bgra_to_rgba(pixels: &[u8], w: i32, h: i32, max_dim: i32) -> (Vec<u8>, 
 
 /// BGRA pixels (raw), w, h, method. No BMP/base64 until poll time.
 static STREAM_FRAME: Mutex<(Vec<u8>, i32, i32, String)> = Mutex::new((Vec::new(), 0, 0, String::new()));
+static H264_ENCODER: Mutex<Option<h264_encoder::H264EncoderHandle>> = Mutex::new(None);
 // Raw BGRA pixels for TCP clients (scaled, uncompressed).
 static RAW_FRAME: Mutex<(Vec<u8>, i32, i32)> = Mutex::new((Vec::new(), 0, 0));
 
@@ -686,6 +704,34 @@ unsafe fn capture_with_method_ffi(hwnd: u64, method: &str) -> Option<(Vec<u8>, i
 // ── WGC capture via static-linked C++ FFI ───────────────
 /// Call into C++ WgcCapture library, feed frames into
 /// STREAM_FRAME / RAW_FRAME / stream-tick pipeline.
+
+/// Set to true to dump all captured frames to test/frames/ for debugging.
+static DEBUG_DUMP_FRAMES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn find_project_root() -> std::path::PathBuf {
+    if let Ok(exe) = std::env::current_exe() {
+        let mut dir = exe.parent().unwrap_or(&exe).to_path_buf();
+        for _ in 0..8 {
+            if dir.join("CLAUDE.md").exists() { return dir; }
+            if !dir.pop() { break; }
+        }
+    }
+    std::env::current_dir().unwrap_or_default()
+}
+
+fn dump_frame_to_file(pixels: &[u8], w: i32, h: i32, frame_num: u64) {
+    let dir = find_project_root().join("test/frames");
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join(format!("frame_{:05}.bgra", frame_num));
+    // Write simple header: [w:4 LE][h:4 LE] then raw BGRA pixels
+    if let Ok(mut f) = std::fs::File::create(&path) {
+        use std::io::Write;
+        let _ = f.write_all(&w.to_le_bytes());
+        let _ = f.write_all(&h.to_le_bytes());
+        let _ = f.write_all(pixels);
+    }
+}
+
 fn run_wgc_stream(
     hwnd: u64,
     app: tauri::AppHandle,
@@ -693,18 +739,48 @@ fn run_wgc_stream(
 ) {
     let max_px = 3840 * 2160 * 4; // 4K BGRA
     let mut buf = vec![0u8; max_px];
-    let handle = unsafe { wgc_stream_start(hwnd as isize, 1280) };
+
+    // Desktop capture (hwnd=0): use WGC monitor capture
+    let handle = if hwnd == 0 {
+        let hmon = unsafe {
+            use windows::Win32::Graphics::Gdi::MonitorFromWindow;
+            MonitorFromWindow(
+                windows::Win32::Foundation::HWND(std::ptr::null_mut()),
+                windows::Win32::Graphics::Gdi::MONITOR_DEFAULTTOPRIMARY,
+            )
+        };
+        unsafe { wgc_stream_start_monitor(hmon.0 as isize, 1280) }
+    } else {
+        unsafe { wgc_stream_start(hwnd as isize, 1280) }
+    };
+
     if handle.is_null() {
         dlog!("wgc: failed to start stream for hwnd={}", hwnd);
+        // Signal frontend that capture failed
+        let _ = app.emit("stream-tick", serde_json::json!({"method": "WGC", "error": "init_failed"}));
         return;
     }
     dlog!("wgc: stream started for hwnd={}", hwnd);
 
+    // Clear test frames from last session
+    if DEBUG_DUMP_FRAMES.load(Ordering::Relaxed) {
+        let dir = find_project_root().join("test/frames");
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::create_dir_all(&dir);
+        dlog!("wgc: debug frame dump enabled → test/frames/");
+    }
+
     let mut frames: u64 = 0;
-    let fps_t0 = Instant::now();
+    let mut last_fps_log = Instant::now();
+    let mut last_tick = Instant::now();
+    const TICK_INTERVAL_MS: u64 = 33;
+    const FPS_LOG_INTERVAL_S: u64 = 5;
 
     while running.load(Ordering::Relaxed) {
-        if unsafe { wgc_stream_is_ok(handle) } == 0 { break; }
+        if unsafe { wgc_stream_is_ok(handle) } == 0 {
+            dlog!("wgc: stream not OK, exiting");
+            break;
+        }
 
         let (mut w, mut h, mut ch) = (0i32, 0i32, 0i32);
         let size = unsafe {
@@ -712,11 +788,15 @@ fn run_wgc_stream(
                             &mut w, &mut h, &mut ch)
         };
         if size <= 0 || w <= 0 || h <= 0 || ch <= 0 {
-            std::thread::sleep(std::time::Duration::from_millis(1));
+            std::thread::sleep(std::time::Duration::from_millis(2));
             continue;
         }
         let pixels = &buf[..size as usize];
-        let t0 = Instant::now();
+
+        // Debug: dump raw BGRA frames to test/frames/
+        if DEBUG_DUMP_FRAMES.load(Ordering::Relaxed) && frames < 10 {
+            dump_frame_to_file(pixels, w, h, frames);
+        }
 
         // Pack raw BGRA for TCP broadcast
         let payload = payload::bgra::pack(pixels, w as u32, h as u32, ch as u32);
@@ -724,229 +804,164 @@ fn run_wgc_stream(
             *raw = (payload, w, h);
         }
 
-        // Raw RGBA for frontend Canvas (BGRA→RGBA swap)
+        // BGRA→RGBA swap for frontend Canvas (C++ already scaled to max 1280)
         let rgba = bgra_to_rgba(pixels);
         if let Ok(mut state) = STREAM_FRAME.lock() {
             *state = (rgba, w, h, "WGC".to_string());
         }
 
+        // Throttle: only emit stream-tick at 30Hz to prevent frontend overload.
+        // STREAM_FRAME is always updated so the latest frame is available when polled.
+        let now = Instant::now();
+        if now.duration_since(last_tick).as_millis() as u64 >= TICK_INTERVAL_MS {
+            last_tick = now;
+            // Push to MJPEG server (zero-overhead <img> rendering in frontend)
+        mjpeg_server::push_mjpeg_frame(pixels, w as u32, h as u32);
+
+        // Push to H.264 encoder if active
+        if let Ok(enc_guard) = H264_ENCODER.lock() {
+            if let Some(ref enc) = *enc_guard {
+                enc.push(pixels, w as u32, h as u32);
+            }
+        }
+
         let _ = app.emit("stream-tick", serde_json::json!({"method": "WGC"}));
+        }
         frames += 1;
 
-        if frames % 60 == 0 {
-            dlog!("wgc: {} frames bmp={}us", frames, t0.elapsed().as_micros());
-        }
-        if frames > 0 && frames % 120 == 0 {
-            let elapsed = fps_t0.elapsed().as_secs_f64();
-            dlog!("wgc: {} frames in {:.1}s = {:.0}fps", frames, elapsed, frames as f64 / elapsed);
+        // FPS log every N seconds (time-based, not frame-based)
+        {
+            let now = Instant::now();
+            let dt = now.duration_since(last_fps_log).as_secs();
+            if dt >= FPS_LOG_INTERVAL_S {
+                let fps = frames as f64 / dt as f64;
+                dlog!("wgc: {} frames in {}s = {:.0} FPS {}x{}", frames, dt, fps, w, h);
+                frames = 0;
+                last_fps_log = now;
+            }
         }
     }
 
-    unsafe { wgc_stream_stop(handle); }
+    // Signal C++ worker to stop without blocking (join can hang in WinRT)
+    unsafe { wgc_stream_signal_stop(handle); }
     dlog!("wgc: stream exited after {} frames", frames);
 }
 
 #[tauri::command]
-fn capture_stream_start(app: tauri::AppHandle, hwnd: u64, tcp_port: Option<u16>, method: Option<String>) -> Result<String, String> {
+fn capture_stream_start(app: tauri::AppHandle, hwnd: u64, tcp_port: Option<u16>, method: Option<String>, transport: Option<String>) -> Result<String, String> {
     let _ = capture_stream_stop();
 
     let port = tcp_port.unwrap_or(protocol::DEFAULT_TCP_PORT);
     let method_str = method.as_deref().unwrap_or("auto");
 
     let running = Arc::new(AtomicBool::new(true));
-    let running_clone = running.clone();
 
-    // WGC is statically linked — always available
-    let use_wgc = if method_str == "wgc" {
-        true
-    } else if method_str == "auto" || method_str.is_empty() {
-        hwnd != 0
-    } else {
-        false
-    };
+    // Always use WGC — OBS-compatible approach.
+    // GDI disabled: too slow (45ms BitBlt + 35ms scale for 1080p), can't capture
+    // background/occluded windows, fails on multi-monitor edge cases.
+    let transport_str = transport.as_deref().unwrap_or("mjpeg");
+    dlog!("stream_start: hwnd={} port={} method={} transport={} using=WGC", hwnd, port, method_str, transport_str);
 
-    dlog!("stream_start: hwnd={} port={} method={} use_wgc={}", hwnd, port, method_str, use_wgc);
-
-    // Start TCP broadcast server (works for both WGC and GDI)
+    // Start TCP broadcast server
     let tcp_running = running.clone();
     thread::spawn(move || { tcp_broadcast_thread(port, tcp_running); });
 
-    if use_wgc {
-        // ── WGC path: subprocess-based GPU capture ──
-        // Emit method tag immediately so frontend shows "WGC" right away
-        let _ = app.emit("stream-tick", serde_json::json!({"method": "WGC"}));
-
-        let wgc_running = running.clone();
-        let wgc_app = app.clone();
-        thread::spawn(move || { run_wgc_stream(hwnd, wgc_app, wgc_running); });
-        *STREAM.lock().unwrap() = Some(StreamState { running });
-        return Ok("started (wgc)".into());
+    // Start MJPEG server if transport is mjpeg or h264 (MJPEG as fallback preview)
+    const MJPEG_PORT: u16 = 9998;
+    if transport_str == "mjpeg" || transport_str == "h264" {
+        mjpeg_server::start_mjpeg_server(MJPEG_PORT);
+        dlog!("mjpeg: server started on port {}", MJPEG_PORT);
     }
 
-    // ── GDI / explicit method stream loop ──
-    let explicit_method: Option<String> = if method_str != "auto" && !method_str.is_empty() {
-        Some(method_str.to_string())
-    } else {
-        None
-    };
-
-    thread::spawn(move || {
-        let hwnd_ptr = HWND(std::ptr::with_exposed_provenance_mut::<std::ffi::c_void>(hwnd as usize));
-        let mut stream_method: String;
-        let mut w: i32;
-        let mut h: i32;
-
-        if let Some(ref m) = explicit_method {
-            stream_method = normalize_method(m).to_string();
-            let is_desk = hwnd == 0 || hwnd_ptr == unsafe { GetDesktopWindow() };
-            if is_desk {
-                unsafe { w = GetSystemMetrics(SM_CXSCREEN); h = GetSystemMetrics(SM_CYSCREEN); }
-            } else {
-                let mut wr = RECT::default();
-                if unsafe { GetWindowRect(hwnd_ptr, &mut wr).is_err() } {
-                    dlog!("stream: GetWindowRect failed, aborting"); return;
-                }
-                w = wr.right - wr.left; h = wr.bottom - wr.top;
+    // Start H.264 encoder if transport is h264
+    const H264_PORT: u16 = 9997;
+    if transport_str == "h264" {
+        let h264_dir = find_project_root().join("test");
+        let _ = std::fs::create_dir_all(&h264_dir);
+        match h264_encoder::H264EncoderHandle::new(&h264_dir, 1920, 1080, 30) {
+            Ok(enc) => {
+                let path = enc.output_path().to_path_buf();
+                let h264_running = running.clone();
+                h264_encoder::start_video_server(H264_PORT, path, h264_running);
+                *H264_ENCODER.lock().unwrap() = Some(enc);
+                dlog!("h264: encoder started, video server on port {}", H264_PORT);
             }
-            if w <= 0 || h <= 0 { dlog!("stream: zero-size window, aborting"); return; }
-            dlog!("stream: explicit method={} {}x{}", stream_method, w, h);
-        } else {
-            let detect = unsafe { capture_auto_detect_ffi(hwnd) };
-            if let Some((pixels, pw, ph, method)) = detect {
-                stream_method = normalize_method(&method).to_string();
-                w = pw; h = ph;
-                dlog!("stream: detected method={} {}x{}", stream_method, w, h);
-                // Display first frame immediately
-                let rgba = bgra_to_rgba(&pixels);
-                if let Ok(mut state) = STREAM_FRAME.lock() {
-                    *state = (rgba, w, h, stream_method.clone());
-                }
-                let _ = app.emit("stream-tick", serde_json::json!({"method": &stream_method}));
-            } else {
-                dlog!("stream: no working capture method, aborting"); return;
-            }
+            Err(e) => dlog!("h264: encoder init failed: {}", e),
         }
+    }
 
-        let hwnd_ptr = HWND(std::ptr::with_exposed_provenance_mut::<std::ffi::c_void>(hwnd as usize));
-        let target_ms = 16u64; // 60fps
-        let mut frames: u64 = 0;
-        let mut prev_pixels: Vec<u8> = Vec::new();
-        let mut recheck_counter = 0u32;
-        let fps_t0 = Instant::now();
+    // WGC capture thread
+    let _ = app.emit("stream-tick", serde_json::json!({"method": "WGC"}));
+    let wgc_running = running.clone();
+    let wgc_app = app.clone();
+    let capture_thread = thread::spawn(move || { run_wgc_stream(hwnd, wgc_app, wgc_running); });
 
-        while running_clone.load(Ordering::Relaxed) {
-            // Window gone → abort (skip for desktop)
-            if hwnd != 0 && unsafe { !IsWindow(hwnd_ptr).as_bool() } {
-                dlog!("stream: window closed, stopping");
-                break;
-            }
+    *STREAM.lock().unwrap() = Some(StreamState { running, capture_thread: Some(capture_thread) });
+    Ok("started (wgc)".into())
+}
 
-            let frame_t0 = Instant::now();
-            let result = unsafe { capture_fast_ffi(hwnd, &stream_method) };
-            let cap_us = frame_t0.elapsed().as_micros();
-
-            if let Some((pixels, pw, ph)) = result {
-                w = pw; h = ph;
-
-                // Frame differ: skip unchanged frames in auto mode only.
-                // Explicit method: always send frames — user chose this method
-                // and expects continuous preview (e.g. DXGI desktop).
-                let skip_differ = explicit_method.is_none()
-                    && pixels.len() == prev_pixels.len() && pixels == prev_pixels;
-
-                if skip_differ {
-                    if let Ok(mut state) = STREAM_FRAME.lock() {
-                        state.3 = stream_method.clone();
-                    }
-                } else {
-                    // Pack raw BGRA for TCP broadcast (before scaling for preview)
-                    let tcp_payload = payload::bgra::pack(&pixels, w as u32, h as u32, 4);
-                    if let Ok(mut raw) = RAW_FRAME.lock() {
-                        *raw = (tcp_payload, w, h);
-                    }
-
-                    let t_pack = Instant::now();
-                    // Scale+swap BGRA→RGBA in one pass (no intermediate buffer)
-                    let (preview_rgba, pw, ph) = scale_bgra_to_rgba(&pixels, w, h, 1280);
-                    let scale_us = t_pack.elapsed().as_micros();
-
-                    let t_store = Instant::now();
-                    prev_pixels = pixels;
-                    if let Ok(mut state) = STREAM_FRAME.lock() {
-                        *state = (preview_rgba, pw, ph, stream_method.clone());
-                    }
-                    let store_us = t_store.elapsed().as_micros();
-
-                    // Per-frame timing every 60 frames (avoid log flooding)
-                    if frames % 60 == 0 {
-                        let total_us = frame_t0.elapsed().as_micros();
-                        dlog!("frame #{} cap={}us scale={}us store={}us total={}us {}x{}→{}x{}", frames, cap_us, scale_us, store_us, total_us, w, h, pw, ph);
-                    }
-                }
-                let _ = app.emit("stream-tick", serde_json::json!({"method": &stream_method}));
-                frames += 1;
-                recheck_counter = 0;
-            } else {
-                // Auto mode: re-detect after 30 consecutive failures
-                // Explicit method: just emit tick so frontend doesn't freeze
-                if explicit_method.is_none() {
-                    recheck_counter += 1;
-                    if recheck_counter > 30 {
-                        if let Some((_, _pw, _ph, method)) = unsafe { capture_auto_detect_ffi(hwnd) } {
-                            stream_method = normalize_method(&method).to_string();
-                            dlog!("stream: re-detected method={}", stream_method);
-                        }
-                        recheck_counter = 0;
-                    }
-                } else {
-                    // Explicit method: emit tick so frontend shows we're still alive
-                    let _ = app.emit("stream-tick", serde_json::json!({"method": &stream_method}));
-                }
-            }
-
-            // FPS log every 120 frames
-            if frames > 0 && frames % 120 == 0 {
-                let elapsed = fps_t0.elapsed().as_secs_f64();
-                dlog!("stream: {} frames in {:.1}s = {:.0}fps method={}",
-                    frames, elapsed, frames as f64 / elapsed, stream_method);
-            }
-
-            // Frame pacing
-            let elapsed = frame_t0.elapsed().as_millis() as u64;
-            if elapsed < target_ms { std::thread::sleep(std::time::Duration::from_millis(target_ms - elapsed)); }
-        }
-        dlog!("stream: exited after {} frames", frames);
-    });
-
-    *STREAM.lock().unwrap() = Some(StreamState { running });
-    Ok("started".into())
+#[tauri::command]
+fn debug_dump_frames(enable: bool) {
+    DEBUG_DUMP_FRAMES.store(enable, Ordering::Relaxed);
+    dlog!("debug_dump_frames: {}", enable);
 }
 
 #[tauri::command]
 fn stream_poll() -> String {
-    if let Ok(state) = STREAM_FRAME.lock() {
-        let (ref pixels, w, h, ref method) = *state;
-        if !pixels.is_empty() {
-            let b64 = base64_encode(pixels);
-            return serde_json::json!({
-                "p": b64,
-                "w": w,
-                "h": h,
-                "m": method
-            }).to_string();
+    // Copy frame data under lock, then encode outside lock.
+    // base64 on 3.7MB RGBA takes ~200ms — holding the lock that long
+    // blocks the capture thread from storing new frames (causing 250ms stalls).
+    let snapshot: Option<(Vec<u8>, i32, i32, String)> = {
+        if let Ok(state) = STREAM_FRAME.lock() {
+            let (ref pixels, w, h, ref method) = *state;
+            if !pixels.is_empty() {
+                Some((pixels.clone(), w, h, method.clone()))
+            } else {
+                None
+            }
+        } else {
+            None
         }
+    };
+    if let Some((pixels, w, h, method)) = snapshot {
+        let b64 = base64_encode(&pixels);
+        return serde_json::json!({
+            "p": b64,
+            "w": w,
+            "h": h,
+            "m": method
+        }).to_string();
     }
     String::new()
 }
 
 #[tauri::command]
 fn capture_stream_stop() -> Result<String, String> {
-    let mut state = STREAM.lock().unwrap();
-    if let Some(ref s) = *state {
-        s.running.store(false, Ordering::Relaxed);
-        dlog!("stream_stop: signaled stop");
+    let thread_to_join: Option<std::thread::JoinHandle<()>>;
+    {
+        let mut state = STREAM.lock().unwrap();
+        if let Some(ref s) = *state {
+            s.running.store(false, Ordering::Relaxed);
+            dlog!("stream_stop: signaled stop");
+        }
+        thread_to_join = state.take().and_then(|s| s.capture_thread);
     }
-    *state = None;
+    // Join the capture thread OUTSIDE the lock to avoid deadlock
+    if let Some(handle) = thread_to_join {
+        dlog!("stream_stop: waiting for capture thread...");
+        let _ = handle.join();
+        dlog!("stream_stop: capture thread joined");
+    }
+    mjpeg_server::stop_mjpeg_server();
+    dlog!("stream_stop: mjpeg server stopped");
+    // Finalize H.264 encoder
+    if let Ok(mut enc_guard) = H264_ENCODER.lock() {
+        if let Some(ref enc) = *enc_guard {
+            enc.stop();
+            dlog!("stream_stop: h264 encoder stopped");
+        }
+        *enc_guard = None;
+    }
     Ok("stopped".into())
 }
 
@@ -967,6 +982,14 @@ struct LogFile { name: String, lines: Vec<String> }
 fn read_logs(max_files: usize) -> Vec<LogFile> {
     let log_dir = find_project_log_dir();
     let mut result = Vec::new();
+
+    // First entry: current session's in-memory log buffer (live)
+    if let Ok(guard) = LOG_MEMORY.lock() {
+        if !guard.is_empty() {
+            let lines: Vec<String> = guard.iter().map(|(ts, msg)| format!("[{}] {}", ts, msg)).collect();
+            result.push(LogFile { name: "[live]".into(), lines });
+        }
+    }
 
     if let Ok(entries) = std::fs::read_dir(&log_dir) {
         let mut log_files: Vec<_> = entries
@@ -1033,9 +1056,8 @@ fn log_ui_event(msg: String) {
 /// Archive current log file and start a new session log.
 #[tauri::command]
 fn clear_log() {
-    // Close current log file (old file stays on disk as archive)
     *LOG_FILE.lock().unwrap() = None;
-    // Start new session with fresh timestamped file
+    LOG_MEMORY.lock().unwrap().clear();
     init_log(5);
     dlog!("New session started (previous log archived)");
 }
@@ -1051,7 +1073,47 @@ fn window_state(hwnd: u64) -> String {
 
 fn main() {
     init_log(5);  // keep max 5 log files
+
+    // Log panics to disk before crash
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        // Try to write panic info to log
+        if let Ok(mut guard) = LOG_FILE.lock() {
+            if let Some(ref mut f) = *guard {
+                let loc = info.location().map(|l| format!("{}:{}", l.file(), l.line())).unwrap_or_default();
+                let msg = info.payload().downcast_ref::<&str>().map(|s| *s)
+                    .or_else(|| info.payload().downcast_ref::<String>().map(|s| s.as_str()))
+                    .unwrap_or("(non-string panic)");
+                let _ = writeln!(f, "[PANIC] {} — {}", loc, msg);
+                let _ = f.flush();
+            }
+        }
+        default_hook(info);
+    }));
+
     dlog!("Starting Tauri application...");
+
+    // Initialize WinRT MTA apartment on a dedicated thread.
+    // Must NOT be on the main thread — Tauri/winit initializes COM as STA
+    // via OleInitialize(), which conflicts with MTA (RPC_E_CHANGED_MODE).
+    // This daemon thread stays alive to keep the MTA alive.
+    let mta_ready = Arc::new(Barrier::new(2));
+    let mta_shutdown = Arc::new(AtomicBool::new(false));
+    let mta_ready_clone = mta_ready.clone();
+    let mta_shutdown_clone = mta_shutdown.clone();
+    std::thread::spawn(move || {
+        unsafe { wgc_init_apartment(); }
+        mta_ready_clone.wait();
+        // Keep MTA alive until shutdown
+        while !mta_shutdown_clone.load(Ordering::Relaxed) {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        unsafe { wgc_deinit_apartment(); }
+    });
+    mta_ready.wait(); // block until MTA initialized
+    dlog!("WinRT apartment initialized (MTA)");
+    // Store shutdown flag for cleanup (will be set at process exit)
+    // Note: the daemon thread is cleaned up when the process exits.
 
     // Start overlay position tracker
     start_overlay_tracker();
@@ -1061,7 +1123,8 @@ fn main() {
             list_windows, list_processes,
             capture_single, capture_window,
             capture_stream_start, capture_stream_stop, stream_poll,
-            highlight_window, screen_info, read_logs, log_ui_event, clear_log, window_state, benchmark_methods
+            highlight_window, screen_info, read_logs, log_ui_event, clear_log,
+            window_state, benchmark_methods, debug_dump_frames
         ])
         .setup(|_app| {
             dlog!("Tauri setup complete, window created");
@@ -1084,4 +1147,8 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("error while running game agent monitor");
+
+    // Signal MTA daemon thread to shutdown (it will call wgc_deinit_apartment)
+    mta_shutdown.store(true, Ordering::Relaxed);
+    dlog!("Application shutdown complete");
 }

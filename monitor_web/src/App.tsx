@@ -450,7 +450,8 @@ function ConnectionPanel({ onSelect, onDisconnect, forceMethod, setForceMethod, 
 }
 
 // ═══ Screenshot Panel ───
-function ScreenshotPanel({ selWin, screenRatio, forceMethod, winState, expanded, onToggle }: { selWin?: WindowInfo; screenRatio: number; forceMethod: string; winState: string; expanded: boolean; onToggle: () => void }) {
+function ScreenshotPanel({ selWin, screenRatio, forceMethod, transportMethod, winState, expanded, onToggle }: { selWin?: WindowInfo; screenRatio: number; forceMethod: string; transportMethod: string; winState: string; expanded: boolean; onToggle: () => void }) {
+  const MJPEG_URL = 'http://127.0.0.1:9998/stream'
   const [previewing, setPreviewing] = useState(false)
   const [imgSrc, setImgSrc] = useState('')       // single-frame PNG (Camera btn)
   const [imgStyle, setImgStyle] = useState<React.CSSProperties>({})
@@ -499,34 +500,21 @@ function ScreenshotPanel({ selWin, screenRatio, forceMethod, winState, expanded,
         addLog(`[Preview] blocked: window minimized, ${forceMethod} cannot capture`); return
       }
       addLog(`[Preview] ${selWin?.title ?? 'desktop'} [${forceMethod}]`)
-      try { await invoke<string>('capture_stream_start', { hwnd, tcpPort: 9999, method: forceMethod }) }
+      try { await invoke<string>('capture_stream_start', { hwnd, tcpPort: 9999, method: forceMethod, transport: transportMethod }) }
       catch (e) { addLog(`[Preview] start failed: ${e}`); return }
 
-      previewingRef.current = true; setPreviewing(true); setImgSrc('')
-      framesRef.current = 0; lastFpsRef.current = Date.now()
+      // Auto-expand panel
+      if (!expanded) onToggle()
+      previewingRef.current = true; setPreviewing(true);
+      // Use MJPEG stream — browser <img> natively handles multipart/x-mixed-replace.
+      // Cache-bust to force fresh connection each start.
+      setImgSrc(`${MJPEG_URL}?t=${Date.now()}`)
+      setFps(0)
 
-      const unlisten = await listen<{ method: string }>('stream-tick', async (event) => {
+      // Listen for stream-tick for FPS counting only (rendering is via <img>)
+      const unlisten = await listen<{ method: string }>('stream-tick', (event) => {
         if (!previewingRef.current) return
         if (event.payload.method) setCapMethod(event.payload.method)
-        try {
-          const json = await invoke<string>('stream_poll')
-          if (json && canvasRef.current) {
-            const data = JSON.parse(json)  // {p: base64, w, h, m}
-            const canvas = canvasRef.current
-            if (canvas.width !== data.w || canvas.height !== data.h) {
-              canvas.width = data.w; canvas.height = data.h
-              setCanvasDims({ w: data.w, h: data.h })
-            }
-            const ctx = canvas.getContext('2d')
-            if (ctx) {
-              const binary = atob(data.p)
-              const bytes = new Uint8Array(binary.length)
-              for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-              const imgData = new ImageData(new Uint8ClampedArray(bytes.buffer), data.w, data.h)
-              ctx.putImageData(imgData, 0, 0)
-            }
-          }
-        } catch (_) {}
         framesRef.current++
         const now = Date.now(); const elapsed = now - lastFpsRef.current
         if (elapsed >= 1000) { setFps(Math.round(framesRef.current * 1000 / elapsed)); framesRef.current = 0; lastFpsRef.current = now }
@@ -593,8 +581,9 @@ function ScreenshotPanel({ selWin, screenRatio, forceMethod, winState, expanded,
             <div className="w-full rounded-lg bg-bg-primary overflow-hidden flex items-center justify-center relative"
               style={{ aspectRatio: screenRatio }}>
               {previewing ? (
-                <canvas ref={canvasRef} className="max-w-full max-h-full object-contain"
-                  style={{ width: canvasDims.w, height: canvasDims.h }} />
+                <img src={imgSrc || `${MJPEG_URL}?t=${Date.now()}`}
+                  className="max-w-full max-h-full object-contain"
+                  alt="MJPEG stream" />
               ) : imgSrc ? (
                 <img src={imgSrc} style={imgStyle} alt="preview" />
               ) : (
@@ -826,13 +815,30 @@ function SettingsCard({ icon, title, defaultExpanded, children }: {
 }
 
 // ═══ Settings Page ═══
-function SettingsPage({ forceMethod, setForceMethod, selWin, winState, onSelect, onDisconnect }: { forceMethod: string; setForceMethod: (m: string) => void; selWin?: WindowInfo; winState: string; onSelect: (w: WindowInfo) => void; onDisconnect: () => void }) {
+function SettingsPage({ forceMethod, setForceMethod, transportMethod, setTransportMethod, selWin, winState, onSelect, onDisconnect }: { forceMethod: string; setForceMethod: (m: string) => void; transportMethod: string; setTransportMethod: (m: string) => void; selWin?: WindowInfo; winState: string; onSelect: (w: WindowInfo) => void; onDisconnect: () => void }) {
   const colors = ['#3B82F6','#8B5CF6','#EC4899','#F59E0B','#10B981','#EF4444']
   const [accent, setAccent] = useState('#3B82F6')
   const [connExpanded, setConnExpanded] = useState(true)
   return (
     <div className="flex-1 overflow-y-auto p-6 space-y-3">
       <ConnectionPanel onSelect={onSelect} onDisconnect={onDisconnect} forceMethod={forceMethod} setForceMethod={setForceMethod} selWin={selWin} winState={winState} showMethod expanded={connExpanded} onToggle={() => setConnExpanded(v => !v)} />
+
+      <SettingsCard icon={<Monitor className="w-4 h-4 text-text-secondary" />} title="Transport">
+        <div className="text-xs text-text-muted mb-2">How frames are sent to the frontend for preview.</div>
+        <div className="flex gap-2">
+          {[
+            ['mjpeg','MJPEG','JPEG stream via HTTP, browser GPU decode — fast'],
+            ['base64','Base64','Raw RGBA via JSON/base64 — legacy, slow'],
+            ['h264','H.264','GPU MFT encode — coming soon'],
+          ].map(([v, label, desc]) =>
+            <button key={v} onClick={() => { setTransportMethod(v); addLog(`[Transport] ${v}`) }}
+              className={`flex-1 p-3 rounded-lg border text-left transition-colors ${transportMethod === v ? 'border-accent bg-accent/10' : 'border-border bg-bg-primary hover:bg-bg-hover'}`}>
+              <div className="text-sm font-medium text-text-primary">{label}</div>
+              <div className="text-xs text-text-muted mt-1">{desc}</div>
+            </button>
+          )}
+        </div>
+      </SettingsCard>
 
       <SettingsCard icon={<Sun className="w-4 h-4 text-text-secondary" />} title="Theme">
         <div className="flex items-center gap-2 mb-2">
@@ -1098,6 +1104,7 @@ export default function App() {
   const [selWindow, setSelWindow] = useState<WindowInfo>({ title: ' Entire Desktop', category: 'desktop', hwnd: 0 })
   const [screenRatio, setScreenRatio] = useState(16/9)
   const [forceMethod, setForceMethod] = useState('dxgi')
+  const [transportMethod, setTransportMethod] = useState('mjpeg')
   const [winState, setWinState] = useState('desktop')
   const lastWinStateRef = useRef('desktop')
 
@@ -1169,7 +1176,7 @@ export default function App() {
             </div>
           )}
           {tab === 'Log' && <LogPanel />}
-          {tab === 'Settings' && <SettingsPage forceMethod={forceMethod} setForceMethod={setForceMethod} selWin={selWindow} winState={winState} onSelect={setSelWindow} onDisconnect={() => { setSelWindow({ title: ' Entire Desktop', category: 'desktop', hwnd: 0 }); addLog('[Connection] disconnected, back to desktop') }} />}
+          {tab === 'Settings' && <SettingsPage forceMethod={forceMethod} setForceMethod={setForceMethod} transportMethod={transportMethod} setTransportMethod={setTransportMethod} selWin={selWindow} winState={winState} onSelect={setSelWindow} onDisconnect={() => { setSelWindow({ title: ' Entire Desktop', category: 'desktop', hwnd: 0 }); addLog('[Connection] disconnected, back to desktop') }} />}
           <BottomBar running={running} fps={0} lat={0} />
         </div>
         <Tooltip text={rightCollapsed ? "向右拖拽展开面板" : "拖拽调整面板宽度，向右拖到底可折叠"}>
@@ -1184,7 +1191,7 @@ export default function App() {
               setSelWindow({ title: ' Entire Desktop', category: 'desktop', hwnd: 0 })
               addLog('[Connection] disconnected, back to desktop')
             }} forceMethod={forceMethod} selWin={selWindow} winState={winState} expanded={connectionExpanded} onToggle={() => setConnectionExpanded(v => !v)} /></div>
-            <div className="shrink-0 overflow-hidden"><ScreenshotPanel selWin={selWindow} screenRatio={screenRatio} forceMethod={forceMethod} winState={winState} expanded={screenshotExpanded} onToggle={() => setScreenshotExpanded(v => !v)} /></div>
+            <div className="shrink-0 overflow-hidden"><ScreenshotPanel selWin={selWindow} screenRatio={screenRatio} forceMethod={forceMethod} transportMethod={transportMethod} winState={winState} expanded={screenshotExpanded} onToggle={() => setScreenshotExpanded(v => !v)} /></div>
             <div className="shrink-0"><LogPanel compact expanded={logExpanded} onToggle={() => setLogExpanded(v => !v)} /></div>
             <div className="flex-1" />
           </div>

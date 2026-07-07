@@ -1,25 +1,18 @@
 /**
  * capture_wgc.cpp — WGC FramePool capture implementation.
  *
- * Design for 60+ FPS:
- *   - Triple-buffered staging textures: while CPU reads staging[N],
- *     GPU can copy next frame to staging[N+1].
- *   - Reuse all buffers (no per-frame alloc).
- *   - Do work between CopyResource and Map (e.g. TCP send of prev frame)
- *     so GPU has time to finish the copy before CPU maps.
- *   - Timing breakdown: cap → copy → readback → total.
- *
- * Output format (stdout stream mode):
- *   [timestamp_us:8][w:4][h:4][ch:4][reserved:4][pixels: w*h*ch]
- *
- * Usage:
- *   capture_wgc.exe <hwnd> [--single|--stream]
+ * Follows OBS winrt-capture.cpp architecture:
+ *   - FrameArrived event registered (not polling without event)
+ *   - Condition variable for efficient frame waiting
+ *   - D3D texture desc used instead of ContentSize (more reliable)
+ *   - Safe staging buffer create-before-destroy
+ *   - Device loss handled via item.Closed event
+ *   - Borderless capture on Win11
+ *   - Format change detection
  */
 #include "../include/capture_wgc.hpp"
 #include <cstdlib>
 #include <cstring>
-#include <io.h>
-#include <fcntl.h>
 #include <thread>
 #include <atomic>
 
@@ -32,9 +25,6 @@ namespace wgc {
 bool WgcCapture::init(HWND hwnd) {
     if (ok_) return true;
 
-    // Must init WinRT apartment before calling WGC APIs
-    // (caller should have done winrt::init_apartment)
-
     if (!hwnd || !IsWindow(hwnd)) {
         last_error_ = "invalid HWND";
         return false;
@@ -45,7 +35,63 @@ bool WgcCapture::init(HWND hwnd) {
     if (!create_frame_pool()) return false;
 
     ok_ = true;
-    fprintf(stderr, "[wgc] init OK: %dx%d\n", item_w_, item_h_);
+    fprintf(stderr, "[wgc] init OK: %dx%d format=%d\n", item_w_, item_h_, (int)format_);
+    return true;
+}
+
+bool WgcCapture::init_monitor(HMONITOR hmon) {
+    if (ok_) return true;
+
+    if (!hmon) {
+        last_error_ = "invalid HMONITOR";
+        return false;
+    }
+
+    if (!create_d3d_device_monitor(hmon)) return false;
+    if (!create_capture_item_monitor(hmon)) return false;
+    if (!create_frame_pool()) return false;
+
+    ok_ = true;
+    fprintf(stderr, "[wgc] init_monitor OK: %dx%d\n", item_w_, item_h_);
+    return true;
+}
+
+bool WgcCapture::create_d3d_device_monitor(HMONITOR hmon) {
+    ComPtr<IDXGIFactory1> factory;
+    HRESULT hr = CreateDXGIFactory1(__uuidof(IDXGIFactory1), (void**)factory.GetAddressOf());
+    if (FAILED(hr)) {
+        last_error_ = "CreateDXGIFactory1 failed";
+        return false;
+    }
+
+    ComPtr<IDXGIAdapter1> adapter;
+    bool found = false;
+    for (UINT i = 0; factory->EnumAdapters1(i, adapter.GetAddressOf()) != DXGI_ERROR_NOT_FOUND; i++) {
+        ComPtr<IDXGIOutput> output;
+        for (UINT j = 0; adapter->EnumOutputs(j, output.GetAddressOf()) != DXGI_ERROR_NOT_FOUND; j++) {
+            DXGI_OUTPUT_DESC desc;
+            if (SUCCEEDED(output->GetDesc(&desc)) && desc.Monitor == hmon) {
+                found = true; break;
+            }
+            output.Reset();
+        }
+        if (found) break;
+        adapter.Reset();
+    }
+
+    D3D_DRIVER_TYPE driver = adapter ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE;
+    IDXGIAdapter* adapter_ptr = adapter ? adapter.Get() : nullptr;
+
+    hr = D3D11CreateDevice(
+        adapter_ptr, driver, nullptr,
+        D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+        nullptr, 0, D3D11_SDK_VERSION,
+        device_.GetAddressOf(), nullptr, ctx_.GetAddressOf());
+
+    if (FAILED(hr)) {
+        last_error_ = "D3D11CreateDevice failed";
+        return false;
+    }
     return true;
 }
 
@@ -90,6 +136,44 @@ bool WgcCapture::create_d3d_device(HWND hwnd) {
     return true;
 }
 
+bool WgcCapture::create_capture_item_monitor(HMONITOR hmon) {
+    ComPtr<IDXGIDevice> dxgi_dev;
+    if (FAILED(device_.As(&dxgi_dev))) {
+        last_error_ = "no IDXGIDevice";
+        return false;
+    }
+
+    winrt::com_ptr<::IInspectable> d3d_inspectable;
+    HRESULT hr = CreateDirect3D11DeviceFromDXGIDevice(dxgi_dev.Get(), d3d_inspectable.put());
+    if (FAILED(hr)) {
+        last_error_ = "CreateDirect3D11DeviceFromDXGIDevice failed";
+        return false;
+    }
+
+    // Create GraphicsCaptureItem from HMONITOR via IGraphicsCaptureItemInterop
+    auto factory = winrt::get_activation_factory<wgc_rt::GraphicsCaptureItem>();
+    auto interop = factory.as<IGraphicsCaptureItemInterop>();
+    winrt::com_ptr<::IUnknown> item_unk;
+    hr = interop->CreateForMonitor(hmon, winrt::guid_of<wgc_rt::GraphicsCaptureItem>(),
+        item_unk.put_void());
+    if (FAILED(hr)) {
+        last_error_ = "CreateForMonitor failed";
+        fprintf(stderr, "[wgc] CreateForMonitor failed 0x%08lX\n", hr);
+        return false;
+    }
+    item_ = item_unk.as<wgc_rt::GraphicsCaptureItem>();
+    auto sz = item_.Size();
+    item_w_ = sz.Width;
+    item_h_ = sz.Height;
+
+    closed_token_ = item_.Closed([this](wgc_rt::GraphicsCaptureItem const&,
+                                         wf::IInspectable const&) {
+        on_closed();
+    });
+
+    return true;
+}
+
 bool WgcCapture::create_capture_item(HWND hwnd) {
     // Get IDirect3DDevice from ID3D11Device
     ComPtr<IDXGIDevice> dxgi_dev;
@@ -105,7 +189,7 @@ bool WgcCapture::create_capture_item(HWND hwnd) {
         return false;
     }
 
-    // Create GraphicsCaptureItem from HWND
+    // Create GraphicsCaptureItem from HWND via IGraphicsCaptureItemInterop
     auto factory = winrt::get_activation_factory<wgc_rt::GraphicsCaptureItem>();
     auto interop = factory.as<IGraphicsCaptureItemInterop>();
     winrt::com_ptr<::IUnknown> item_unk;
@@ -120,18 +204,32 @@ bool WgcCapture::create_capture_item(HWND hwnd) {
     auto sz = item_.Size();
     item_w_ = sz.Width;
     item_h_ = sz.Height;
+
+    // Register Closed event for device loss detection
+    closed_token_ = item_.Closed([this](wgc_rt::GraphicsCaptureItem const&,
+                                         wf::IInspectable const&) {
+        on_closed();
+    });
+
     return true;
 }
 
 bool WgcCapture::create_frame_pool() {
     // Get WinRT Direct3D device
     ComPtr<IDXGIDevice> dxgi_dev;
-    device_.As(&dxgi_dev);
+    if (FAILED(device_.As(&dxgi_dev))) {
+        last_error_ = "As<IDXGIDevice> failed";
+        return false;
+    }
     winrt::com_ptr<::IInspectable> insp;
-    CreateDirect3D11DeviceFromDXGIDevice(dxgi_dev.Get(), insp.put());
-    auto d3d_dev = insp.as<winrt::Windows::Graphics::DirectX::Direct3D11::IDirect3DDevice>();
+    HRESULT hr = CreateDirect3D11DeviceFromDXGIDevice(dxgi_dev.Get(), insp.put());
+    if (FAILED(hr)) {
+        last_error_ = "CreateDirect3D11DeviceFromDXGIDevice failed";
+        return false;
+    }
+    auto d3d_dev = insp.as<wgdd::IDirect3DDevice>();
 
-    // Create FramePool with 2 buffered frames (min latency)
+    // Create FramePool with 2 buffered frames (min latency, matching OBS)
     auto item_size = winrt::Windows::Graphics::SizeInt32{ item_w_, item_h_ };
     pool_ = wgc_rt::Direct3D11CaptureFramePool::Create(
         d3d_dev,
@@ -143,14 +241,29 @@ bool WgcCapture::create_frame_pool() {
         return false;
     }
 
+    // Register FrameArrived event early (before CreateCaptureSession)
+    frame_arrived_token_ = pool_.FrameArrived([this](
+        wgc_rt::Direct3D11CaptureFramePool const&,
+        wf::IInspectable const&) {
+        on_frame_arrived();
+    });
+
     session_ = pool_.CreateCaptureSession(item_);
     if (!session_) {
         last_error_ = "CreateCaptureSession failed";
         return false;
     }
 
-    // Configure for max throughput
-    session_.IsCursorCaptureEnabled(false);  // no cursor = slightly faster
+    // Borderless capture (Win11+)
+    if (borderless_supported()) {
+        session_.IsBorderRequired(false);
+    }
+
+    // Disable WGC cursor capture (better perf, we can add our own later)
+    if (cursor_toggle_supported()) {
+        session_.IsCursorCaptureEnabled(false);
+    }
+
     session_.StartCapture();
 
     last_w_ = item_w_;
@@ -159,34 +272,67 @@ bool WgcCapture::create_frame_pool() {
 }
 
 bool WgcCapture::ensure_staging(int w, int h) {
-    // Reuse staging textures if size matches
+    // Fast path: size matches, reuse
     if (staging_[0] && staging_w_[0] == w && staging_h_[0] == h)
         return true;
 
-    for (int i = 0; i < STAGING_COUNT; i++) {
-        staging_[i].Reset();
-        D3D11_TEXTURE2D_DESC desc = {};
-        desc.Width = (UINT)w;
-        desc.Height = (UINT)h;
-        desc.MipLevels = 1;
-        desc.ArraySize = 1;
-        desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-        desc.SampleDesc.Count = 1;
-        desc.Usage = D3D11_USAGE_STAGING;
-        desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    // Safe pattern: create all new textures first, then swap in.
+    // This avoids leaving partial state if creation fails midway.
+    ComPtr<ID3D11Texture2D> new_staging[STAGING_COUNT];
+    int new_w[STAGING_COUNT] = {};
+    int new_h[STAGING_COUNT] = {};
 
-        HRESULT hr = device_->CreateTexture2D(&desc, nullptr, staging_[i].GetAddressOf());
+    D3D11_TEXTURE2D_DESC desc = {};
+    desc.Width = (UINT)w;
+    desc.Height = (UINT)h;
+    desc.MipLevels = 1;
+    desc.ArraySize = 1;
+    desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    desc.SampleDesc.Count = 1;
+    desc.Usage = D3D11_USAGE_STAGING;
+    desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+
+    for (int i = 0; i < STAGING_COUNT; i++) {
+        HRESULT hr = device_->CreateTexture2D(&desc, nullptr, new_staging[i].GetAddressOf());
         if (FAILED(hr)) {
             last_error_ = "CreateTexture2D(staging) failed";
             return false;
         }
-        staging_w_[i] = w;
-        staging_h_[i] = h;
+        new_w[i] = w;
+        new_h[i] = h;
+    }
+
+    // All succeeded — release old textures and swap
+    for (int i = 0; i < STAGING_COUNT; i++) {
+        staging_[i] = std::move(new_staging[i]);
+        staging_w_[i] = new_w[i];
+        staging_h_[i] = new_h[i];
     }
     staging_idx_ = 0;
     last_w_ = w;
     last_h_ = h;
     return true;
+}
+
+void WgcCapture::on_frame_arrived() {
+    // Called from WinRT DispatcherQueue thread.
+    // Just signal the condition variable — actual processing happens in capture()
+    {
+        std::lock_guard<std::mutex> lk(frame_mtx_);
+        frame_ready_ = true;
+    }
+    frame_cv_.notify_one();
+}
+
+void WgcCapture::on_closed() {
+    // Window destroyed or capture item lost
+    fprintf(stderr, "[wgc] item closed\n");
+    ok_ = false;
+    {
+        std::lock_guard<std::mutex> lk(frame_mtx_);
+        frame_ready_ = false;
+    }
+    frame_cv_.notify_all();
 }
 
 bool WgcCapture::capture(WgcFrame& out, WgcTiming* timing) {
@@ -196,23 +342,45 @@ bool WgcCapture::capture(WgcFrame& out, WgcTiming* timing) {
 
     // Try to get next frame from FramePool (non-blocking)
     auto frame = pool_.TryGetNextFrame();
-    if (!frame) return false;
+    if (!frame) {
+        // DON'T reset frame_ready_ here — on_frame_arrived may have
+        // set it to true between TryGetNextFrame returning null and now.
+        // Resetting it would lose the notification (race condition).
+        return false;
+    }
 
     uint64_t t1 = now_us();
 
     // Get ID3D11Texture2D from WinRT surface
+    // IDirect3DDxgiInterfaceAccess is an ABI interface, not a projected type
     auto surface = frame.Surface();
-    auto access = surface.as<Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
+    auto access = surface.as<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
     ComPtr<ID3D11Texture2D> src_tex;
     HRESULT hr = access->GetInterface(__uuidof(ID3D11Texture2D), (void**)src_tex.GetAddressOf());
-    if (FAILED(hr) || !src_tex) return false;
+    if (FAILED(hr) || !src_tex) {
+        std::lock_guard<std::mutex> lk(frame_mtx_);
+        frame_ready_ = false;
+        return false;
+    }
 
+    // Use D3D texture desc for dimensions (more reliable than ContentSize — OBS pattern)
     D3D11_TEXTURE2D_DESC desc;
     src_tex->GetDesc(&desc);
     int fw = (int)desc.Width, fh = (int)desc.Height;
 
+    // Format change detection
+    if (desc.Format != format_) {
+        fprintf(stderr, "[wgc] format changed %d→%d, marking inactive\n",
+                (int)format_, (int)desc.Format);
+        ok_ = false;
+        frame_cv_.notify_all();
+        return false;
+    }
+
     // Ensure staging textures are sized correctly
-    if (!ensure_staging(fw, fh)) return false;
+    if (!ensure_staging(fw, fh)) {
+        return false;
+    }
 
     // Rotate staging buffer: use next slot for GPU copy
     int si = staging_idx_;
@@ -220,13 +388,17 @@ bool WgcCapture::capture(WgcFrame& out, WgcTiming* timing) {
 
     // GPU copy: source texture → staging texture
     ctx_->CopyResource(staging_[si].Get(), src_tex.Get());
-    src_tex.Reset();  // release frame reference early
+    src_tex.Reset();  // release frame reference early so GPU can reuse surface
     uint64_t t2 = now_us();
 
-    // CPU readback: Map staging texture
+    // CPU readback: Map staging texture (blocks until GPU copy complete)
     D3D11_MAPPED_SUBRESOURCE mapped = {};
     hr = ctx_->Map(staging_[si].Get(), 0, D3D11_MAP_READ, 0, &mapped);
-    if (FAILED(hr)) return false;
+    if (FAILED(hr)) {
+        std::lock_guard<std::mutex> lk(frame_mtx_);
+        frame_ready_ = false;
+        return false;
+    }
 
     int pitch = (int)mapped.RowPitch;
     int px_count = fw * fh * 4;
@@ -251,6 +423,12 @@ bool WgcCapture::capture(WgcFrame& out, WgcTiming* timing) {
     ctx_->Unmap(staging_[si].Get(), 0);
     uint64_t t3 = now_us();
 
+    // Frame consumed; clear ready flag (new FrameArrived will set it again)
+    {
+        std::lock_guard<std::mutex> lk(frame_mtx_);
+        frame_ready_ = false;
+    }
+
     if (timing) {
         timing->cap_us = t1 - t0;
         timing->copy_us = t2 - t1;
@@ -261,12 +439,61 @@ bool WgcCapture::capture(WgcFrame& out, WgcTiming* timing) {
     return true;
 }
 
-void WgcCapture::shutdown() {
-    if (ok_) {
-        session_.Close();
-        pool_.Close();
-        ok_ = false;
+bool WgcCapture::wait_frame(WgcFrame& out, int timeout_ms, WgcTiming* timing) {
+    if (!ok_) return false;
+
+    // Check if frame is already ready (non-blocking)
+    if (capture(out, timing)) return true;
+
+    // Wait for FrameArrived signal
+    std::unique_lock<std::mutex> lk(frame_mtx_);
+    if (!frame_cv_.wait_for(lk, std::chrono::milliseconds(timeout_ms),
+                            [this] { return frame_ready_ || !ok_; })) {
+        return false; // timeout
     }
+    if (!ok_) return false;
+    lk.unlock();
+
+    // Now capture the frame
+    return capture(out, timing);
+}
+
+void WgcCapture::cleanup_winrt_objects() {
+    // Unregister events first
+    if (frame_arrived_token_.value) {
+        pool_.FrameArrived(frame_arrived_token_);
+        frame_arrived_token_.value = 0;
+    }
+    if (closed_token_.value) {
+        item_.Closed(closed_token_);
+        closed_token_.value = 0;
+    }
+
+    // Close WinRT objects (try/catch each, matching OBS pattern)
+    if (session_) {
+        try { session_.Close(); } catch (...) {}
+        session_ = nullptr;
+    }
+    if (pool_) {
+        try { pool_.Close(); } catch (...) {}
+        pool_ = nullptr;
+    }
+    item_ = nullptr;
+}
+
+void WgcCapture::signal_stop() {
+    ok_ = false;
+    std::lock_guard<std::mutex> lk(frame_mtx_);
+    frame_ready_ = true;
+    frame_cv_.notify_all();
+}
+
+void WgcCapture::shutdown() {
+    ok_ = false;
+    frame_cv_.notify_all();
+
+    cleanup_winrt_objects();
+
     for (int i = 0; i < STAGING_COUNT; i++) {
         staging_[i].Reset();
     }

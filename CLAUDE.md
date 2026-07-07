@@ -40,12 +40,12 @@ tictactoe/
 ├── capture/                     # C++ screen capture (static lib + standalone tools)
 │   ├── src/
 │   │   ├── capture_common.cpp   Content validation + window state (FFI)
-│   │   ├── capture_gdi.cpp      GetWindowDC (FFI)
-│   │   ├── capture_pw.cpp       PrintWindow + magenta sentinel (FFI)
-│   │   ├── capture_screen.cpp   ScreenBitBlt (FFI)
-│   │   ├── capture_desktop.cpp  DesktopBlt (FFI)
+│   │   ├── capture_gdi.cpp      GetWindowDC (FFI, DPI-aware)
+│   │   ├── capture_pw.cpp       PrintWindow + magenta sentinel (FFI, DPI-aware)
+│   │   ├── capture_screen.cpp   ScreenBitBlt (FFI, virtual screen DC)
+│   │   ├── capture_desktop.cpp  DesktopBlt (FFI, virtual screen DC)
 │   │   ├── capture_auto.cpp     Auto-detect fallback chain (FFI)
-│   │   ├── capture_wgc.cpp      WGC GPU FramePool (D3D11+WinRT)
+│   │   ├── capture_wgc.cpp      WGC GPU FramePool (D3D11+WinRT, OBS patterns)
 │   │   ├── capture_wgc_ffi.cpp  WGC stream FFI wrapper
 │   │   ├── capture_dxgi.cpp     DXGI Desktop Duplication backend
 │   │   ├── capture_single.cpp   Standalone: single-frame screenshot
@@ -54,16 +54,21 @@ tictactoe/
 │   ├── include/
 │   │   ├── capture_methods.h    Public FFI header (all methods)
 │   │   ├── capture_wgc_ffi.h    WGC stream FFI header
-│   │   ├── capture_internal.h   Shared GDI inline helpers
-│   │   ├── capture_wgc.hpp      WGC C++ class
+│   │   ├── capture_internal.h   Shared GDI inline helpers + DpiGuard RAII
+│   │   ├── capture_wgc.hpp      WGC C++ class (FrameArrived + condition_variable)
 │   │   └── capture.hpp          ICaptureBackend (DXGI + GDI)
 │   ├── build.cmd                MSVC build (standalone exes)
 │   └── build_capture_lib.cmd    MSVC → capture_lib.lib (8 FFI files)
 ├── monitor_web/                 # Tauri 2 + React desktop app
 │   ├── src/
-│   │   └── App.tsx              Main UI (MXU-style, Dashboard/Screenshot/Log)
+│   │   └── App.tsx              Main UI (MXU-style, Dashboard/Screenshot/Log/Settings)
 │   └── src-tauri/
-│       └── src/main.rs          Rust backend (C++ FFI, overlay, TCP)
+│       ├── src/
+│       │   ├── main.rs          Rust backend (WGC FFI, MJPEG server, H.264 MFT, log)
+│       │   ├── mjpeg_server.rs  MJPEG HTTP server (JPEG encode + multipart stream)
+│       │   └── h264_encoder.rs  H.264 MFT GPU encoder (mpsc channel → MP4)
+│       ├── Cargo.toml           v0.2.0 (single source of version truth)
+│       └── tauri.conf.json      Window config + metadata
 ├── model/                       # Python
 │   ├── __init__.py               Re-exports public API
 │   ├── action_space.py           Token vocabulary + serialization (LE)
@@ -71,11 +76,15 @@ tictactoe/
 │   ├── hierarchical.py           PerceptionSpecialist + StrategicReasoner
 │   └── payload/
 │       └── bgra.py               Canonical BGRA pack/unpack for Python
+├── test/                        # Test artifacts
+│   ├── frames/                  Debug BGRA dumps (gitignored)
+│   │   └── .gitkeep
+│   └── view_frame.py            Python frame viewer
 ├── examples/                    # Protocol examples + Benchmark
 │   ├── wgc_bench_send.cpp       WGC→TCP benchmark (C++)
 │   ├── wgc_bench_recv.rs        TCP→file benchmark (Rust)
 │   └── run_bench.bat
-└── log/                         # Unified logs
+└── log/                         # Unified logs (gitignored)
     ├── agent_*.log               Rust (Tauri main process)
     └── wgc_*.log                 C++ (WGC subprocess)
 ```
@@ -92,154 +101,114 @@ DEFAULT_TCP_PORT=9999, MAGIC=0x4D415246, FRAME_HEADER_SIZE=12
 
 `body_size` = body bytes only (NOT including type_tag). Matches Rust `build_header(payload.len(), type_tag)`.
 
-### BGRA payload
-
-Canonical implementations (use for new code):
-- C++: `common/payload/bgra.hpp` (`payload::bgra_pack/unpack`)
-- Rust: `monitor_web/src-tauri/src/payload/bgra.rs` (`payload::bgra::pack/unpack`)
-- Python: `model/payload/bgra.py` (`pack/unpack`)
-
 ## Build Commands
 
 ```bash
-cd capture  && build.cmd          # Standalone C++ tools (capture_wgc.exe etc.)
-cd capture  && build_capture_lib.cmd  # Static lib (Rust build.rs calls this automatically)
+cd capture  && build.cmd              # Standalone C++ tools
+cd capture  && build_capture_lib.cmd  # Static lib (Rust build.rs calls this)
 cd monitor_web
-npm install && npm run tauri dev  # Vite HMR + Cargo watch (auto-builds capture_lib.lib)
-npm run tauri build               # Release .exe (statically linked)
+npm install && npm run tauri dev      # Vite HMR + Cargo watch
+npm run tauri build                   # Release .exe (statically linked)
 ```
 
-## Capture Methods
+## Version
 
-### WGC (Windows.Graphics.Capture) — Window capture
+Version is defined in `Cargo.toml` only. `main.rs` reads it via `env!("CARGO_PKG_VERSION")`.
 
-GPU-accelerated FramePool. ~7ms/frame (140+ FPS capable).
-- Works for occluded/background windows (NOT minimized)
-- Event-driven: frames only produced when content changes
-- `capture_stream_start` calls WGC FFI directly (static lib, zero subprocess)
-- Falls back to GDI if WGC init fails
+## Capture Pipeline
+
+### Streaming preview (Play button → WGC + MJPEG)
+
+```
+WGC GPU FramePool (D3D11+WinRT, OBS patterns)
+  → FrameArrived event → condition_variable
+  → TryGetNextFrame → CopyResource(GPU) → Map(CPU readback)
+  → C++ FFI (wgc_stream_read) → scaled BGRA (max 1280)
+  → Rust: BGRA→RGBA swap + MJPEG push (raw BGRA store)
+  → MJPEG server thread: BGRA→RGB → JPEG encode (quality 70) → HTTP multipart
+  → Frontend: <img src="http://127.0.0.1:9998/stream">
+```
+
+### Single-frame capture (Camera button → GDI fallback)
+
+GDI chain: DesktopBlt / GetWindowDC / PrintWindow / ScreenBitBlt / Auto-detect
+
+### Transport methods
+
+| Transport | Encoding | Transfer | Browser | Settings |
+|-----------|----------|----------|---------|----------|
+| MJPEG | CPU JPEG ~5ms | HTTP port 9998 | `<img>` GPU | default |
+| H.264 | GPU MFT (wip) | MP4 port 9997 | `<video>` | experimental |
+| Base64 | none | JSON invoke | Canvas ImageData | legacy |
+
+Select in Settings → Transport card.
+
+### WGC Internals
+
+- WinRT MTA initialized on daemon thread (avoids Tauri STA conflict)
+- DispatcherQueue created per capture thread (required for FrameArrived)
+- Condition variable for efficient frame waiting (no busy-poll)
 - Triple-buffered staging textures for GPU/CPU overlap
-- C++ writes per-frame timing to `log/wgc_*.log`
+- FrameArrived event registered → callback sets `frame_ready_` + notifies CV
+- `wait_frame()` blocks on CV with 100ms timeout
+- `TryGetNextFrame` false does NOT reset `frame_ready_` (race fix)
+- `signal_stop()` for non-blocking shutdown (avoids `worker.join()` hang)
+- Win11 borderless capture (`IsBorderRequired(false)`)
 
-### GDI — Desktop / fallback
+### H.264 MFT Internals
 
-3-method chain: `GetWindowDC → PrintWindow(magenta sentinel) → ScreenBitBlt`
-
-### DXGI Desktop Duplication — Desktop only
-
-Full desktop capture at monitor refresh rate. Used via `bench_send.exe 0`.
+- mpsc channel: capture thread → dedicated encoder thread (IMFSinkWriter not Send)
+- `MFStartup`/`MFShutdown` via raw FFI (not in windows crate 0.58)
+- SinkWriter → MP4 file, HTTP server serves for `<video>` progressive download
+- `test/video.mp4` output (gitignored)
 
 ## Frontend (App.tsx)
 
 Single-file React app. Key components:
 - `TopBar` — MXU-style tabs: Dashboard | Monitor | Log + Start/Stop + Theme + Settings
-- `ConnectionPanel` — Fixed-width, `justify-between`. Title(144px)+X(32px) left, Select right. IP(184px) left, Port(80px) right
-- `ScreenshotPanel` — Canvas rendering (BGRA→RGBA, no BMP). Dynamic `aspectRatio` from screen resolution. Play/Stop streaming + Camera single-shot. Method selector in header.
-- `LogPanel` — Dual mode: compact right-sidebar shows current session (max 100); Log tab shows full-card layout with historical files from disk via `read_logs`
-- `DashboardView` — System info, Capture Pipeline, Update (check + source selector), Resources
-- `SettingsPage` — `SettingsCard` collapsible cards: Connection (with method selector), Theme, Model, Update, Log, Project
+- `ConnectionPanel` — Window selector, method, capture mode, IP/Port
+- `ScreenshotPanel` — MJPEG `<img>` preview (streaming) + PNG `<img>` (single-frame)
+- `LogPanel` — Unified log view (in-memory `[live]` + disk files)
+- `DashboardView` — System info, Capture Pipeline, Update, Resources
+- `SettingsPage` — Connection, Transport, Theme, Model, Update, Log, Project
 - `WindowPickerModal` — Window/desktop/process selection with search
-
-### Capture method selector
-
-Choose capture method in Settings → Connection:
-- `Auto` — fallback chain (WGC → GetWindowDC → PrintWindow → ScreenBitBlt)
-- `WGC` — GPU FramePool (stream via subprocess, single-frame via `--single`)
-- `DXGI` — desktop GDI BitBlt
-- `GDI` — GetWindowDC only, no solid-color check
-- `PrintWindow` / `ScreenBlt` — single method, no fallback
-
-Method flows as `forceMethod` through: App state → ScreenshotPanel props → invoke calls → Rust backend. All user actions logged via `addLog()`.
-
-### User action logging
-
-All interactions logged: tab switches, Start/Stop, theme toggle, method selection, capture preview, screenshot, clear logs. Log tab loads historical `agent_*.log` files as full-card tiles via `read_logs`.
-
-### MXU-style design patterns
-- Cards: `bg-bg-secondary rounded-xl ring-1 ring-inset ring-border overflow-hidden`
-- Header: `<div role="button">` with icon + title + status + chevron
-- Expand/collapse: `grid` animation (`grid-template-rows: 1fr ↔ 0fr`)
-- Action buttons: individual `e.stopPropagation()`, chevron without (allows toggle)
-- TopBar tabs: `border-b-[3px]` active indicator, icons + labels
 
 ### Right panel sizing
 - Default width: 324px, min: 324px, max: 400px
-- Drag resize capped by `Math.max(324, Math.min(400, w))`
+- Auto-collapse chain: Log → Screenshot → Connection when overflow
 
 ## Rust Backend (main.rs)
 
-Rust is the webview/IPC layer — all capture logic lives in C++ static lib (see Capture Library).
-
 ### Default window size
 
-Defined at top of `src-tauri/src/main.rs`:
+Defined at top:
 ```rust
 const DEFAULT_WINDOW_W: u32 = 1280;
 const DEFAULT_WINDOW_H: u32 = 720;
 ```
-These are **physical pixels** (unaffected by OS scale factor). Setup queries monitor scale → computes logical size → `set_size` → `show()`.
-To change default size, edit these consts — NOT `tauri.conf.json`.
 
 ### Key commands
-- `list_windows` / `list_processes` — Win32 enumeration (pure Rust, no subprocess)
-- `capture_window(hwnd, method)` — Single-frame via C++ FFI. Auto uses 3-method fallback chain in C++.
-- `capture_stream_start(app, hwnd, tcp_port, method)` — Stream preview. WGC FFI or GDI FFI loop in thread.
-- `stream_poll` — Returns JSON `{p: base64, w, h, m: method}` for Canvas
-- `highlight_window` — Yellow border overlay on target window
-- `screen_info` — Returns `{w, h}` for screen resolution
-- `read_logs(max_files)` — Reads newest N `agent_*.log` files, returns `[{name, lines}]`
-- `log_ui_event` / `clear_log` — Frontend → disk log bridge
-- `window_state` — Proxy to C++ `capture_query_window_state`
+- `list_windows` / `list_processes` — Win32 enumeration (pure Rust)
+- `capture_window(hwnd, method)` — Single-frame via C++ FFI
+- `capture_stream_start(app, hwnd, tcp_port, method, transport)` — WGC stream
+- `capture_stream_stop` — Signal stop + join capture thread + stop MJPEG/H.264
+- `stream_poll` — Returns JSON {p: base64, w, h, m} for Canvas fallback
+- `read_logs(max_files)` — Returns `[live]` (in-memory buffer) + disk files
+- `log_ui_event` / `clear_log` — Frontend → disk + memory log bridge
 - `benchmark_methods` — Test all methods, return timings
+- `debug_dump_frames(bool)` — Toggle raw BGRA dump to test/frames/
 
-### Capture Library (C++ static lib)
-
-All capture methods are C++ `extern "C"` functions in `capture_lib.lib` (linked at build time, zero subprocess):
-
-```
-capture/src/
-├── capture_common.cpp    # Content validation + window state
-├── capture_gdi.cpp       # GetWindowDC
-├── capture_pw.cpp        # PrintWindow
-├── capture_screen.cpp    # ScreenBitBlt
-├── capture_desktop.cpp   # DesktopBlt
-├── capture_auto.cpp      # Auto-detect fallback chain
-├── capture_wgc.cpp       # WGC GPU FramePool (D3D11 + WinRT)
-├── capture_wgc_ffi.cpp   # WGC stream FFI wrapper
-capture/include/
-├── capture_methods.h     # Public FFI header (all methods)
-├── capture_wgc_ffi.h     # WGC stream FFI header
-├── capture_wgc.hpp       # WGC C++ class
-└── capture_internal.h    # Shared GDI inline helpers
-```
-
-Build: `build_capture_lib.cmd` (MSVC) → `capture_lib.lib` → linked via `build.rs`.
-
-### Yellow border overlay
-- 4 thin STATIC popup windows (top/bottom/left/right, 3px, yellow GDI FillRect)
-- `SetWinEventHook` — event-driven reposition
-- Z-order: `SetWindowPos(h, target)` — follows target
-- Inset: `BORDER_INSET=1` shrinks border inward for tight fit
-
-### Frame pipeline
-- WGC: BGRA pixels (C++ FFI) → `bgra_to_rgba()` → store in `STREAM_FRAME`
-- GDI: BGRA pixels (C++ FFI) → `bgra_to_rgba()` → store in `STREAM_FRAME`
-- `stream_poll()`: base64-encode raw RGBA → JSON → frontend Canvas ImageData
-- TCP broadcast: raw BGRA frames on `127.0.0.1:9999` for external consumers (Python agent)
-
-## Logging
-
-- Rust: `dlog!()` macro → `agent_*.log` (session-based, max 5 files kept)
-- C++: WGC per-frame timing → `log/wgc_*.log`
-- Frontend: `LogManager` class → in-memory array + `invoke('log_ui_event')` → disk
-- Three views (right panel compact, Log tab, disk file) are unified via LogManager
-- Clear button: archives current log file, opens new session file
-- All `log/` files are gitignored — not committed to repo
+### Logging
+- `dlog!()` macro writes to BOTH file AND in-memory `LOG_MEMORY` buffer
+- `read_logs()` returns `[live]` entry first (in-memory), then disk files
+- In-memory buffer capped at 5000 entries
+- Clear button clears both file and memory
 
 ## Known Issues
 
-1. **DXGI desktop**: returns solid black on virtual display adapters
-2. **Yellow border color**: GDI FillRect on STATIC — repaints white on window invalidation, may flicker
-3. **WGC init latency**: ~300ms for first frame after session start
-4. **WGC FPS**: Limited by window content change rate. Static window = 0-5 FPS. Dynamic = 60+ FPS. By design (event-driven)
-5. **Overlay orphan risk**: Yellow overlay STATIC windows may persist if app crashes without `destroy_overlay_bars()` cleanup.
+1. **WGC FPS**: Event-driven — static content = low FPS. Dynamic window = 60+.
+2. **H.264 MFT**: Encoder creates MP4 for progressive download but `<video>` needs full file. MSE + fMP4 needed for true live streaming.
+3. **Yellow border**: GDI FillRect flickers on window invalidation.
+4. **Overlay orphan**: Yellow overlay STATIC windows may persist if app crashes.
+5. **MJPEG port race**: `stop_mjpeg_server` pokes old listener to force unbind. Retry loop in bind.
+6. **texture_stream.rs**: Attempted ICoreWebView2ExperimentalTextureStream — not in webview2-com-sys 0.38.2.
