@@ -322,14 +322,14 @@ static bool tcp_server_start() {
     WSADATA wsa;
     WSAStartup(MAKEWORD(2, 2), &wsa);
     g_tcp_listen = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (g_tcp_listen == INVALID_SOCKET) return false;
+    if (g_tcp_listen == INVALID_SOCKET) { WSACleanup(); g_tcp_listen = INVALID_SOCKET; return false; }
     int reuse = 1;
     setsockopt(g_tcp_listen, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse));
     sockaddr_in addr = {};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(9999);
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    if (bind(g_tcp_listen, (sockaddr*)&addr, sizeof(addr)) != 0) { closesocket(g_tcp_listen); return false; }
+    if (bind(g_tcp_listen, (sockaddr*)&addr, sizeof(addr)) != 0) { closesocket(g_tcp_listen); g_tcp_listen = INVALID_SOCKET; return false; }
     listen(g_tcp_listen, SOMAXCONN);
     g_tcp_running = true;
     g_tcp_accept_thread = std::thread(tcp_accept_loop);
@@ -380,7 +380,13 @@ static std::string cmd_capture_stream_start(uint64_t hwnd, const std::string& me
     cmd_capture_stream_stop();
 
     HWND h = (HWND)(uintptr_t)hwnd;
-    g_stream_handle = wgc_stream_start(h, 1280);
+    if (h == nullptr) {
+        // Desktop capture: use monitor-based WGC
+        g_stream_handle = wgc_stream_start_monitor(
+            MonitorFromWindow(nullptr, MONITOR_DEFAULTTOPRIMARY), 1280);
+    } else {
+        g_stream_handle = wgc_stream_start(h, 1280);
+    }
     if (!g_stream_handle) {
         LOG("cmd", "stream_start: FAILED");
         return R"({"ok":false,"error":"wgc_stream_start failed"})";
@@ -393,7 +399,7 @@ static std::string cmd_capture_stream_start(uint64_t hwnd, const std::string& me
         while (g_streaming) {
             int w, h, ch;
             int size = wgc_stream_read(g_stream_handle, buf.data(), MAX_PX, &w, &h, &ch);
-            if (size > 0) {
+            if (size > 0 && w > 0 && h > 0 && w <= 3840 && h <= 2160) {
                 // Push via SharedBuffer (zero-copy), MJPEG (fallback), TCP (agents)
                 shared_buffer_push_frame(buf.data(), w, h);
                 mjpeg_server_push_frame(buf.data(), w, h);
@@ -478,9 +484,11 @@ static std::string cmd_debug_dump_frames(bool enable) {
 
 // ── highlight_window (yellow overlay) ─────────────────────
 static HWND g_overlay_bars[4] = {};
+static std::mutex g_overlay_mutex;
 static constexpr int BORDER_W = 3;
 
 static void destroy_overlay() {
+    std::lock_guard<std::mutex> lk(g_overlay_mutex);
     for (auto& hw : g_overlay_bars) {
         if (hw) { DestroyWindow(hw); hw = nullptr; }
     }
@@ -488,6 +496,7 @@ static void destroy_overlay() {
 
 static std::string cmd_highlight_window(uint64_t hwnd_u64) {
     destroy_overlay();
+    std::lock_guard<std::mutex> lk(g_overlay_mutex);
     HWND target = (HWND)(uintptr_t)hwnd_u64;
     if (!target || !IsWindow(target)) return R"({"ok":false})";
 
@@ -568,6 +577,7 @@ std::string dispatch_command(const std::string& json) {
         auto* hw = (HWND)(uintptr_t)json_get_uint64(args, "hwnd");
         const char* state = capture_query_window_state(hw);
         result = "\"" + std::string(state ? state : "unknown") + "\"";
+        if (state) capture_free_string(state);
     }
     else if (cmd == "stream_poll") {
         // Return latest RGBA frame as base64 for Canvas fallback

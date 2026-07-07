@@ -126,8 +126,8 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR lpCm
         DispatchMessage(&msg);
     }
 
+    backend_shutdown();  // stops stream first, then MJPEG
     mjpeg_server_stop();
-    backend_shutdown();
 
     return (int)msg.wParam;
 }
@@ -183,15 +183,17 @@ HRESULT InitWebView2(HWND hwnd)
                         g_webview->Navigate(L"http://localhost:1420");
                     } else {
                         // Prod: map virtual host to dist/ folder → no HTTP server needed
-                        wchar_t exe_dir[MAX_PATH];
-                        GetModuleFileNameW(nullptr, exe_dir, MAX_PATH);
-                        wchar_t* last_slash = wcsrchr(exe_dir, L'\\');
-                        if (last_slash) *last_slash = L'\0';
-                        wcscat_s(exe_dir, L"\\..\\..\\monitor_web\\dist");
-                        g_webview3->SetVirtualHostNameToFolderMapping(
-                            L"gam.local", exe_dir,
-                            COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
-                        g_webview->Navigate(L"https://gam.local/index.html");
+                        if (g_webview3) {
+                            wchar_t exe_dir[MAX_PATH * 2];
+                            GetModuleFileNameW(nullptr, exe_dir, MAX_PATH);
+                            wchar_t* last_slash = wcsrchr(exe_dir, L'\\');
+                            if (last_slash) *last_slash = L'\0';
+                            wcscat_s(exe_dir, L"\\..\\..\\monitor_web\\dist");
+                            g_webview3->SetVirtualHostNameToFolderMapping(
+                                L"gam.local", exe_dir,
+                                COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
+                            g_webview->Navigate(L"https://gam.local/index.html");
+                        }
                     }
 
                     RECT rc;
