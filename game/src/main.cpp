@@ -13,81 +13,83 @@
 #include "../../common/include/types.hpp"
 #include "../../common/include/signals.hpp"
 #include <iostream>
+#include <iomanip>
 #include <string>
 #include <chrono>
 #include <conio.h>
 
 // ── ANSI helpers ──
 #define ESC "\033"
-static void a_home()   { printf(ESC "[H"); }
-static void a_rst()    { printf(ESC "[0m"); }
-static void a_bold()   { printf(ESC "[1m"); }
-static void a_dim()    { printf(ESC "[2m"); }
-static void a_inv()    { printf(ESC "[7m"); }
-static void a_grn()    { printf(ESC "[32m"); }
-static void a_blu()    { printf(ESC "[34m"); }
-static void a_yel()    { printf(ESC "[33m"); }
-static void a_wht_bg() { printf(ESC "[47m"); }
-static void a_gry()    { printf(ESC "[90m"); }
-static void a_clr()    { printf(ESC "[2J" ESC "[H"); }
-static void a_cur_hide(){ printf(ESC "[?25l"); }
-static void a_cur_show(){ printf(ESC "[?25h"); }
+static void a_home()   { std::cout << ESC "[H"; }
+static void a_rst()    { std::cout << ESC "[0m"; }
+static void a_bold()   { std::cout << ESC "[1m"; }
+static void a_dim()    { std::cout << ESC "[2m"; }
+static void a_inv()    { std::cout << ESC "[7m"; }
+static void a_grn()    { std::cout << ESC "[32m"; }
+static void a_blu()    { std::cout << ESC "[34m"; }
+static void a_yel()    { std::cout << ESC "[33m"; }
+static void a_wht_bg() { std::cout << ESC "[47m"; }
+static void a_gry()    { std::cout << ESC "[90m"; }
+static void a_clr()    { std::cout << ESC "[2J" ESC "[H"; }
+static void a_cur_hide(){ std::cout << ESC "[?25l"; }
+static void a_cur_show(){ std::cout << ESC "[?25h"; }
 
 // ── ASCII grid (works everywhere, looks clean) ──
-static void g_top() { a_gry(); printf("      +---+---+---+"); a_rst(); printf("\n"); }
-static void g_mid() { a_gry(); printf("      +---+---+---+"); a_rst(); printf("\n"); }
-static void g_bot() { a_gry(); printf("      +---+---+---+"); a_rst(); printf("\n"); }
+static void g_top() { a_gry(); std::cout << "      +---+---+---+"; a_rst(); std::cout << "\n"; }
+static void g_mid() { a_gry(); std::cout << "      +---+---+---+"; a_rst(); std::cout << "\n"; }
+static void g_bot() { a_gry(); std::cout << "      +---+---+---+"; a_rst(); std::cout << "\n"; }
 
 static void g_row(int r, int cur_r, int cur_c, bool cur_vis, char player) {
-    printf("      ");
-    a_gry(); printf("|"); a_rst();
+    std::cout << "      ";
+    a_gry(); std::cout << "|"; a_rst();
     for (int c = 0; c < 3; c++) {
         bool cur_here = (r == cur_r && c == cur_c) && cur_vis;
         bool occupied = board[r][c] != '.';
-        printf(" ");
+        std::cout << " ";
 
         if (cur_here && occupied) {
             // Cursor on occupied cell — white background highlight
             a_wht_bg(); a_bold();
-            if (board[r][c] == 'X') { a_grn(); printf("X"); }
-            else                    { a_blu(); printf("O"); }
+            if (board[r][c] == 'X') { a_grn(); std::cout << "X"; }
+            else                    { a_blu(); std::cout << "O"; }
             a_rst();
         } else if (cur_here && !occupied) {
             // Cursor on empty cell — invert whole cell
-            a_inv(); printf("%c", player); a_rst();
+            a_inv(); std::cout << player; a_rst();
         } else if (occupied) {
             // Occupied, no cursor
             a_bold();
-            if (board[r][c] == 'X') { a_grn(); printf("X"); }
-            else                    { a_blu(); printf("O"); }
+            if (board[r][c] == 'X') { a_grn(); std::cout << "X"; }
+            else                    { a_blu(); std::cout << "O"; }
             a_rst();
         } else {
             // Empty, no cursor — dim dot placeholder
-            a_dim(); printf("."); a_rst();
+            a_dim(); std::cout << "."; a_rst();
         }
 
-        printf(" ");
-        a_gry(); printf("|"); a_rst();
+        std::cout << " ";
+        a_gry(); std::cout << "|"; a_rst();
     }
-    printf("\n");
+    std::cout << "\n";
 }
 
 static void g_status(const char* msg) {
     // Pad to 16 chars so shorter strings don't leave residue
-    printf("  |  "); a_yel(); printf("%-16s", msg ? msg : ""); a_rst();
+    std::cout << "  |  "; a_yel();
+    std::cout << std::left << std::setw(16) << (msg ? msg : ""); a_rst();
 }
 
 static void wait_any_key() {
-    printf("  Press any key to continue...\n"); fflush(stdout);
+    std::cout << "  Press any key to continue...\n" << std::flush;
     while (!_kbhit()) Sleep(50); _getch();
 }
 
 static bool ask_replay() {
     a_clr();
-    printf("  Play again?\n\n");
-    printf("    [Enter]  Yes\n");
-    printf("    [Esc]    No\n");
-    fflush(stdout);
+    std::cout << "  Play again?\n\n";
+    std::cout << "    [Enter]  Yes\n";
+    std::cout << "    [Esc]    No\n";
+    std::cout << std::flush;
     while (true) {
         if (_kbhit()) {
             int c = _getch();
@@ -115,13 +117,13 @@ static bool tui_get_move(int& row, int& col, char player) {
 
     auto draw = [&]() {
         a_home();
-        printf("  Tic Tac Toe  |  Player: ");
+        std::cout << "  Tic Tac Toe  |  Player: ";
         a_bold();
-        if (player == 'X') { a_grn(); printf("X"); }
-        else               { a_blu(); printf("O"); }
+        if (player == 'X') { a_grn(); std::cout << "X"; }
+        else               { a_blu(); std::cout << "O"; }
         a_rst();
-        printf("  |  arrows:move  enter:place  esc:quit"); g_status(cur_status());
-        printf("\n");
+        std::cout << "  |  arrows:move  enter:place  esc:quit"; g_status(cur_status());
+        std::cout << "\n";
 
         g_top();
         for (int r = 0; r < 3; r++) {
@@ -129,8 +131,7 @@ static bool tui_get_move(int& row, int& col, char player) {
             if (r < 2) g_mid();
         }
         g_bot();
-        printf("\n");
-        fflush(stdout);
+        std::cout << "\n" << std::flush;
     };
 
     draw();
@@ -184,8 +185,8 @@ static int play_tui_game() {
         if (!tui_get_move(r, c, cur)) return 0;
         board[r][c] = cur;
         a_clr(); print_board();
-        if (check_win(cur)) { a_yel(); a_bold(); printf("  *** %c wins! ***\n", cur); a_rst(); wait_any_key(); return 1; }
-        if (is_draw())      { a_yel(); printf("  *** Draw! ***\n"); a_rst(); wait_any_key(); return 1; }
+        if (check_win(cur)) { a_yel(); a_bold(); std::cout << "  *** " << cur << " wins! ***\n"; a_rst(); wait_any_key(); return 1; }
+        if (is_draw())      { a_yel(); std::cout << "  *** Draw! ***\n"; a_rst(); wait_any_key(); return 1; }
         cur = (cur == 'X') ? 'O' : 'X';
     }
     return 0;
@@ -202,18 +203,18 @@ static int play_tui_vs_ai(SOCKET sock) {
             board[r][c] = cur;
         } else {
             float v;
-            if (!get_ai_move(sock, cur, r, c, v)) { printf("\nAI error\n"); wait_any_key(); return 0; }
+            if (!get_ai_move(sock, cur, r, c, v)) { std::cout << "\nAI error\n"; wait_any_key(); return 0; }
             board[r][c] = cur;
-            a_home(); printf("  AI plays %d %d (%.2f)\n", r, c, v);
+            a_home(); std::cout << "  AI plays " << r << " " << c << " (" << v << ")\n";
         }
         a_clr(); print_board();
         if (check_win(cur)) {
-            if (cur == human) { a_grn(); printf("  *** You win! ***\n"); }
-            else              { a_yel(); printf("  *** AI wins! ***\n"); }
+            if (cur == human) { a_grn(); std::cout << "  *** You win! ***\n"; }
+            else              { a_yel(); std::cout << "  *** AI wins! ***\n"; }
             a_rst(); if (g_cfg.use_server) send_end(sock, cur == 'X' ? 1 : -1);
             wait_any_key(); return 1;
         }
-        if (is_draw()) { a_yel(); printf("  *** Draw! ***\n"); a_rst(); if (g_cfg.use_server) send_end(sock, 0); wait_any_key(); return 1; }
+        if (is_draw()) { a_yel(); std::cout << "  *** Draw! ***\n"; a_rst(); if (g_cfg.use_server) send_end(sock, 0); wait_any_key(); return 1; }
         cur = (cur == 'X') ? 'O' : 'X';
     }
     return 0;

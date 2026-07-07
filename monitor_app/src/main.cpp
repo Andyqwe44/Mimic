@@ -14,6 +14,7 @@
 #include <cstdio>
 
 #include "../dep/WebView2.h"
+#include "../../logger/logger.h"
 #include "commands.h"
 #include "mjpeg_server.h"
 
@@ -87,11 +88,12 @@ HRESULT InitWebView2(HWND hwnd);
 // ── WinMain ─────────────────────────────────────────────────
 int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR lpCmdLine, _In_ int nCmdShow)
 {
+    bool auto_stream = (std::string(lpCmdLine).find("--auto-stream") != std::string::npos);
     g_dev_mode = (std::string(lpCmdLine).find("--dev") != std::string::npos);
     AllocConsole();
     freopen("CONOUT$", "w", stdout);
     freopen("CONOUT$", "w", stderr);
-    printf("GAM starting (dev=%d)...\n", (int)g_dev_mode);
+    LOG("main", "GAM starting (dev=%d auto_stream=%d)", (int)g_dev_mode, (int)auto_stream);
 
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
@@ -119,6 +121,14 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR lpCm
 
     backend_init();
     mjpeg_server_start();
+
+    // Auto-start streaming for testing (bypasses GUI)
+    if (auto_stream) {
+        LOG("main", "auto-stream: starting desktop stream");
+        std::string result = dispatch_command(
+            R"({"cmd":"capture_stream_start","id":0,"args":{"hwnd":0,"method":"WGC","transport":"shared"}})");
+        LOG("main", "auto-stream: %s", result.c_str());
+    }
 
     MSG msg = {};
     while (GetMessage(&msg, nullptr, 0, 0)) {
@@ -213,9 +223,23 @@ void shared_buffer_push_frame(const uint8_t* bgra, int w, int h) {
     if (FAILED(g_env12->CreateSharedBuffer((UINT)size, &buf))) return;
     BYTE* dst = nullptr;
     if (FAILED(buf->get_Buffer(&dst)) || !dst) return;
-    memcpy(dst, bgra, size);
+
+    // Convert BGRA → RGBA inline (ImageData expects RGBA)
+    for (int i = 0; i < w * h; i++) {
+        dst[i * 4 + 0] = bgra[i * 4 + 2];  // B → R
+        dst[i * 4 + 1] = bgra[i * 4 + 1];  // G → G
+        dst[i * 4 + 2] = bgra[i * 4 + 0];  // R → B
+        dst[i * 4 + 3] = bgra[i * 4 + 3];  // A → A
+    }
+
+    // Pass dimensions as metadata so JS can construct ImageData
+    wchar_t meta[64];
+    swprintf(meta, 64, L"{\"w\":%d,\"h\":%d}", w, h);
+
+    // CRITICAL: PostSharedBufferToScript BEFORE Close — per WebView2 docs,
+    // the buffer must remain open when posted to script.
+    g_webview17->PostSharedBufferToScript(buf.Get(), COREWEBVIEW2_SHARED_BUFFER_ACCESS_READ_ONLY, meta);
     buf->Close();
-    g_webview17->PostSharedBufferToScript(buf.Get(), COREWEBVIEW2_SHARED_BUFFER_ACCESS_READ_ONLY, L"{}");
 }
 
 // ── WebMessage bridge (replaces Tauri invoke) ───────────────

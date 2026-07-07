@@ -1,7 +1,50 @@
 # CLAUDE.md — TicTacToe → General Visual Game AI
 
-## 语言偏好
-用中文思考和回答。代码、commit、PR 描述用英文。
+## ⛔ 思想钢印 — 三条铁律，每次写代码前过一遍
+
+### 铁律 1: 中文思考回答
+
+用中文思考和回答。代码、commit 信息、PR 描述用英文。
+
+### 铁律 2: 日志只用 LOG()
+
+**项目已配备统一日志系统。严禁使用任何裸打印函数。**
+
+以下符号**不得出现**于 `logger/logger.cpp` 以外的任何 C++ 文件中：
+
+```
+printf          fprintf         fprintf(stdout     fprintf(stderr
+std::cout       std::cerr       std::clog
+puts            putchar         fputs              fwrite(..., stdout
+WriteConsole    OutputDebugString
+```
+
+**唯一例外**：`logger/logger.cpp` 自身 + `game/src/` 终端 UI 渲染。
+
+**唯一合法方式**：
+```cpp
+#include "logger/logger.h"
+LOG("tag", "format_string", args...);
+```
+
+| 标签 | 用途 |
+|------|------|
+| `wgc` `dxgi` | 捕获 |
+| `cmd` | 命令调度 |
+| `main` | 主循环/启动 |
+| `mjpeg` | MJPEG 服务器 |
+| `ui` | 前端事件 |
+| `agent` | AI Agent |
+
+### 铁律 3: 存档 = 更新 README + 更新 CLAUDE.md + commit
+
+每次有实质性改动（新功能、架构变更、重要修复）结束时：
+
+1. **更新 README.md** — 如果对外接口/用法变了
+2. **更新 CLAUDE.md** — 如果架构/结构/构建流程变了
+3. **git commit** — 写出清晰的 commit message，描述做了什么和为什么
+
+这三个动作是一体的。不要说"稍后再做"——做完代码立刻存档。
 
 ## Project Vision
 

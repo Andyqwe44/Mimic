@@ -21,13 +21,13 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <sstream>
 #include <string>
 #include <vector>
 #include <chrono>
+#include "../../logger/logger.h"
 
 // ==================== TCP Client ====================
 
@@ -103,39 +103,39 @@ private:
 int run_agent(const AgentConfig& cfg) {
     setup_global_signals();
 
-    printf("=== Generic Visual Game Agent ===\n");
-    printf("Window: %ls\n", cfg.window_title.c_str());
-    printf("Server: %s:%d\n", cfg.server_host.c_str(), cfg.server_port);
-    printf("Interval: %dms  Max games: %d  Verbose: %s  Dry-run: %s\n\n",
+    LOG("agent", "=== Generic Visual Game Agent ===");
+    LOG("agent", "Window: %ls", cfg.window_title.c_str());
+    LOG("agent", "Server: %s:%d", cfg.server_host.c_str(), cfg.server_port);
+    LOG("agent", "Interval: %dms  Max games: %d  Verbose: %s  Dry-run: %s",
            cfg.frame_interval_ms, cfg.max_games,
            cfg.verbose ? "yes" : "no", cfg.dry_run ? "YES" : "no");
 
     // 1. Capture backend
     auto capture = create_capture_backend();
-    printf("Capture: %s\n", capture->name());
+    LOG("agent", "Capture: %s", capture->name());
 
     // 2. Input backend
     auto input = create_input_backend();
-    printf("Input: %s\n", input->name());
+    LOG("agent", "Input: %s", input->name());
 
     // 3. Find game window
     Rect game_rect = {};
     if (!capture->get_window_rect(cfg.window_title.c_str(), game_rect)) {
-        fprintf(stderr, "ERROR: Cannot find window '%ls'\n", cfg.window_title.c_str());
+        LOG("agent", "ERROR: Cannot find window '%ls'", cfg.window_title.c_str());
         return 1;
     }
-    printf("Window rect: x=%d y=%d w=%d h=%d\n\n", game_rect.x, game_rect.y,
+    LOG("agent", "Window rect: x=%d y=%d w=%d h=%d", game_rect.x, game_rect.y,
            game_rect.w, game_rect.h);
 
     // 4. Connect to AI server
     AiServerClient server;
     if (!server.connect(cfg.server_host.c_str(), cfg.server_port)) {
-        fprintf(stderr, "ERROR: Cannot connect to %s:%d\n",
+        LOG("agent", "ERROR: Cannot connect to %s:%d",
                 cfg.server_host.c_str(), cfg.server_port);
-        fprintf(stderr, "Start server: python server/model_server.py\n");
+        LOG("agent", "Start server: python server/model_server.py");
         return 1;
     }
-    printf("Connected to server.\n\n");
+    LOG("agent", "Connected to server.");
 
     // 5. Action mapper
     ActionDecoder decoder(game_rect.w, game_rect.h);
@@ -151,7 +151,7 @@ int run_agent(const AgentConfig& cfg) {
     raw_tokens.reserve(512);
     int frame_count = 0;
 
-    printf("Agent loop running. Ctrl+C to stop.\n\n");
+    LOG("agent", "Agent loop running. Ctrl+C to stop.");
 
     while (!g_quit_flag) {
         auto t0 = capture_now_us();
@@ -170,14 +170,14 @@ int run_agent(const AgentConfig& cfg) {
 
         // Send to server
         if (!server.send_tensor(tensor, 4, 84, 84)) {
-            fprintf(stderr, "Send error\n");
+            LOG("agent", "ERROR: Send error");
             break;
         }
 
         // Receive action tokens (reuse buffer)
         raw_tokens.clear();
         if (!server.recv_action_tokens(raw_tokens)) {
-            fprintf(stderr, "Recv error/timeout\n");
+            LOG("agent", "ERROR: Recv error/timeout");
             continue;
         }
         auto t3 = capture_now_us();
@@ -194,20 +194,19 @@ int run_agent(const AgentConfig& cfg) {
         // Logging
         frame_count++;
         if (cfg.verbose) {
-            printf("[%d] cap=%.1fms pre=%.1fms net=%.1fms act=%.1fms total=%.1fms tokens=%zu\n",
+            LOG("agent", "[%d] cap=%.1fms pre=%.1fms net=%.1fms act=%.1fms total=%.1fms tokens=%zu",
                    frame_count,
                    (t1 - t0) / 1000.0, (t2 - t1) / 1000.0,
                    (t3 - t2) / 1000.0, (t4 - t3) / 1000.0,
                    (t4 - t0) / 1000.0, decoded.size());
         } else if (frame_count % 10 == 0) {
-            printf(".");
-            fflush(stdout);
+            LOG("agent", ".");
         }
 
         sleep_ms(cfg.frame_interval_ms);
     }
 
-    printf("\n\nFrames processed: %d\n", frame_count);
+    LOG("agent", "Frames processed: %d", frame_count);
     server.disconnect();
     capture->shutdown();
     input->shutdown();

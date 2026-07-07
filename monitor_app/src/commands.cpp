@@ -329,7 +329,9 @@ static bool tcp_server_start() {
     addr.sin_family = AF_INET;
     addr.sin_port = htons(9999);
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    if (bind(g_tcp_listen, (sockaddr*)&addr, sizeof(addr)) != 0) { closesocket(g_tcp_listen); g_tcp_listen = INVALID_SOCKET; return false; }
+    if (bind(g_tcp_listen, (sockaddr*)&addr, sizeof(addr)) != 0) {
+        closesocket(g_tcp_listen); g_tcp_listen = INVALID_SOCKET; WSACleanup(); return false;
+    }
     listen(g_tcp_listen, SOMAXCONN);
     g_tcp_running = true;
     g_tcp_accept_thread = std::thread(tcp_accept_loop);
@@ -409,8 +411,10 @@ static std::string cmd_capture_stream_start(uint64_t hwnd, const std::string& me
                 g_stream_frame_pixels.assign(buf.data(), buf.data() + (size_t)size);
                 g_stream_frame_w = w;
                 g_stream_frame_h = h;
+            } else {
+                // No new frame — yield CPU, avoid busy-wait
+                Sleep(1);
             }
-            Sleep(1);
         }
         CoUninitialize();
     });
@@ -445,6 +449,13 @@ static std::string cmd_read_logs(int max_files) {
 }
 
 static std::string cmd_clear_log() {
+    // Stop any running stream first — prevents use-after-free in concurrent LOG() calls
+    if (g_streaming) {
+        g_streaming = false;
+        if (g_stream_handle) wgc_stream_signal_stop(g_stream_handle);
+        if (g_stream_thread.joinable()) g_stream_thread.join();
+        if (g_stream_handle) { wgc_stream_stop(g_stream_handle); g_stream_handle = nullptr; }
+    }
     capture_log_shutdown();
     capture_log_init("agent", "0.2.0", "log/", 5, 5000);
     LOG("cmd", "log cleared");
@@ -599,10 +610,18 @@ std::string dispatch_command(const std::string& json) {
 // ── MTA daemon thread (WGC needs MTA, main thread is STA for WebView2/WIC) ──
 static std::thread g_mta_thread;
 static std::atomic<bool> g_mta_running{false};
+static std::mutex g_mta_init_mtx;
+static std::condition_variable g_mta_init_cv;
+static bool g_mta_init_done = false;
 
 static void mta_daemon() {
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     wgc_init_apartment();
+    {
+        std::lock_guard<std::mutex> lk(g_mta_init_mtx);
+        g_mta_init_done = true;
+    }
+    g_mta_init_cv.notify_one();
     LOG("cmd", "MTA daemon running");
     while (g_mta_running) Sleep(500);
     wgc_deinit_apartment();
@@ -619,7 +638,13 @@ void backend_init() {
     // MTA daemon for WGC (separate thread avoids STA vs MTA conflict)
     g_mta_running = true;
     g_mta_thread = std::thread(mta_daemon);
-    Sleep(100); // brief wait for MTA init
+    // Wait for MTA init with proper sync (not Sleep race)
+    {
+        std::unique_lock<std::mutex> lk(g_mta_init_mtx);
+        if (!g_mta_init_cv.wait_for(lk, std::chrono::seconds(10), [] { return g_mta_init_done; })) {
+            LOG("cmd", "WARNING: MTA daemon init timeout after 10s");
+        }
+    }
 
     LOG("cmd", "backend init OK");
 }

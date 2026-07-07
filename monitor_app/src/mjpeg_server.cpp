@@ -12,7 +12,7 @@
 #include <thread>
 #include <mutex>
 #include <atomic>
-#include <cstdio>
+#include "../../logger/logger.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -156,7 +156,7 @@ bool mjpeg_server_start() {
     CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
                      IID_PPV_ARGS(&g_wic));
     if (!g_wic) {
-        fprintf(stderr, "[mjpeg] WIC factory init failed\n");
+        LOG("mjpeg", "WIC factory init failed");
         return false;
     }
 
@@ -184,7 +184,7 @@ bool mjpeg_server_start() {
 
     g_running = true;
     g_accept_thread = std::thread(accept_loop);
-    fprintf(stderr, "[mjpeg] server started on port 9998\n");
+    LOG("mjpeg", "server started on port 9998");
     return true;
 }
 
@@ -228,7 +228,7 @@ void mjpeg_server_stop() {
 
     g_wic = nullptr;
     WSACleanup();
-    fprintf(stderr, "[mjpeg] server stopped\n");
+    LOG("mjpeg", "server stopped");
 }
 
 void mjpeg_server_push_frame(const uint8_t* pixels, int w, int h) {

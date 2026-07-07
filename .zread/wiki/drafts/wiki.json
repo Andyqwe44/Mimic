@@ -1,0 +1,213 @@
+{
+  "id": "2026-07-07-182948",
+  "generated_at": "2026-07-07T10:29:48.1530662Z",
+  "language": "zh",
+  "pages": [
+    {
+      "slug": "1-xiang-mu-zong-lan-xiang-su-shu-ru-dong-zuo-shu-chu-tong-yong-shi-jue-you-xi-aixi-tong",
+      "title": "项目总览：像素输入，动作输出 — 通用视觉游戏AI系统",
+      "file": "1-xiang-mu-zong-lan-xiang-su-shu-ru-dong-zuo-shu-chu-tong-yong-shi-jue-you-xi-aixi-tong.md",
+      "section": "Get Started",
+      "level": "Beginner"
+    },
+    {
+      "slug": "2-kuai-su-qi-dong-cong-bian-yi-dao-yun-xing-ge-wan-zheng-de-jing-zi-qi-aizi-yi",
+      "title": "快速启动：从编译到运行一个完整的井字棋AI自弈",
+      "file": "2-kuai-su-qi-dong-cong-bian-yi-dao-yun-xing-ge-wan-zheng-de-jing-zi-qi-aizi-yi.md",
+      "section": "Get Started",
+      "level": "Beginner"
+    },
+    {
+      "slug": "3-she-ji-zhe-xue-si-ceng-jia-gou-you-xi-ben-ti-ping-mu-bu-huo-shu-ru-mo-ni-aimo-xing-yu-ling-rustchun-c-ce-lue",
+      "title": "设计哲学：四层架构（游戏本体→屏幕捕获→输入模拟→AI模型）与零Rust纯C++策略",
+      "file": "3-she-ji-zhe-xue-si-ceng-jia-gou-you-xi-ben-ti-ping-mu-bu-huo-shu-ru-mo-ni-aimo-xing-yu-ling-rustchun-c-ce-lue.md",
+      "section": "Deep Dive",
+      "group": "核心思想与架构",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "4-xiang-mu-quan-mao-logger-capture-monitor_app-agent-ai-model-liu-da-mo-kuai-zhi-ze-fen-gong",
+      "title": "项目全貌：logger/capture/monitor_app/agent/ai/model 六大模块职责分工",
+      "file": "4-xiang-mu-quan-mao-logger-capture-monitor_app-agent-ai-model-liu-da-mo-kuai-zhi-ze-fen-gong.md",
+      "section": "Deep Dive",
+      "group": "核心思想与架构",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "5-chang-qi-yuan-jing-zi-zu-zhi-ceng-ci-hua-shi-jue-ai-cong-jing-zi-qi-dao-tong-yong-you-xi-de-fan-hua-lu-jing",
+      "title": "长期愿景：自组织层次化视觉AI — 从井字棋到通用游戏的泛化路径",
+      "file": "5-chang-qi-yuan-jing-zi-zu-zhi-ceng-ci-hua-shi-jue-ai-cong-jing-zi-qi-dao-tong-yong-you-xi-de-fan-hua-lu-jing.md",
+      "section": "Deep Dive",
+      "group": "核心思想与架构",
+      "level": "Advanced"
+    },
+    {
+      "slug": "6-you-xi-luo-ji-3x3qi-pan-gui-ze-sheng-fu-pan-ding-yu-kong-zhi-tai-zhong-duan-tuijiao-hu",
+      "title": "游戏逻辑：3x3棋盘规则、胜负判定与控制台终端TUI交互",
+      "file": "6-you-xi-luo-ji-3x3qi-pan-gui-ze-sheng-fu-pan-ding-yu-kong-zhi-tai-zhong-duan-tuijiao-hu.md",
+      "section": "Deep Dive",
+      "group": "井字棋游戏本体 (game/)",
+      "level": "Beginner"
+    },
+    {
+      "slug": "7-wang-luo-dui-zhan-xie-yi-chun-wen-ben-xing-xie-yi-9qi-ge-zhi-qi-fang-fan-hui-xing-lie-zhi-chi-ren-ren-human-vs-ai-ai-vs-aisan-chong-mo-shi",
+      "title": "网络对战协议：纯文本行协议（9棋格+执棋方→返回行列），支持人人/Human-vs-AI/AI-vs-AI三种模式",
+      "file": "7-wang-luo-dui-zhan-xie-yi-chun-wen-ben-xing-xie-yi-9qi-ge-zhi-qi-fang-fan-hui-xing-lie-zhi-chi-ren-ren-human-vs-ai-ai-vs-aisan-chong-mo-shi.md",
+      "section": "Deep Dive",
+      "group": "井字棋游戏本体 (game/)",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "8-bu-huo-yin-qing-jia-gou-chou-xiang-jie-kou-icapturebackend-yu-wu-chong-hou-duan-wgc-desktopblt-getwindowdc-printwindow-screenbitblt",
+      "title": "捕获引擎架构：抽象接口 ICaptureBackend 与五种后端（WGC/DesktopBlt/GetWindowDC/PrintWindow/ScreenBitBlt）",
+      "file": "8-bu-huo-yin-qing-jia-gou-chou-xiang-jie-kou-icapturebackend-yu-wu-chong-hou-duan-wgc-desktopblt-getwindowdc-printwindow-screenbitblt.md",
+      "section": "Deep Dive",
+      "group": "屏幕捕获 (capture/)",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "9-wgcbu-huo-shen-du-jie-xi-gpu-framepool-d3d11-winrtduo-xian-cheng-mtashe-ji-triple-bufferedyu-tiao-jian-bian-liang-tong-bu",
+      "title": "WGC捕获深度解析：GPU FramePool + D3D11 + WinRT多线程MTA设计，Triple-buffered与条件变量同步",
+      "file": "9-wgcbu-huo-shen-du-jie-xi-gpu-framepool-d3d11-winrtduo-xian-cheng-mtashe-ji-triple-bufferedyu-tiao-jian-bian-liang-tong-bu.md",
+      "section": "Deep Dive",
+      "group": "屏幕捕获 (capture/)",
+      "level": "Advanced"
+    },
+    {
+      "slug": "10-zheng-yu-chu-li-guan-xian-ren-yi-fen-bian-lu-bgra-cai-jian-84x84shuang-xian-xing-suo-fang-hui-du-hua-4zheng-dui-die-gui-hua-float32zhang-liang",
+      "title": "帧预处理管线：任意分辨率BGRA→裁剪→84x84双线性缩放→灰度化→4帧堆叠→归一化float32张量",
+      "file": "10-zheng-yu-chu-li-guan-xian-ren-yi-fen-bian-lu-bgra-cai-jian-84x84shuang-xian-xing-suo-fang-hui-du-hua-4zheng-dui-die-gui-hua-float32zhang-liang.md",
+      "section": "Deep Dive",
+      "group": "屏幕捕获 (capture/)",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "11-shu-ru-chou-xiang-ceng-she-ji-gameactiontong-yu-yi-iinputbackendjie-kou-fen-chi-zuo-shi-yao-yu-zen-yao-zuo",
+      "title": "输入抽象层设计：GameAction统一语义 + IInputBackend接口，分离\"做什么\"与\"怎么做\"",
+      "file": "11-shu-ru-chou-xiang-ceng-she-ji-gameactiontong-yu-yi-iinputbackendjie-kou-fen-chi-zuo-shi-yao-yu-zen-yao-zuo.md",
+      "section": "Deep Dive",
+      "group": "输入模拟 (input/)",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "12-shuang-hou-duan-ce-lue-interceptionqu-dong-ceng-nei-he-ji-rao-guo-fan-zuo-bi-yu-sendinputxi-tong-ceng-apiji-ke-jian-ce",
+      "title": "双后端策略：Interception驱动层（内核级，绕过反作弊）与SendInput系统层（API级，可检测）",
+      "file": "12-shuang-hou-duan-ce-lue-interceptionqu-dong-ceng-nei-he-ji-rao-guo-fan-zuo-bi-yu-sendinputxi-tong-ceng-apiji-ke-jian-ce.md",
+      "section": "Deep Dive",
+      "group": "输入模拟 (input/)",
+      "level": "Advanced"
+    },
+    {
+      "slug": "13-agentzhu-xun-huan-guan-xian-bu-huo-yu-chu-li-tcpfa-song-jie-shou-dong-zuo-ling-pai-jie-ma-zhi-xing-shu-ru",
+      "title": "Agent主循环管线：捕获→预处理→TCP发送→接收动作令牌→解码→执行输入",
+      "file": "13-agentzhu-xun-huan-guan-xian-bu-huo-yu-chu-li-tcpfa-song-jie-shou-dong-zuo-ling-pai-jie-ma-zhi-xing-shu-ru.md",
+      "section": "Deep Dive",
+      "group": "视觉Agent (agent/)",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "14-tong-yong-dong-zuo-bian-jie-ma-actionpooler-jin-zhi-xie-yi-shu-biao-yi-dong-dian-ji-an-jian-deng-dai-deng-10chong-cao-zuo-you-xi-wu-guan-de-biao-zhun-hua-ge-shi",
+      "title": "通用动作编解码：ActionPool二进制协议（鼠标移动/点击/按键/等待等10种操作），游戏无关的标准化格式",
+      "file": "14-tong-yong-dong-zuo-bian-jie-ma-actionpooler-jin-zhi-xie-yi-shu-biao-yi-dong-dian-ji-an-jian-deng-dai-deng-10chong-cao-zuo-you-xi-wu-guan-de-biao-zhun-hua-ge-shi.md",
+      "section": "Deep Dive",
+      "group": "视觉Agent (agent/)",
+      "level": "Advanced"
+    },
+    {
+      "slug": "15-jing-zi-qi-mlpmo-xing-9wei-shu-ru-3ceng-quan-lian-jie-ce-lue-tou-9-logits-jie-zhi-tou-tanh-1-1-ke-50msnei-cputui-li",
+      "title": "井字棋MLP模型：9维输入→3层全连接→策略头(9 logits)+价值头(tanh[-1,1])，可50ms内CPU推理",
+      "file": "15-jing-zi-qi-mlpmo-xing-9wei-shu-ru-3ceng-quan-lian-jie-ce-lue-tou-9-logits-jie-zhi-tou-tanh-1-1-ke-50msnei-cputui-li.md",
+      "section": "Deep Dive",
+      "group": "AI模型体系 (ai/ + model/)",
+      "level": "Beginner"
+    },
+    {
+      "slug": "16-zi-yi-xun-lian-xi-tong-ai_server-py-game-main-exe-lian-diao-epsilon-greedytan-suo-ce-lue-ti-du-die-dai-500lun-shou-lian",
+      "title": "自弈训练系统：ai_server.py + game/main.exe 联调，epsilon-greedy探索→策略梯度→迭代500轮收敛",
+      "file": "16-zi-yi-xun-lian-xi-tong-ai_server-py-game-main-exe-lian-diao-epsilon-greedytan-suo-ce-lue-ti-du-die-dai-500lun-shou-lian.md",
+      "section": "Deep Dive",
+      "group": "AI模型体系 (ai/ + model/)",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "17-tong-yong-shi-jue-agentmo-xing-cnnshi-jue-bian-ma-qi-4x84x84-256wei-transformerzi-hui-gui-jie-ma-qi-sheng-cheng-dong-zuo-ling-pai-xu-lie-you-xi-wu-guan",
+      "title": "通用视觉Agent模型：CNN视觉编码器(4x84x84→256维) + Transformer自回归解码器(生成动作令牌序列)，游戏无关",
+      "file": "17-tong-yong-shi-jue-agentmo-xing-cnnshi-jue-bian-ma-qi-4x84x84-256wei-transformerzi-hui-gui-jie-ma-qi-sheng-cheng-dong-zuo-ling-pai-xu-lie-you-xi-wu-guan.md",
+      "section": "Deep Dive",
+      "group": "AI模型体系 (ai/ + model/)",
+      "level": "Advanced"
+    },
+    {
+      "slug": "18-ceng-ci-hua-jia-gou-l1gan-zhi-zhuan-jia-xiang-su-16wei-ya-suo-yin-bian-liang-z-l2ce-lue-tui-li-qi-z-li-shi-dong-zuo-duan-dao-duan-xin-xi-ping-jing-xun-lian",
+      "title": "层次化架构：L1感知专家(像素→16维压缩隐变量z) + L2策略推理器(z+历史→动作)，端到端信息瓶颈训练",
+      "file": "18-ceng-ci-hua-jia-gou-l1gan-zhi-zhuan-jia-xiang-su-16wei-ya-suo-yin-bian-liang-z-l2ce-lue-tui-li-qi-z-li-shi-dong-zuo-duan-dao-duan-xin-xi-ping-jing-xun-lian.md",
+      "section": "Deep Dive",
+      "group": "AI模型体系 (ai/ + model/)",
+      "level": "Advanced"
+    },
+    {
+      "slug": "19-er-jin-zhi-xian-lan-xie-yi-mo-shu-fram-xiao-duan-zai-he-da-xiao-lei-xing-biao-qian-ti-c-pythonshuang-duan-tong-bu",
+      "title": "二进制线缆协议：魔数\"FRAM\" + 小端载荷大小/类型标签 + 体，C++/Python双端同步",
+      "file": "19-er-jin-zhi-xian-lan-xie-yi-mo-shu-fram-xiao-duan-zai-he-da-xiao-lei-xing-biao-qian-ti-c-pythonshuang-duan-tong-bu.md",
+      "section": "Deep Dive",
+      "group": "通信协议 (protocol/)",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "20-san-chong-chuan-shu-fang-shi-sharedbufferling-kao-bei-gpu-canvas-mjpeg-http-9998duan-kou-hui-tui-tcp-9999duan-kou-wai-bu-tong-xin",
+      "title": "三种传输方式：SharedBuffer零拷贝GPU→Canvas、MJPEG HTTP 9998端口回退、TCP 9999端口外部通信",
+      "file": "20-san-chong-chuan-shu-fang-shi-sharedbufferling-kao-bei-gpu-canvas-mjpeg-http-9998duan-kou-hui-tui-tcp-9999duan-kou-wai-bu-tong-xin.md",
+      "section": "Deep Dive",
+      "group": "通信协议 (protocol/)",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "21-chun-c-webview2su-zhu-win32chuang-kou-react-ui-yu-taurijie-ou-tong-fen-qian-duan-dai-ma-100-bu-bian",
+      "title": "纯C++ WebView2宿主：Win32窗口 + React UI（与Tauri解耦，同一份前端代码100%不变）",
+      "file": "21-chun-c-webview2su-zhu-win32chuang-kou-react-ui-yu-taurijie-ou-tong-fen-qian-duan-dai-ma-100-bu-bian.md",
+      "section": "Deep Dive",
+      "group": "监控桌面应用 (monitor_app/ + monitor_web/)",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "22-webmessageqiao-jie-chrome-webview-postmessage-c-ming-ling-fen-fa-jsonxiang-ying-qu-dai-tauri-invoke",
+      "title": "WebMessage桥接：chrome.webview.postMessage → C++命令分发 → JSON响应，取代Tauri invoke",
+      "file": "22-webmessageqiao-jie-chrome-webview-postmessage-c-ming-ling-fen-fa-jsonxiang-ying-qu-dai-tauri-invoke.md",
+      "section": "Deep Dive",
+      "group": "监控桌面应用 (monitor_app/ + monitor_web/)",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "23-liu-shi-chuan-shu-guan-xian-wgc-gpukao-bei-sharedbufferzhi-tui-canvas-zhu-lu-jing-wic-jpegbian-ma-mjpeg-httpduo-bu-fen-chuan-shu-hui-tui",
+      "title": "流式传输管线：WGC→GPU拷贝→SharedBuffer直推Canvas（主路径）/ WIC JPEG编码→MJPEG HTTP多部分传输（回退）",
+      "file": "23-liu-shi-chuan-shu-guan-xian-wgc-gpukao-bei-sharedbufferzhi-tui-canvas-zhu-lu-jing-wic-jpegbian-ma-mjpeg-httpduo-bu-fen-chuan-shu-hui-tui.md",
+      "section": "Deep Dive",
+      "group": "监控桌面应用 (monitor_app/ + monitor_web/)",
+      "level": "Advanced"
+    },
+    {
+      "slug": "24-jian-kong-mian-ban-gong-neng-yi-biao-pan-chuang-kou-bu-huo-yu-lan-fpsji-shu-ri-zhi-huan-huan-chong-qu-chuang-kou-xuan-ze-qi-she-zhi-ye-mian",
+      "title": "监控面板功能：仪表盘/窗口捕获预览/FPS计数/日志环缓冲区/窗口选择器/设置页面",
+      "file": "24-jian-kong-mian-ban-gong-neng-yi-biao-pan-chuang-kou-bu-huo-yu-lan-fpsji-shu-ri-zhi-huan-huan-chong-qu-chuang-kou-xuan-ze-qi-she-zhi-ye-mian.md",
+      "section": "Deep Dive",
+      "group": "监控桌面应用 (monitor_app/ + monitor_web/)",
+      "level": "Beginner"
+    },
+    {
+      "slug": "25-shu-ju-shou-ji-qi-mlpzi-yi-ji-lu-zheng-dong-zuo-qi-pan-zhuang-tai-jie-zhi-shi-jue-mo-xing-zheng-liu-xun-lian",
+      "title": "数据收集器：MLP自弈记录(帧,动作,棋盘状态,价值) → 视觉模型蒸馏训练",
+      "file": "25-shu-ju-shou-ji-qi-mlpzi-yi-ji-lu-zheng-dong-zuo-qi-pan-zhuang-tai-jie-zhi-shi-jue-mo-xing-zheng-liu-xun-lian.md",
+      "section": "Deep Dive",
+      "group": "训练数据与工具链",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "26-ri-zhi-yin-qing-tong-c-api-capture_log_write_msg-xian-cheng-an-quan-huan-huan-chong-qu-wen-jian-gun-dong-kua-c-rust-gong-ju-shi-yong",
+      "title": "日志引擎：统一C API (capture_log_write_msg) + 线程安全环缓冲区 + 文件滚动，跨C++/Rust/工具使用",
+      "file": "26-ri-zhi-yin-qing-tong-c-api-capture_log_write_msg-xian-cheng-an-quan-huan-huan-chong-qu-wen-jian-gun-dong-kua-c-rust-gong-ju-shi-yong.md",
+      "section": "Deep Dive",
+      "group": "训练数据与工具链",
+      "level": "Intermediate"
+    }
+  ]
+}

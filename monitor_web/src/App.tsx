@@ -501,20 +501,24 @@ function ScreenshotPanel({ selWin, screenRatio, forceMethod, transportMethod, wi
   const framesRef = useRef(0)
   const lastFpsRef = useRef(Date.now())
   const unlistenRef = useRef<(() => void) | null>(null)
+  const sharedBufHandlerRef = useRef<((e: any) => void) | null>(null) // track sharedbufferreceived handler
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const [canvasDims, setCanvasDims] = useState({ w: 0, h: 0 }) // triggers re-render for canvas sizing
-  const sharedBufActiveRef = useRef(false)        // true if receiving shared buffers
+  const [canvasDims, setCanvasDims] = useState({ w: 0, h: 0 })
+  const sharedBufActiveRef = useRef(false)
 
   // ── SharedBuffer → Canvas rendering (zero-copy) ──
   const setupSharedBufferListener = () => {
-    // WebView2 sharedbufferreceived — raw BGRA pixels straight to Canvas ImageData
     const wv = (window as any).chrome?.webview
     if (!wv) {
-      // Fallback: WebView2 SharedBuffer API not available, use MJPEG
       sharedBufActiveRef.current = false
       setImgSrc(`${MJPEG_URL}?t=${Date.now()}`)
       addLog('[Preview] SharedBuffer not available, falling back to MJPEG')
       return
+    }
+    // Remove old listener if re-entering preview
+    if (sharedBufHandlerRef.current) {
+      wv.removeEventListener('sharedbufferreceived', sharedBufHandlerRef.current)
+      sharedBufHandlerRef.current = null
     }
     const handler = (e: any) => {
       if (!previewingRef.current || !sharedBufActiveRef.current) return
@@ -522,7 +526,9 @@ function ScreenshotPanel({ selWin, screenRatio, forceMethod, transportMethod, wi
         const buf: ArrayBuffer = e.getBuffer()
         const metaStr: string = e.getAdditionalData()
         const meta = JSON.parse(metaStr) as { w: number; h: number; ts: number }
+        if (!meta.w || !meta.h || meta.w <= 0 || meta.h <= 0) return
         // Zero-copy: ArrayBuffer → Uint8ClampedArray → ImageData → Canvas
+        // Note: C++ now sends RGBA (converted from BGRA), so ImageData works directly
         const imgData = new ImageData(
           new Uint8ClampedArray(buf, 0, meta.w * meta.h * 4),
           meta.w, meta.h
@@ -539,6 +545,7 @@ function ScreenshotPanel({ selWin, screenRatio, forceMethod, transportMethod, wi
         if (elapsed >= 1000) { setFps(Math.round(framesRef.current * 1000 / elapsed)); framesRef.current = 0; lastFpsRef.current = now }
       } catch (_) { /* skip corrupt frame */ }
     }
+    sharedBufHandlerRef.current = handler
     wv.addEventListener('sharedbufferreceived', handler)
     addLog('[Preview] SharedBuffer pipeline active — zero-copy Canvas')
   }
@@ -623,7 +630,13 @@ function ScreenshotPanel({ selWin, screenRatio, forceMethod, transportMethod, wi
   // Cleanup: stop stream and unlisten on unmount
   useEffect(() => { return () => {
     previewingRef.current = false
+    sharedBufActiveRef.current = false
     if (unlistenRef.current) { unlistenRef.current(); unlistenRef.current = null }
+    const wv = (window as any).chrome?.webview
+    if (wv && sharedBufHandlerRef.current) {
+      wv.removeEventListener('sharedbufferreceived', sharedBufHandlerRef.current)
+      sharedBufHandlerRef.current = null
+    }
     // Stop backend stream to prevent resource leak
     hostCall('capture_stream_stop').catch(() => {})
   } }, [])

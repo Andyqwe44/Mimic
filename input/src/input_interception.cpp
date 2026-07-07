@@ -10,6 +10,7 @@
 #include "input.hpp"
 #include <windows.h>
 #include <cstdio>
+#include "../../logger/logger.h"
 
 // --- Interception API types ---
 typedef int  InterceptionContext;
@@ -60,11 +61,11 @@ public:
     bool init() override {
         dll_ = LoadLibraryA("interception.dll");
         if (!dll_) {
-            fprintf(stderr, "Interception: interception.dll not found\n");
+            LOG("input", "Interception: interception.dll not found");
             return false;
         }
         #define LOAD(fn) pfn_##fn = (PFN_##fn)GetProcAddress(dll_, #fn); \
-            if (!pfn_##fn) { fprintf(stderr, "Interception: missing %s\n", #fn); return false; }
+            if (!pfn_##fn) { LOG("input", "Interception: missing %s", #fn); return false; }
         LOAD(interception_create_context);
         LOAD(interception_destroy_context);
         LOAD(interception_set_filter);
@@ -73,7 +74,7 @@ public:
         #undef LOAD
 
         ctx_ = pfn_interception_create_context();
-        if (!ctx_) { fprintf(stderr, "Interception: create_context failed. Run as Admin?\n"); return false; }
+        if (!ctx_) { LOG("input", "Interception: create_context failed. Run as Admin?"); return false; }
 
         pfn_interception_set_filter(ctx_, I_KEYBOARD, I_FILTER_KEY_ALL);
         pfn_interception_set_filter(ctx_, I_MOUSE, I_FILTER_MOUSE_ALL);

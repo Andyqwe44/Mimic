@@ -13,7 +13,7 @@
   #include <unistd.h>
 #endif
 
-#include <cstdio>
+#include <iostream>
 
 static bool g_tui_active = false;
 #ifdef _WIN32
@@ -41,8 +41,7 @@ bool tui_init() {
     SetConsoleMode(g_hin, in_mode);
 
     // Hide blinking cursor
-    printf("\x1b[?25l");
-    fflush(stdout);
+    std::cout << "\x1b[?25l" << std::flush;
     g_tui_active = true;
     return true;
 #else
@@ -52,8 +51,7 @@ bool tui_init() {
     raw.c_cc[VMIN] = 0;
     raw.c_cc[VTIME] = 1;
     tcsetattr(STDIN_FILENO, TCSANOW, &raw);
-    printf("\x1b[?25l");
-    fflush(stdout);
+    std::cout << "\x1b[?25l" << std::flush;
     g_tui_active = true;
     return true;
 #endif
@@ -61,8 +59,7 @@ bool tui_init() {
 
 void tui_restore() {
     if (!g_tui_active) return;
-    printf("\x1b[?25h\x1b[0m\x1b[2J\x1b[H");
-    fflush(stdout);
+    std::cout << "\x1b[?25h\x1b[0m\x1b[2J\x1b[H" << std::flush;
 #ifdef _WIN32
     if (g_hin)  SetConsoleMode(g_hin, g_old_in);
     if (g_hout) SetConsoleMode(g_hout, g_old_out);

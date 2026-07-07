@@ -3,9 +3,9 @@
  */
 #include "agent.hpp"
 #include <windows.h>
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include "../../logger/logger.h"
 
 int main(int argc, char* argv[]) {
     AgentConfig cfg;
@@ -34,16 +34,16 @@ int main(int argc, char* argv[]) {
         } else if (strcmp(argv[i], "--dry-run") == 0) {
             cfg.dry_run = true;
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
-            printf("Visual Game Agent\n\n");
-            printf("Usage: agent.exe [options]\n\n");
-            printf("Options:\n");
-            printf("  --window TITLE     Game window title (required)\n");
-            printf("  --server HOST:PORT AI server address (default: 127.0.0.1:9999)\n");
-            printf("  --interval MS      Frame interval in ms (default: 100)\n");
-            printf("  --games N          Max games (default: unlimited)\n");
-            printf("  --verbose          Show per-frame latency\n");
-            printf("  --dry-run          Don't simulate input (debug mode)\n");
-            printf("  --help             Show this help\n");
+            LOG("agent", "Visual Game Agent");
+            LOG("agent", "Usage: agent.exe [options]");
+            LOG("agent", "Options:");
+            LOG("agent", "  --window TITLE     Game window title (required)");
+            LOG("agent", "  --server HOST:PORT AI server address (default: 127.0.0.1:9999)");
+            LOG("agent", "  --interval MS      Frame interval in ms (default: 100)");
+            LOG("agent", "  --games N          Max games (default: unlimited)");
+            LOG("agent", "  --verbose          Show per-frame latency");
+            LOG("agent", "  --dry-run          Don't simulate input (debug mode)");
+            LOG("agent", "  --help             Show this help");
             return 0;
         } else if (cfg.window_title.empty()) {
             // First positional arg = window title
@@ -54,8 +54,8 @@ int main(int argc, char* argv[]) {
     }
 
     if (cfg.window_title.empty()) {
-        fprintf(stderr, "Usage: agent.exe --window \"Game Window Title\"\n");
-        fprintf(stderr, "Try: agent.exe --help\n");
+        LOG("agent", "Usage: agent.exe --window \"Game Window Title\"");
+        LOG("agent", "Try: agent.exe --help");
         return 1;
     }
 
