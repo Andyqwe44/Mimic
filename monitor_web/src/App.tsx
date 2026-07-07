@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { Play, Square, Camera, Monitor, Settings, Moon, Sun, ChevronDown, FileText, Trash2, X, MonitorUp, Search, MonitorSmartphone, RefreshCw } from 'lucide-react'
+import { Play, Square, Camera, Monitor, Settings, Moon, Sun, ChevronDown, FileText, Trash2, X, MonitorUp, Search, MonitorSmartphone, RefreshCw, FolderOpen } from 'lucide-react'
 // ── WebView2 WebMessage bridge (replaces Tauri invoke) ──
 type PendingCall = {
   resolve: (value: any) => void;
@@ -14,7 +14,8 @@ const _pending = new Map<number, PendingCall>();
 if (typeof (window as any).chrome?.webview !== 'undefined') {
   (window as any).chrome.webview.addEventListener('message', (e: any) => {
     try {
-      const msg = JSON.parse(e.data);
+      // PostWebMessageAsJson sends a pre-parsed object, not a JSON string
+      const msg = typeof e.data === 'string' ? JSON.parse(e.data) : e.data;
       const pending = _pending.get(msg.id);
       if (pending) {
         clearTimeout(pending.timer);
@@ -33,7 +34,14 @@ function hostCall(cmd: string, args?: Record<string, any>): Promise<any> {
       _pending.delete(id);
       reject(new Error(`hostCall timeout: ${cmd}`));
     }, 30000);
-    _pending.set(id, { resolve, reject, timer });
+    _pending.set(id, {
+      resolve: (raw: any) => {
+        // Unwrap {id, result} envelope — handle both wrapped and raw formats
+        resolve(raw && typeof raw === 'object' && 'result' in raw ? raw.result : raw);
+      },
+      reject,
+      timer
+    });
     try {
       (window as any).chrome.webview.postMessage(JSON.stringify({ cmd, id, args: args || {} }));
     } catch (e) {
@@ -727,7 +735,7 @@ class LogManager {
   add(msg: string) {
     this.entries.push({ ts: timeStr(), msg })
     this.listeners.forEach(f => f())
-    hostCall('log_ui_event', { msg }).catch(() => {})
+    hostCall('log_ui_event', { event: msg, detail: '' }).catch(() => {})
   }
 
   getAll(): LogEntry[] { return this.entries }
@@ -747,8 +755,16 @@ class LogManager {
 
   async loadHistory(maxFiles: number): Promise<HistoryFile[]> {
     try {
-      return await hostCall('read_logs', { max_files: maxFiles })
-    } catch { return [] }
+      const data = await hostCall('read_logs', { max_files: maxFiles })
+      // Handle both {files} and {id,result:{files}} wrapping
+      const payload = data?.result || data
+      const files = payload?.files || []
+      this.add(`[LogMgr] loaded ${files.length} history files (keep=${maxFiles})`)
+      return files.map((f: any) => ({ name: f.name, lines: [] as string[] }))
+    } catch (e) {
+      this.add(`[LogMgr] loadHistory failed: ${e}`)
+      return []
+    }
   }
 }
 const logMgr = new LogManager()
@@ -758,7 +774,7 @@ function addLog(msg: string) { logMgr.add(msg) }
 // ═══ Log Panel ───
 type HistoryFile = { name: string; lines: string[] }
 
-function LogPanel({ compact, expanded: exp, onToggle }: { compact?: boolean; expanded?: boolean; onToggle?: () => void }) {
+function LogPanel({ compact, expanded: exp, onToggle, keepFiles }: { compact?: boolean; expanded?: boolean; onToggle?: () => void; keepFiles?: number }) {
   const [localExpanded, setLocalExpanded] = useState(true)
   const expanded = exp !== undefined ? exp : localExpanded
   const toggle = onToggle || (() => setLocalExpanded(v => !v))
@@ -767,6 +783,7 @@ function LogPanel({ compact, expanded: exp, onToggle }: { compact?: boolean; exp
   const userScrolledUp = useRef(false)
   const [historyFiles, setHistoryFiles] = useState<HistoryFile[]>([])
   const [openFiles, setOpenFiles] = useState<Set<number>>(new Set())
+  const [currentExpanded, setCurrentExpanded] = useState(true)
   const [entries, setEntries] = useState(logMgr.getAll())
 
   // Subscribe to LogManager for live updates
@@ -777,8 +794,8 @@ function LogPanel({ compact, expanded: exp, onToggle }: { compact?: boolean; exp
 
   // Load history files from disk on mount
   useEffect(() => {
-    logMgr.loadHistory(5).then(setHistoryFiles)
-  }, [])
+    logMgr.loadHistory(keepFiles ?? 5).then(setHistoryFiles)
+  }, [keepFiles])
 
   // Format in-memory entries as display lines (same format as disk)
   const formatLine = (e: LogEntry) => `[${e.ts}] ${e.msg}`
@@ -808,25 +825,36 @@ function LogPanel({ compact, expanded: exp, onToggle }: { compact?: boolean; exp
   if (!compact) {
     return (
       <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-3">
-        {/* Current session card — from LogManager in-memory */}
+        {/* Current session card */}
         <div className="bg-bg-secondary rounded-xl ring-1 ring-inset ring-border overflow-hidden">
-          <div className="flex items-center justify-between px-3 py-2">
+          <div role="button" tabIndex={0}
+            onClick={() => { setCurrentExpanded(v => !v); addLog(`[Log] Current Session ${currentExpanded ? 'collapsed' : 'expanded'}`) }}
+            onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){(e.currentTarget as HTMLElement).click()}}}
+            className="w-full flex items-center justify-between px-3 py-2 hover:bg-bg-hover cursor-pointer transition-colors outline-none">
             <div className="flex items-center gap-2">
-              <FileText className="w-4 h-4 text-accent" />
+              <FileText className="w-4 h-4 text-accent shrink-0" />
               <span className="text-sm font-medium text-text-primary">Current Session</span>
               <span className="text-xs text-text-muted">({displayLines.length})</span>
             </div>
-            <Tooltip text="清空当前日志"><button onClick={() => logMgr.clear()}
-              className="p-1 rounded-md text-text-secondary hover:text-error hover:bg-bg-tertiary transition-colors"><Trash2 className="w-3.5 h-3.5" /></button></Tooltip>
+            <div className="flex items-center gap-0.5">
+              <Tooltip text="清空当前日志"><button onClick={e => { e.stopPropagation(); logMgr.clear() }}
+                className="p-1 rounded-md text-text-secondary hover:text-error hover:bg-bg-tertiary transition-colors"><Trash2 className="w-3.5 h-3.5" /></button></Tooltip>
+              <ChevronDown className={`w-4 h-4 text-text-muted transition-transform duration-150 shrink-0 ${currentExpanded?'rotate-180':''}`} />
+            </div>
           </div>
-          <div className="border-t border-border" />
-          <div ref={sessionScrollRef} className="max-h-[400px] overflow-y-auto p-4 font-mono text-xs space-y-0.5">
-            {displayLines.length === 0
-              ? <div className="text-text-muted text-center py-4">No logs yet</div>
-              : displayLines.map((l, i) => (
-                  <div key={`cur-${i}`} className="text-text-muted">{l}</div>
-                ))
-            }
+          <div className="grid transition-[grid-template-rows] duration-150 ease-out"
+            style={{ gridTemplateRows: currentExpanded ? '1fr' : '0fr' }}>
+            <div className="overflow-hidden min-h-0">
+              <div className="border-t border-border" />
+              <div ref={sessionScrollRef} className="max-h-[400px] overflow-y-auto p-4 font-mono text-xs space-y-0.5">
+                {displayLines.length === 0
+                  ? <div className="text-text-muted text-center py-4">No logs yet</div>
+                  : displayLines.map((l, i) => (
+                      <div key={`cur-${i}`} className="text-text-muted">{l}</div>
+                    ))
+                }
+              </div>
+            </div>
           </div>
         </div>
 
@@ -835,31 +863,53 @@ function LogPanel({ compact, expanded: exp, onToggle }: { compact?: boolean; exp
           const open = openFiles.has(fi)
           return (
             <div key={f.name} className="bg-bg-secondary rounded-xl ring-1 ring-inset ring-border overflow-hidden">
-              <div role="button" tabIndex={0} onClick={() => { const s = new Set(openFiles); open ? s.delete(fi) : s.add(fi); setOpenFiles(s) }}
+              <div role="button" tabIndex={0} onClick={() => {
+                  const s = new Set(openFiles);
+                  if (open) { s.delete(fi); }
+                  else {
+                    s.add(fi);
+                    if (f.lines.length === 0) {
+                      hostCall('read_log_file', { filename: f.name }).then(res => {
+                        const content = res?.content || '';
+                        const newLines = content ? content.split('\n') : [] as string[];
+                        setHistoryFiles(prev => prev.map((hf, i) => i === fi ? { ...hf, lines: newLines } : hf));
+                      }).catch(() => {
+                        setHistoryFiles(prev => prev.map((hf, i) => i === fi ? { ...hf, lines: ['(failed to load)'] } : hf));
+                      });
+                    }
+                  }
+                  setOpenFiles(s)
+                }}
                 onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){(e.currentTarget as HTMLElement).click()}}}
                 className="w-full flex items-center justify-between px-3 py-2 hover:bg-bg-hover cursor-pointer transition-colors outline-none">
                 <div className="flex items-center gap-2 min-w-0">
                   <FileText className="w-4 h-4 text-text-muted shrink-0" />
                   <span className="text-sm font-medium text-text-primary truncate">{f.name}</span>
-                  <span className="text-xs text-text-muted shrink-0">{f.lines.length} lines</span>
+                  <span className="text-xs text-text-muted shrink-0">{f.lines.length > 0 ? `${f.lines.length} lines` : 'click to load'}</span>
                 </div>
                 <ChevronDown className={`w-4 h-4 text-text-muted transition-transform duration-150 shrink-0 ${open?'rotate-180':''}`} />
               </div>
-              {open && (
-                <>
+              <div className="grid transition-[grid-template-rows] duration-150 ease-out"
+                style={{ gridTemplateRows: open ? '1fr' : '0fr' }}>
+                <div className="overflow-hidden min-h-0">
                   <div className="border-t border-border" />
                   <div className="max-h-[400px] overflow-y-auto p-4 font-mono text-xs space-y-0.5">
-                    {f.lines.map((l, i) => (
-                      <div key={i} className="text-text-muted">{l}</div>
-                    ))}
+                    {f.lines.length === 0
+                      ? <div className="text-text-muted text-center py-4">Loading...</div>
+                      : f.lines.map((l, i) => (
+                          <div key={i} className="text-text-muted">{l}</div>
+                        ))
+                    }
                   </div>
-                </>
-              )}
+                </div>
+              </div>
             </div>
           )
         })}
-        {displayLines.length === 0 && historyFiles.length === 0 && (
-          <div className="flex items-center justify-center py-12 text-sm text-text-muted">No logs yet</div>
+        {historyFiles.length === 0 && (
+          <div className="text-center py-6 text-xs text-text-muted">
+            {entries.length === 0 ? 'No logs yet' : 'No history files found'}
+          </div>
         )}
       </div>
     )
@@ -933,7 +983,7 @@ function SettingsCard({ icon, title, defaultExpanded, children }: {
 }
 
 // ═══ Settings Page ═══
-function SettingsPage({ forceMethod, setForceMethod, transportMethod, setTransportMethod, selWin, winState, onSelect, onDisconnect }: { forceMethod: string; setForceMethod: (m: string) => void; transportMethod: string; setTransportMethod: (m: string) => void; selWin?: WindowInfo; winState: string; onSelect: (w: WindowInfo) => void; onDisconnect: () => void }) {
+function SettingsPage({ forceMethod, setForceMethod, transportMethod, setTransportMethod, selWin, winState, onSelect, onDisconnect, keepFiles, setKeepFiles }: { forceMethod: string; setForceMethod: (m: string) => void; transportMethod: string; setTransportMethod: (m: string) => void; selWin?: WindowInfo; winState: string; onSelect: (w: WindowInfo) => void; onDisconnect: () => void; keepFiles: number; setKeepFiles: (n: number) => void }) {
   const colors = ['#3B82F6','#8B5CF6','#EC4899','#F59E0B','#10B981','#EF4444']
   const [accent, setAccent] = useState('#3B82F6')
   const [connExpanded, setConnExpanded] = useState(true)
@@ -994,8 +1044,8 @@ function SettingsPage({ forceMethod, setForceMethod, transportMethod, setTranspo
       </SettingsCard>
 
       <SettingsCard icon={<FileText className="w-4 h-4 text-text-secondary" />} title="Log">
-        <div className="flex items-center gap-3 mb-2"><label className="text-sm text-text-secondary w-28 shrink-0">Directory</label><Tooltip text="日志文件存放路径"><input defaultValue="logs/" className="flex-1 h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent" /></Tooltip></div>
-        <div className="flex items-center gap-3"><label className="text-sm text-text-secondary w-28 shrink-0">Keep Files</label><Tooltip text="最多保留日志文件数"><select defaultValue="5" className="h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent">{[3,5,7,10].map(n=><option key={n}>{n} files</option>)}</select></Tooltip></div>
+        <div className="flex items-center gap-3 mb-2"><label className="text-sm text-text-secondary w-28 shrink-0">Directory</label><Tooltip text="日志文件存放路径"><input defaultValue="logs/" className="flex-1 h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent" /></Tooltip><Tooltip text="在资源管理器中打开日志目录"><button onClick={() => hostCall('open_log_dir').catch(() => {})} className="shrink-0 p-1.5 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-tertiary transition-colors"><FolderOpen className="w-4 h-4" /></button></Tooltip></div>
+        <div className="flex items-center gap-3"><label className="text-sm text-text-secondary w-28 shrink-0">Keep Files</label><Tooltip text="Log 菜单中显示的历史日志文件数"><select value={keepFiles} onChange={e => setKeepFiles(Number(e.target.value))} className="h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent">{[3,5,7,10].map(n=><option key={n} value={n}>{n} files</option>)}</select></Tooltip></div>
       </SettingsCard>
 
       <SettingsCard icon={<Monitor className="w-4 h-4 text-text-secondary" />} title="Project">
@@ -1224,6 +1274,7 @@ export default function App() {
   const [screenRatio, setScreenRatio] = useState(16/9)
   const [forceMethod, setForceMethod] = useState('dxgi')
   const [transportMethod, setTransportMethod] = useState('shared')
+  const [keepFiles, setKeepFiles] = useState(5)
   const [winState, setWinState] = useState('desktop')
   const lastWinStateRef = useRef('desktop')
 
@@ -1293,8 +1344,8 @@ export default function App() {
               </div>
             </div>
           )}
-          {tab === 'Log' && <LogPanel />}
-          {tab === 'Settings' && <SettingsPage forceMethod={forceMethod} setForceMethod={setForceMethod} transportMethod={transportMethod} setTransportMethod={setTransportMethod} selWin={selWindow} winState={winState} onSelect={setSelWindow} onDisconnect={() => { setSelWindow({ title: ' Entire Desktop', category: 'desktop', hwnd: 0 }); addLog('[Connection] disconnected, back to desktop') }} />}
+          {tab === 'Log' && <LogPanel keepFiles={keepFiles} />}
+          {tab === 'Settings' && <SettingsPage forceMethod={forceMethod} setForceMethod={setForceMethod} transportMethod={transportMethod} setTransportMethod={setTransportMethod} selWin={selWindow} winState={winState} onSelect={setSelWindow} onDisconnect={() => { setSelWindow({ title: ' Entire Desktop', category: 'desktop', hwnd: 0 }); addLog('[Connection] disconnected, back to desktop') }} keepFiles={keepFiles} setKeepFiles={setKeepFiles} />}
           <BottomBar running={running} fps={0} lat={0} />
         </div>
         <Tooltip text={rightCollapsed ? "向右拖拽展开面板" : "拖拽调整面板宽度，向右拖到底可折叠"}>

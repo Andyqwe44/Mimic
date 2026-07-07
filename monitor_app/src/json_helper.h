@@ -21,8 +21,13 @@ inline std::string json_get_str(const std::string& json, const std::string& key)
     size_t p = json.find(s);
     if (p == std::string::npos) return "";
     p += s.length();
-    size_t e = json.find('"', p);
-    if (e == std::string::npos) return "";
+    // Find closing quote, skipping escaped quotes (backslash-quote)
+    size_t e = p;
+    while (e < json.size()) {
+        if (json[e] == '"' && (e == p || json[e-1] != '\\')) break;
+        e++;
+    }
+    if (e >= json.size()) return "";
     return json.substr(p, e - p);
 }
 

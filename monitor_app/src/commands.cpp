@@ -13,6 +13,8 @@
 #include "../../logger/logger.h"
 #include "../../capture/include/capture_methods.h"
 #include "../../capture/include/capture_wgc_ffi.h"
+#include <shobjidl.h>  // IVirtualDesktopManager
+#include <shellapi.h>  // ShellExecuteA
 #include <windows.h>
 #include <tlhelp32.h>
 #include <dwmapi.h>
@@ -116,19 +118,40 @@ struct WindowInfo { std::string title, category; uint64_t hwnd; };
 static std::vector<WindowInfo> g_winlist;
 static std::mutex g_winlist_mutex;
 
+struct EnumContext {
+    std::vector<WindowInfo>* list;
+    IVirtualDesktopManager* vdm;
+    std::vector<GUID>* desktop_ids;  // accumulate unique desktop GUIDs
+};
+
 static BOOL CALLBACK enum_callback(HWND hwnd, LPARAM lparam) {
-    auto* list = reinterpret_cast<std::vector<WindowInfo>*>(lparam);
-    if (!IsWindowVisible(hwnd)) return TRUE;
+    auto* ctx = reinterpret_cast<EnumContext*>(lparam);
+    auto* list = ctx->list;
 
     LONG_PTR style = GetWindowLongPtrW(hwnd, GWL_STYLE);
     LONG_PTR ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
     if (!(style & WS_CAPTION)) return TRUE;
     if (ex & WS_EX_TOOLWINDOW) return TRUE;
 
-    // Not cloaked
-    BOOL cloaked = FALSE;
-    DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &cloaked, sizeof(cloaked));
-    if (cloaked) return TRUE;
+    // Check virtual desktop — allow windows on any desktop
+    BOOL on_current = TRUE;
+    GUID desktop_id = {};
+    if (ctx->vdm) {
+        HRESULT hr = ctx->vdm->IsWindowOnCurrentVirtualDesktop(hwnd, &on_current);
+        if (FAILED(hr)) on_current = TRUE; // assume current if API fails
+        ctx->vdm->GetWindowDesktopId(hwnd, &desktop_id);
+    }
+
+    // Visibility: only filter if on CURRENT desktop (windows on other desktops
+    // appear invisible/cloaked, but we still want to list them)
+    if (on_current) {
+        if (!IsWindowVisible(hwnd)) return TRUE;
+
+        // Cloaked check (only for current desktop)
+        BOOL cloaked = FALSE;
+        DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &cloaked, sizeof(cloaked));
+        if (cloaked) return TRUE;
+    }
 
     RECT r;
     if (!GetWindowRect(hwnd, &r) || r.right <= r.left || r.bottom <= r.top) return TRUE;
@@ -149,6 +172,24 @@ static BOOL CALLBACK enum_callback(HWND hwnd, LPARAM lparam) {
     std::string title(ulen, '\0');
     WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), (int)ws.size(), &title[0], ulen, nullptr, nullptr);
 
+    // Label windows on non-current desktops
+    if (!on_current && ctx->desktop_ids) {
+        // Find or assign desktop index
+        int desktop_idx = -1;
+        for (size_t i = 0; i < ctx->desktop_ids->size(); i++) {
+            if (IsEqualGUID((*ctx->desktop_ids)[i], desktop_id)) {
+                desktop_idx = (int)i + 1; break;
+            }
+        }
+        if (desktop_idx < 0) {
+            ctx->desktop_ids->push_back(desktop_id);
+            desktop_idx = (int)ctx->desktop_ids->size();
+        }
+        if (desktop_idx > 1) { // desktop 1 = current, no label needed
+            title += " (Desktop " + std::to_string(desktop_idx) + ")";
+        }
+    }
+
     list->push_back({title, "window", (uint64_t)(uintptr_t)hwnd});
     return TRUE;
 }
@@ -156,7 +197,18 @@ static BOOL CALLBACK enum_callback(HWND hwnd, LPARAM lparam) {
 static std::string cmd_list_windows() {
     std::vector<WindowInfo> list;
     list.push_back({" Entire Desktop", "desktop", 0});
-    EnumWindows(enum_callback, (LPARAM)&list);
+
+    // Create VirtualDesktopManager for cross-desktop window enumeration
+    IVirtualDesktopManager* vdm = nullptr;
+    CoCreateInstance(CLSID_VirtualDesktopManager, nullptr, CLSCTX_INPROC_SERVER,
+                     IID_PPV_ARGS(&vdm));
+
+    std::vector<GUID> desktop_ids;
+    EnumContext ctx = {&list, vdm, &desktop_ids};
+    EnumWindows(enum_callback, (LPARAM)&ctx);
+
+    if (vdm) vdm->Release();
+
     LOG("cmd", "list_windows: %zu entries", list.size());
 
     std::string json = "[";
@@ -220,6 +272,10 @@ static CaptureResult call_capture(uint64_t hwnd, const std::string& method) {
         size = capture_screen_bitblt(hw, buf.data(), MAX_PX, &w, &h);
     } else if (method == "DesktopBlt") {
         size = capture_desktop_bitblt(buf.data(), MAX_PX, &w, &h); // hwnd unused
+    } else if (method == "dxgi") {
+        // DXGI Desktop Duplication — map to DesktopBlt for single frame
+        // (DXGI streaming uses dedicated backend in capture_dxgi.cpp)
+        size = capture_desktop_bitblt(buf.data(), MAX_PX, &w, &h);
     } else {
         // fallback chain
         const char* chain[] = {"DesktopBlt", "GDI(GetWindowDC)", "PrintWindow", "ScreenBitBlt"};
@@ -273,7 +329,7 @@ static std::string cmd_capture_window(uint64_t hwnd, const std::string& method) 
     auto r = call_capture(hwnd, method.empty() ? "auto" : method);
     if (r.w <= 0 || r.h <= 0) {
         LOG("cmd", "capture_window: FAILED hwnd=%llu", (unsigned long long)hwnd);
-        return "";
+        return "{}";
     }
 
     int sw = GetSystemMetrics(SM_CXSCREEN);
@@ -437,15 +493,41 @@ static std::string cmd_capture_stream_stop() {
 
 // ── Log commands ──────────────────────────────────────────
 static std::string cmd_read_logs(int max_files) {
-    char* mem = capture_log_read_memory();
-    std::string live = mem ? mem : "";
-    capture_log_free(mem);
-
+    // Only return file list — live content is managed by frontend LogManager.
+    // (Including the ring buffer in this response causes recursive growth:
+    //  each LOG() in this function expands the ring buffer, making the
+    //  next response even larger until PostWebMessageAsJson drops it.)
     char* fjson = capture_log_list_files(max_files);
     std::string files = fjson ? fjson : "[]";
     capture_log_free(fjson);
 
-    return "{\"live\":\"" + json_escape(live) + "\",\"files\":" + files + "}";
+    LOG("cmd", "read_logs: max_files=%d → %s", max_files, files.c_str());
+    return "{\"files\":" + files + "}";
+}
+
+static std::string cmd_read_log_file(const std::string& filename) {
+    // Sanity check: reject paths with separators
+    if (filename.find('/') != std::string::npos ||
+        filename.find('\\') != std::string::npos ||
+        filename.find("..") != std::string::npos) {
+        return R"({"error":"invalid filename"})";
+    }
+    char* content = capture_log_read_file(filename.c_str());
+    std::string result = content ? content : "";
+    capture_log_free(content);
+    LOG("cmd", "read_log_file: %s → %zub", filename.c_str(), result.size());
+    return "{\"filename\":\"" + json_escape(filename) + "\",\"content\":\"" + json_escape(result) + "\"}";
+}
+
+static std::string cmd_open_log_dir() {
+    // Get absolute path to log directory
+    char cwd[MAX_PATH];
+    GetCurrentDirectoryA(MAX_PATH, cwd);
+    std::string log_path = std::string(cwd) + "\\log";
+    // Open in Explorer
+    ShellExecuteA(nullptr, "open", log_path.c_str(), nullptr, nullptr, SW_SHOW);
+    LOG("cmd", "open_log_dir: %s", log_path.c_str());
+    return R"({"ok":true})";
 }
 
 static std::string cmd_clear_log() {
@@ -566,6 +648,8 @@ std::string dispatch_command(const std::string& json) {
     }
     else if (cmd == "capture_stream_stop") result = cmd_capture_stream_stop();
     else if (cmd == "read_logs") result = cmd_read_logs(json_get_int(args, "max_files"));
+    else if (cmd == "read_log_file") result = cmd_read_log_file(json_get_str(args, "filename"));
+    else if (cmd == "open_log_dir") result = cmd_open_log_dir();
     else if (cmd == "clear_log") result = cmd_clear_log();
     else if (cmd == "log_ui_event") {
         result = cmd_log_ui_event(json_get_str(args, "event"), json_get_str(args, "detail"));

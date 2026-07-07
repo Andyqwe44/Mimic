@@ -42,6 +42,11 @@ char* capture_log_read_memory(void);
 /// [{"name":"agent_20260707_133408.log","size":1234}]
 char* capture_log_list_files(int max_files);
 
+/// Read a historical log file by name (relative to log_dir).
+/// Returns malloc'd string with file contents (lines separated by \n).
+/// Caller must free with capture_log_free().
+char* capture_log_read_file(const char* filename);
+
 /// Free a string returned by the logger.
 void capture_log_free(char* s);
 

@@ -28,6 +28,7 @@ static std::mutex         g_mutex;
 static FILE*              g_file = nullptr;
 static std::string        g_log_dir;
 static std::string        g_app_name;
+static std::string        g_current_file;  // current session filename, excluded from history
 static int                g_max_files = 5;
 static std::vector<LogEntry> g_ring;
 static int                g_ring_cap = 5000;
@@ -152,6 +153,13 @@ void capture_log_init(const char* app_name,
              tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
              tm.tm_hour, tm.tm_min, tm.tm_sec);
 
+    // Store current session filename (just basename) so listing excludes it
+    {
+        const char* base = strrchr(fname, '/');
+        if (!base) base = strrchr(fname, '\\');
+        g_current_file = base ? (base + 1) : fname;
+    }
+
     g_file = fopen(fname, "a");
     if (g_file) {
         fprintf(g_file, "=== %s v%s ===\n", app_name, app_version);
@@ -269,21 +277,44 @@ char* capture_log_list_files(int max_files) {
         return CompareFileTime(&a.ft, &b.ft) > 0;
     });
 
-    // Build JSON
+    // Build JSON — skip current session file, take up to max_files history files
     std::string json = "[";
-    int n = std::min((int)files.size(), max_files > 0 ? max_files : 5);
-    for (int i = 0; i < n; i++) {
-        if (i > 0) json += ",";
+    int taken = 0;
+    int limit = max_files > 0 ? max_files : 5;
+    for (size_t i = 0; i < files.size() && taken < limit; i++) {
+        if (!g_current_file.empty() && files[i].name == g_current_file) continue;
+        if (taken > 0) json += ",";
         char buf[512];
         snprintf(buf, sizeof(buf), R"({"name":"%s","size":%zu})",
                  files[i].name.c_str(), files[i].size);
         json += buf;
+        taken++;
     }
     json += "]";
 
     char* result = (char*)malloc(json.size() + 1);
     if (result) memcpy(result, json.c_str(), json.size() + 1);
     return result;
+}
+
+char* capture_log_read_file(const char* filename) {
+    std::lock_guard<std::mutex> lk(g_mutex);
+    std::string path = g_log_dir + filename;
+    FILE* f = fopen(path.c_str(), "rb");
+    if (!f) {
+        char* empty = (char*)malloc(1);
+        if (empty) empty[0] = 0;
+        return empty;
+    }
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    char* buf = (char*)malloc((size_t)sz + 1);
+    if (!buf) { fclose(f); return nullptr; }
+    if (sz > 0) fread(buf, 1, (size_t)sz, f);
+    buf[sz] = 0;
+    fclose(f);
+    return buf;
 }
 
 void capture_log_free(char* s) {

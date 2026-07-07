@@ -250,13 +250,22 @@ void HandleWebMessage(const std::wstring& msg)
     std::string json(len, '\0');
     WideCharToMultiByte(CP_UTF8, 0, msg.c_str(), -1, &json[0], len, nullptr, nullptr);
 
+    // Extract id for response wrapping (frontend matches by id)
+    int id = 0;
+    auto id_pos = json.find("\"id\":");
+    if (id_pos != std::string::npos) {
+        // Parse the integer after "id":
+        const char* p = json.c_str() + id_pos + 5;
+        while (*p == ' ' || *p == ':') p++;
+        id = atoi(p);
+    }
+
     // Dispatch to commands module
     std::string result = dispatch_command(json);
 
-    // Send response back to WebView
-    if (!result.empty()) {
-        PostJsonToWebView(result);
-    }
+    // Wrap response with id so frontend can match the pending promise
+    std::string wrapped = "{\"id\":" + std::to_string(id) + ",\"result\":" + result + "}";
+    PostJsonToWebView(wrapped);
 }
 
 void PostJsonToWebView(const std::string& json)

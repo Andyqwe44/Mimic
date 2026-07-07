@@ -38,13 +38,13 @@ LOG("tag", "format_string", args...);
 
 ### 铁律 3: 存档 = 更新 README + 更新 CLAUDE.md + commit
 
-每次有实质性改动（新功能、架构变更、重要修复）结束时：
+当用户说"存档"时，执行以下三件事：
 
 1. **更新 README.md** — 如果对外接口/用法变了
 2. **更新 CLAUDE.md** — 如果架构/结构/构建流程变了
 3. **git commit** — 写出清晰的 commit message，描述做了什么和为什么
 
-这三个动作是一体的。不要说"稍后再做"——做完代码立刻存档。
+这三个动作是一体的，缺一不可。
 
 ## Project Vision
 
@@ -163,20 +163,25 @@ cd monitor_app && build\monitor_app.exe         # WebView2 → localhost:8888
 
 ```
 JS:  hostCall('list_windows') → chrome.webview.postMessage('{"cmd":"list_windows","id":1,"args":{}}')
-C++: WebMessageReceived → HandleWebMessage → dispatch_command → PostWebMessageAsJson('{"id":1,"result":[...]}')
-JS:  'message' event → resolve promise → return result
+C++: WebMessageReceived → HandleWebMessage → dispatch_command
+       → wraps result as {"id":1,"result":{...}} → PostWebMessageAsJson
+JS:  'message' event → e.data is pre-parsed object → match by msg.id → hostCall auto-unwraps .result
 ```
+
+Key: `hostCall` internally extracts `.result` from the `{id, result}` envelope, so callers receive the raw command result directly.
 
 ### Command dispatch (commands.cpp)
 
 | Command | Args | Returns |
 |---------|------|---------|
-| `list_windows` | — | `[{title, category, hwnd}, ...]` |
+| `list_windows` | — | `[{title, category, hwnd}, ...]` (跨虚拟桌面，标注 Desktop N) |
 | `list_processes` | — | `[{title, category:"process", hwnd:pid}, ...]` |
-| `capture_window` | `{hwnd, method}` | PNG base64 + dimensions |
+| `capture_window` | `{hwnd, method}` | PNG base64 + dimensions (失败返回 `{}`) |
 | `capture_stream_start` | `{hwnd, method, transport}` | `{ok:true}` |
 | `capture_stream_stop` | — | `{ok:true}` |
-| `read_logs` | `{max_files}` | `{live:"...", files:[...]}` |
+| `read_logs` | `{max_files}` | `{files:[{name, size}, ...]}` (不含当前 session) |
+| `read_log_file` | `{filename}` | `{filename, content}` (按需加载历史文件内容) |
+| `open_log_dir` | — | `{ok:true}` (ShellExecute 打开日志目录) |
 | `clear_log` | — | `{ok:true}` |
 | `log_ui_event` | `{event, detail}` | `{ok:true}` |
 | `benchmark_methods` | `{hwnd, method}` | `{results:[{method, time_ms, size, ok},...]}` |
@@ -281,3 +286,28 @@ Stop button → hostCall('capture_stream_stop')
 3. **Yellow border**: GDI FillRect flickers on window invalidation.
 4. **Overlay orphan**: Yellow overlay STATIC windows may persist if app crashes.
 5. **Chromium background tab throttling**: WebView2 may throttle when app loses focus.
+
+## Recent Fixes (2026-07-08)
+
+### WebMessage bridge response wrapping
+`HandleWebMessage` wraps every response as `{"id":N,"result":{...}}`.
+C++ sends via `PostWebMessageAsJson` (pre-parsed object → JS `e.data` is already an object).
+Frontend `hostCall` auto-unwraps `.result` internally — all callers receive raw command results.
+`json_get_str` handles escaped quotes (`\"`) in JSON values.
+
+### Logger: history + file read
+`capture_log_read_file(filename)` reads historical log files from disk.
+`capture_log_list_files` excludes the current session file (`g_current_file` tracking).
+`read_logs` response no longer includes `live` ring buffer (prevents recursive JSON growth → PostWebMessageAsJson dropping).
+
+### Settings → Log retention wiring
+`keepFiles` state drives Settings select value and LogPanel `loadHistory(N)`.
+LogPanel: collapsible Current Session + N history file tiles loaded on click.
+
+### WGC stability
+`ShutdownQueueAsync().get()` → fire-and-forget (prevents STA thread self-deadlock).
+`worker.join()` → `worker.detach()` on init failure/timeout (prevents main thread hang).
+
+### Virtual desktop window enumeration
+`IVirtualDesktopManager` used in `enum_callback` — windows on other desktops no longer filtered out.
+Windows on non-current desktops labeled with `(Desktop N)`.

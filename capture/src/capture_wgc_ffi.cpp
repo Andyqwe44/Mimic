@@ -70,7 +70,7 @@ struct WgcStreamHandle {
                     init_done = true;
                 }
                 init_cv.notify_one();
-                dispatcher_ctrl_.ShutdownQueueAsync().get();
+                dispatcher_ctrl_.ShutdownQueueAsync(); // fire-and-forget — avoid STA deadlock on own thread
                 dispatcher_ctrl_ = nullptr;
                 return;
             }
@@ -223,7 +223,7 @@ int wgc_capture_single(HWND hwnd, uint8_t* buf, int buf_size,
     auto dq = wgc::create_dispatcher_queue();
 
     wgc::WgcCapture cap;
-    if (!cap.init(hwnd)) { dq.ShutdownQueueAsync().get(); return 0; }
+    if (!cap.init(hwnd)) { dq.ShutdownQueueAsync(); /* fire-and-forget */; return 0; }
 
     wgc::WgcFrame frame;
     // Wait up to ~500ms for first frame with condition variable
@@ -232,7 +232,7 @@ int wgc_capture_single(HWND hwnd, uint8_t* buf, int buf_size,
             int needed = (int)frame.pixels.size();
             if (buf_size < needed) {
                 cap.shutdown();
-                dq.ShutdownQueueAsync().get();
+                dq.ShutdownQueueAsync(); /* fire-and-forget */;
                 return 0;
             }
             memcpy(buf, frame.pixels.data(), needed);
@@ -240,13 +240,13 @@ int wgc_capture_single(HWND hwnd, uint8_t* buf, int buf_size,
             *out_h = frame.height;
             *out_ch = frame.channels;
             cap.shutdown();
-            dq.ShutdownQueueAsync().get();
+            dq.ShutdownQueueAsync(); /* fire-and-forget */;
             return needed;
         }
         if (!cap.is_ok()) break;
     }
     cap.shutdown();
-    dq.ShutdownQueueAsync().get();
+    dq.ShutdownQueueAsync(); /* fire-and-forget */;
     return 0;
 }
 
@@ -266,7 +266,7 @@ WgcStreamHandle* wgc_stream_start_monitor(HMONITOR hmon, int max_dim) {
             }
             h->init_cv.notify_one();
             if (h->dispatcher_ctrl_) {
-                h->dispatcher_ctrl_.ShutdownQueueAsync().get();
+                h->dispatcher_ctrl_.ShutdownQueueAsync(); // fire-and-forget — avoid STA deadlock on own thread
                 h->dispatcher_ctrl_ = nullptr;
             }
             return;
@@ -322,14 +322,14 @@ WgcStreamHandle* wgc_stream_start_monitor(HMONITOR hmon, int max_dim) {
         std::unique_lock<std::mutex> lk(h->init_mtx);
         if (!h->init_cv.wait_for(lk, std::chrono::seconds(5), [h] { return h->init_done; })) {
             h->running = false;
-            if (h->worker.joinable()) h->worker.join();
+            if (h->worker.joinable()) h->worker.detach(); // detach: worker may be stuck in WinRT
             delete h;
             return nullptr;
         }
     }
     if (!h->init_ok) {
         h->running = false;
-        if (h->worker.joinable()) h->worker.join();
+        if (h->worker.joinable()) h->worker.detach(); // detach: worker may be stuck in WinRT
         delete h;
         return nullptr;
     }
@@ -341,7 +341,7 @@ int wgc_capture_single_monitor(HMONITOR hmon, uint8_t* buf, int buf_size,
     auto dq = wgc::create_dispatcher_queue();
 
     wgc::WgcCapture cap;
-    if (!cap.init_monitor(hmon)) { dq.ShutdownQueueAsync().get(); return 0; }
+    if (!cap.init_monitor(hmon)) { dq.ShutdownQueueAsync(); /* fire-and-forget */; return 0; }
 
     wgc::WgcFrame frame;
     for (int i = 0; i < 50; i++) {
@@ -349,7 +349,7 @@ int wgc_capture_single_monitor(HMONITOR hmon, uint8_t* buf, int buf_size,
             int needed = (int)frame.pixels.size();
             if (buf_size < needed) {
                 cap.shutdown();
-                dq.ShutdownQueueAsync().get();
+                dq.ShutdownQueueAsync(); /* fire-and-forget */;
                 return 0;
             }
             memcpy(buf, frame.pixels.data(), needed);
@@ -357,13 +357,13 @@ int wgc_capture_single_monitor(HMONITOR hmon, uint8_t* buf, int buf_size,
             *out_h = frame.height;
             *out_ch = frame.channels;
             cap.shutdown();
-            dq.ShutdownQueueAsync().get();
+            dq.ShutdownQueueAsync(); /* fire-and-forget */;
             return needed;
         }
         if (!cap.is_ok()) break;
     }
     cap.shutdown();
-    dq.ShutdownQueueAsync().get();
+    dq.ShutdownQueueAsync(); /* fire-and-forget */;
     return 0;
 }
 
