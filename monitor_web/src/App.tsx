@@ -1322,6 +1322,53 @@ export default function App() {
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
+  // ── Check vertical overflow after drag — auto collapse/expand panels ──
+  const checkVerticalLayout = useCallback(() => {
+    const el = rightPanelRef.current; if (!el) return
+    const kids = el.querySelectorAll(':scope > div')
+    if (kids.length < 3) return
+    let kidsH = 0
+    for (let i = 0; i < 3; i++) kidsH += (kids[i] as HTMLElement).offsetHeight
+    const ch = el.clientHeight
+    const h = H.current
+    const overflow = kidsH + GAP - ch
+
+    if (overflow > 4) {
+      // Collapse L → S → C
+      if (logExpandedRef.current) {
+        addLog(`[Layout] drag overflow ${overflow}px → auto-collapse log`)
+        setLogExpanded(false)
+      } else if (screenshotExpandedRef.current) {
+        addLog(`[Layout] drag overflow ${overflow}px → auto-collapse screenshot`)
+        setScreenshotExpanded(false)
+      } else if (connectionExpandedRef.current) {
+        addLog(`[Layout] drag overflow ${overflow}px → auto-collapse connection`)
+        setConnectionExpanded(false)
+      }
+    } else if (overflow < -4) {
+      // Room available — expand C → S → L
+      if (!connectionExpandedRef.current) {
+        const wouldNeed = (kidsH - h.Cp + h.C) + GAP
+        if (ch >= wouldNeed) {
+          addLog(`[Layout] drag room for C (need ${wouldNeed}px) → auto-expand connection`)
+          setConnectionExpanded(true)
+        }
+      } else if (!screenshotExpandedRef.current) {
+        const wouldNeed = (kidsH - h.Sp + h.S) + GAP
+        if (ch >= wouldNeed) {
+          addLog(`[Layout] drag room for S (need ${wouldNeed}px) → auto-expand screenshot`)
+          setScreenshotExpanded(true)
+        }
+      } else if (!logExpandedRef.current) {
+        const wouldNeed = (kidsH - h.Lp + h.L) + GAP
+        if (ch >= wouldNeed) {
+          addLog(`[Layout] drag room for L (need ${wouldNeed}px) → auto-expand log`)
+          setLogExpanded(true)
+        }
+      }
+    }
+  }, [])
+
   // ── Horizontal auto-collapse: when window too narrow for left + right panels ──
   const H_COLLAPSE_THRESHOLD = MIN_LEFT_WIDTH + DEFAULT_RIGHT_WIDTH + 24 // 360+324+24=708
   const autoCollapsedByWidth = useRef(false)
@@ -1410,9 +1457,9 @@ export default function App() {
       if (w < 160) setRightCollapsed(true)
       else { setRightCollapsed(false); setRightWidth(Math.max(324, Math.min(400, w))) }
     }
-    const onUp = () => { isResizing.current = false; document.body.style.cursor = ''; document.body.style.userSelect = ''; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); addLog('[Layout] right panel resized') }
+    const onUp = () => { isResizing.current = false; document.body.style.cursor = ''; document.body.style.userSelect = ''; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); addLog('[Layout] right panel resized'); requestAnimationFrame(() => { measureLayout(); checkVerticalLayout() }) }
     window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp)
-  }, [])
+  }, [measureLayout, checkVerticalLayout])
 
   return (
     <div className="h-full flex flex-col bg-bg-primary">

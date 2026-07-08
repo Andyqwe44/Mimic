@@ -36,15 +36,16 @@ LOG("tag", "format_string", args...);
 | `ui` | 前端事件 |
 | `agent` | AI Agent |
 
-### 铁律 3: 存档 = 更新 README + 更新 CLAUDE.md + commit
+### 铁律 3: 存档 = 更新 README + 更新 CLAUDE.md + commit + compact
 
-当用户说"存档"时，执行以下三件事：
+当用户说"存档"时，执行以下四件事：
 
 1. **更新 README.md** — 如果对外接口/用法变了
 2. **更新 CLAUDE.md** — 如果架构/结构/构建流程变了
 3. **git commit** — 写出清晰的 commit message，描述做了什么和为什么
+4. **compact** — 压缩上下文，释放会话内存
 
-这三个动作是一体的，缺一不可。
+这四个动作是一体的，缺一不可。
 
 ## Project Vision
 
