@@ -17,8 +17,10 @@
 #include "../dep/WebView2.h"
 #include "../../logger/logger.h"
 #include "commands.h"
-#include "mjpeg_server.h"
-#include "virtual_desktop.h"
+
+// Forward declare — avoid including virtual_desktop.h which pulls
+// in COM GUIDs that conflict with WebView2.h static initializers.
+void vd_set_main_hwnd(HWND hwnd);
 
 using Microsoft::WRL::ComPtr;
 
@@ -126,7 +128,6 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR lpCm
     InitWebView2(g_hwnd);
 
     backend_init();
-    mjpeg_server_start();
 
     // Auto-start streaming for testing (bypasses GUI)
     if (auto_stream) {
@@ -142,8 +143,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR lpCm
         DispatchMessage(&msg);
     }
 
-    backend_shutdown();  // stops stream first, then MJPEG
-    mjpeg_server_stop();
+    backend_shutdown();  // stops stream, flushes logger, shuts down TCP
 
     return (int)msg.wParam;
 }

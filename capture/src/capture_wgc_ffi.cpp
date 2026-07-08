@@ -154,8 +154,6 @@ struct WgcStreamHandle {
         if (worker.joinable()) {
             worker.detach();
         }
-        // Don't shutdown cap here — worker may still be using it.
-        // Don't shutdown dispatcher — worker owns it.
     }
 };
 

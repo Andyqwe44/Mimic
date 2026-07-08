@@ -9,7 +9,6 @@
 #include <ws2tcpip.h>
 #include "commands.h"
 #include "json_helper.h"
-#include "mjpeg_server.h"
 #include "version.h"
 #include "../../logger/logger.h"
 #include "../../capture/include/capture_methods.h"
@@ -314,7 +313,7 @@ static CaptureResult call_capture(uint64_t hwnd, const std::string& method) {
     HWND hw = (HWND)(uintptr_t)hwnd;
     std::string used = method;
 
-    if (method == "WGC") {
+    if (method == "WGC" || method == "wgc") {
         size = wgc_capture_single(hw, buf.data(), MAX_PX, &w, &h, nullptr);
     } else if (method == "GDI(GetWindowDC)") {
         size = capture_gdi_getwindowdc(hw, buf.data(), MAX_PX, &w, &h);
@@ -384,16 +383,14 @@ static std::string cmd_capture_window(uint64_t hwnd, const std::string& method) 
         return "{}";
     }
 
-    int sw = GetSystemMetrics(SM_CXSCREEN);
-    int sh = GetSystemMetrics(SM_CYSCREEN);
-    int wx = 0, wy = 0;
-    if (hwnd != 0) {
-        RECT wr;
-        if (GetWindowRect((HWND)(uintptr_t)hwnd, &wr)) { wx = wr.left; wy = wr.top; }
-    }
+    // Push frame via SharedBuffer (zero-copy) — no more base64 PNG.
+    // Frontend receives the frame via 'sharedbufferreceived' event.
+    shared_buffer_push_frame(r.pixels.data(), r.w, r.h);
 
-    auto json = frame_to_json(r, wx, wy, sw, sh, 0);
-    LOG("cmd", "capture_window: %dx%d method=%s -> %zub", r.w, r.h, r.method.c_str(), json.size());
+    std::string json = "{\"ok\":true,\"w\":" + std::to_string(r.w) +
+        ",\"h\":" + std::to_string(r.h) +
+        ",\"method\":\"" + r.method + "\"}";
+    LOG("cmd", "capture_window: %dx%d method=%s via SharedBuffer", r.w, r.h, r.method.c_str());
     return json;
 }
 
@@ -401,10 +398,6 @@ static std::string cmd_capture_window(uint64_t hwnd, const std::string& method) 
 static std::atomic<bool> g_streaming{false};
 static std::thread g_stream_thread;
 static WgcStreamHandle* g_stream_handle = nullptr;
-static std::mutex g_stream_frame_mutex;
-static std::vector<uint8_t> g_stream_frame_pixels;
-static int g_stream_frame_w = 0, g_stream_frame_h = 0;
-
 // ── TCP broadcast server (port 9999, wire protocol) ──────
 static std::mutex g_tcp_mutex;
 static std::vector<SOCKET> g_tcp_clients;
@@ -510,15 +503,9 @@ static std::string cmd_capture_stream_start(uint64_t hwnd, const std::string& me
             int w, h, ch;
             int size = wgc_stream_read(g_stream_handle, buf.data(), MAX_PX, &w, &h, &ch);
             if (size > 0 && w > 0 && h > 0 && w <= 3840 && h <= 2160) {
-                // Push via SharedBuffer (zero-copy), MJPEG (fallback), TCP (agents)
+                // Push via SharedBuffer (zero-copy) + TCP (agents)
                 shared_buffer_push_frame(buf.data(), w, h);
-                mjpeg_server_push_frame(buf.data(), w, h);
                 tcp_broadcast_frame(buf.data(), w, h);
-                // Store frame for stream_poll (Canvas fallback)
-                std::lock_guard<std::mutex> lk(g_stream_frame_mutex);
-                g_stream_frame_pixels.assign(buf.data(), buf.data() + (size_t)size);
-                g_stream_frame_w = w;
-                g_stream_frame_h = h;
             } else {
                 // No new frame — yield CPU, avoid busy-wait
                 Sleep(1);
@@ -724,16 +711,6 @@ std::string dispatch_command(const std::string& json) {
         const char* state = capture_query_window_state(hw);
         result = "\"" + std::string(state ? state : "unknown") + "\"";
         if (state) capture_free_string(state);
-    }
-    else if (cmd == "stream_poll") {
-        // Return latest RGBA frame as base64 for Canvas fallback
-        std::lock_guard<std::mutex> lk(g_stream_frame_mutex);
-        if (g_stream_frame_pixels.empty()) { result = "{}"; }
-        else {
-            std::string b64 = base64_encode(g_stream_frame_pixels.data(), g_stream_frame_pixels.size());
-            result = "{\"p\":\"" + b64 + "\",\"w\":" + std::to_string(g_stream_frame_w) +
-                     ",\"h\":" + std::to_string(g_stream_frame_h) + ",\"m\":\"WGC\"}";
-        }
     }
     else if (cmd == "list_desktops") {
         result = vd_list_desktops();

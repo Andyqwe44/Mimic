@@ -72,10 +72,31 @@ LOG("tag", "format_string", args...);
 <div title="xxx">         // ← 原生 title，禁止
 ```
 
+### 铁律 5: 禁止静默回退
+
+**C++ 层不得对前端透明地修改行为。** 前端发送的命令必须被原样执行——成功返回数据，失败返回错误。禁止在 C++ 内部做静默 fallback、参数改写、或结果替换。
+
+违反示例：
+```cpp
+// ❌ 静默回退 — 前端不知道实际用了 DesktopBlt
+if (method == "WGC" && hwnd == 0) {
+    size = capture_desktop_bitblt(...);  // 前端以为用了 WGC
+    used = "DesktopBlt";
+}
+```
+
+正确做法：前端根据目标自行选择正确方法，C++ 只执行。
+```tsx
+// ✅ 前端知道自己在做什么
+const method = hwnd === 0 ? 'dxgi' : forceMethod
+```
+
+此规则适用于所有跨层接口：C++↔TS、C++↔Python TCP。每层对自己的决策负责，下层不替上层做决定。
+
 ## Project Vision
 
 Build self-organizing hierarchical visual game AI. Model interface: **pixels in, actions out**.
-C++ for all real-time work: capture + WebView2 GUI + MJPEG + TCP + logging.
+C++ for all real-time work: capture + WebView2 GUI + TCP + logging.
 Python for AI model training/inference.
 v0.3.0 — pure C++ WebView2 host, zero Rust.
 
@@ -87,8 +108,8 @@ v0.3.0 — pure C++ WebView2 host, zero Rust.
 │       MXU-style UI               │  WebView2 COM 原生                 │
 │       Dashboard/Monitor/Log       │  WebMessage bridge (ex-Tauri IPC) │
 │                                   │  SharedBuffer 直推 (零 FFI)       │
-│  Dev:  WebView2 → localhost:5173 │  MJPEG HTTP :9998                 │
-│  Prod: WebView2 → localhost:8888 │  WIC JPEG encode                  │
+│  Dev:  WebView2 → localhost:5173 │  SharedBuffer 零拷贝            │
+│  Prod: WebView2 → localhost:8888 │  BGRA→RGBA 直推                 │
 └──────────────────┬───────────────────────────────────────────────────┘
                    │
      ┌─────────────┼──────────────┐

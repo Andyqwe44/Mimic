@@ -461,8 +461,8 @@ function ConnectionPanel({ onSelect, onDisconnect, forceMethod, setForceMethod, 
   const recommendedMethod = winState === 'minimized' ? 'dxgi' : 'wgc'
 
   const methods = [
-    { v: 'wgc',  name: 'WGC', eng: 'GPU FramePool', rec: '前台/后台', desc: 'GPU 加速，支持后台/遮挡窗口，前台后台首选' },
-    { v: 'dxgi', name: 'DXGI', eng: 'DesktopBlt',   rec: '最小化/桌面', desc: '全桌面 GDI 位图，最小化窗口或桌面时唯一可行方案' },
+    { v: 'wgc',  name: 'WGC', eng: 'GPU FramePool', rec: '前台窗口/后台窗口/桌面', desc: 'GPU 加速，支持后台/遮挡窗口，前台后台及桌面首选' },
+    { v: 'dxgi', name: 'DXGI', eng: 'DesktopBlt',   rec: '最小化窗口', desc: '全桌面 GDI 位图，最小化窗口时唯一可行方案' },
   ]
 
   return (
@@ -559,45 +559,33 @@ function ConnectionPanel({ onSelect, onDisconnect, forceMethod, setForceMethod, 
 }
 
 // ═══ Screenshot Panel ───
-function ScreenshotPanel({ selWin, screenRatio, forceMethod, transportMethod, winState, expanded, onToggle }: { selWin?: WindowInfo; screenRatio: number; forceMethod: string; transportMethod: string; winState: string; expanded: boolean; onToggle: () => void }) {
-  const MJPEG_URL = 'http://127.0.0.1:9998/stream'
+// Single Canvas for both snapshot and real-time preview.
+// Frames arrive via SharedBuffer (zero-copy) → sharedbufferreceived event → putImageData.
+function ScreenshotPanel({ selWin, screenRatio, forceMethod, winState, expanded, onToggle }: { selWin?: WindowInfo; screenRatio: number; forceMethod: string; winState: string; expanded: boolean; onToggle: () => void }) {
   const [previewing, setPreviewing] = useState(false)
-  const [imgSrc, setImgSrc] = useState('')       // single-frame PNG / MJPEG fallback
-  const [imgStyle, setImgStyle] = useState<React.CSSProperties>({})
+  const [hasContent, setHasContent] = useState(false)  // true when snapshot or preview rendered
   const [fps, setFps] = useState(0)
   const [capMethod, setCapMethod] = useState('')
   const previewingRef = useRef(false)
+  const snapshotRef = useRef(false)        // one-shot: capture next SharedBuffer frame then stop
   const framesRef = useRef(0)
   const lastFpsRef = useRef(Date.now())
-  const unlistenRef = useRef<(() => void) | null>(null)
-  const sharedBufHandlerRef = useRef<((e: any) => void) | null>(null) // track sharedbufferreceived handler
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [canvasDims, setCanvasDims] = useState({ w: 0, h: 0 })
-  const sharedBufActiveRef = useRef(false)
+  const handlerRef = useRef<((e: any) => void) | null>(null)
 
-  // ── SharedBuffer → Canvas rendering (zero-copy) ──
-  const setupSharedBufferListener = () => {
+  // ── SharedBuffer → Canvas (shared by snapshot + stream) ──
+  useEffect(() => {
     const wv = (window as any).chrome?.webview
-    if (!wv) {
-      sharedBufActiveRef.current = false
-      setImgSrc(`${MJPEG_URL}?t=${Date.now()}`)
-      addLog('[Preview] SharedBuffer not available, falling back to MJPEG')
-      return
-    }
-    // Remove old listener if re-entering preview
-    if (sharedBufHandlerRef.current) {
-      wv.removeEventListener('sharedbufferreceived', sharedBufHandlerRef.current)
-      sharedBufHandlerRef.current = null
-    }
+    if (!wv) { addLog('[Screenshot] SharedBuffer not available'); return }
     const handler = (e: any) => {
-      if (!previewingRef.current || !sharedBufActiveRef.current) return
+      const active = previewingRef.current || snapshotRef.current
+      if (!active) return
       try {
         const buf: ArrayBuffer = e.getBuffer()
         const metaStr: string = e.getAdditionalData()
-        const meta = JSON.parse(metaStr) as { w: number; h: number; ts: number }
+        const meta = JSON.parse(metaStr) as { w: number; h: number }
         if (!meta.w || !meta.h || meta.w <= 0 || meta.h <= 0) return
-        // Zero-copy: ArrayBuffer → Uint8ClampedArray → ImageData → Canvas
-        // Note: C++ now sends RGBA (converted from BGRA), so ImageData works directly
         const imgData = new ImageData(
           new Uint8ClampedArray(buf, 0, meta.w * meta.h * 4),
           meta.w, meta.h
@@ -609,46 +597,52 @@ function ScreenshotPanel({ selWin, screenRatio, forceMethod, transportMethod, wi
           const ctx = canvasRef.current.getContext('2d')
           if (ctx) ctx.putImageData(imgData, 0, 0)
         }
+        setHasContent(true)
         framesRef.current++
         const now = Date.now(); const elapsed = now - lastFpsRef.current
         if (elapsed >= 1000) { setFps(Math.round(framesRef.current * 1000 / elapsed)); framesRef.current = 0; lastFpsRef.current = now }
-      } catch (_) { /* skip corrupt frame */ }
+        // Snapshot: one shot, then stop consuming
+        if (snapshotRef.current) { snapshotRef.current = false }
+      } catch (_) {}
     }
-    sharedBufHandlerRef.current = handler
+    handlerRef.current = handler
     wv.addEventListener('sharedbufferreceived', handler)
-    addLog('[Preview] SharedBuffer pipeline active — zero-copy Canvas')
-  }
+    return () => { wv.removeEventListener('sharedbufferreceived', handler) }
+  }, [])
 
-  // Compute proportional position within screen-aspect container
-  const applyCaptureJson = (jsonStr: string) => {
+  // ── Snapshot (Camera button) ──
+  const takeSnapshot = async () => {
+    const hwnd = selWin?.hwnd ?? 0
+    // Desktop (hwnd=0): WGC single-frame needs CreateForMonitor which we don't have.
+    // Use DXGI (DesktopBlt) instead. For windows, use the auto-recommended method.
+    const method = hwnd === 0 ? 'dxgi' : forceMethod
+    if (cantCaptureMinimized(method, winState)) {
+      addLog(`[Capture] blocked: window minimized, ${method} cannot capture`); return
+    }
+    addLog(`[Capture] ${METHOD_SHORT[method] || method} ${hwnd ? 'hwnd='+hwnd : 'desktop'}...`)
+    const t0 = Date.now()
     try {
-      const info = JSON.parse(jsonStr)
-      const src = `data:image/png;base64,${info.image}`
-      setImgSrc(src)
-      setCapMethod(info.method || '')
-      // Proportional positioning: window rect mapped to screen-sized container
-      if (info.screen_w && info.screen_h && info.w && info.h) {
-        setImgStyle({
-          position: 'absolute',
-          left: `${(info.x / info.screen_w) * 100}%`,
-          top: `${(info.y / info.screen_h) * 100}%`,
-          width: `${(info.w / info.screen_w) * 100}%`,
-          height: `${(info.h / info.screen_h) * 100}%`,
-          objectFit: 'fill',
-        })
-      }
-      return true
-    } catch { return false }
+      snapshotRef.current = true
+      const json = await hostCall('capture_window', { hwnd, method })
+      const elapsed = Date.now() - t0
+      try {
+        const info = JSON.parse(json)
+        if (info.ok) {
+          if (info.method) setCapMethod(info.method)
+          addLog(`[Capture] OK (${elapsed}ms) [${info.method || '?'}]`)
+        } else {
+          snapshotRef.current = false
+          addLog(`[Capture] failed (${elapsed}ms)`)
+        }
+      } catch { snapshotRef.current = false; addLog(`[Capture] failed (${elapsed}ms)`) }
+    } catch { snapshotRef.current = false; addLog(`[Capture] failed after ${Date.now() - t0}ms`) }
   }
 
-  // ── BMP Preview: Rust-native multi-method → BMP → <img> ──
+  // ── Preview toggle ──
   const togglePreview = async () => {
     if (previewing) {
-      previewingRef.current = false; setPreviewing(false); setFps(0); setCapMethod('')
-      sharedBufActiveRef.current = false
-      if (unlistenRef.current) { unlistenRef.current(); unlistenRef.current = null }
+      previewingRef.current = false; setPreviewing(false); setFps(0)
       try { await hostCall('capture_stream_stop') } catch (_) {}
-      setImgSrc('')
       addLog('[Preview] stopped')
     } else {
       const hwnd = selWin?.hwnd ?? 0
@@ -656,57 +650,16 @@ function ScreenshotPanel({ selWin, screenRatio, forceMethod, transportMethod, wi
         addLog(`[Preview] blocked: window minimized, ${forceMethod} cannot capture`); return
       }
       addLog(`[Preview] ${selWin?.title ?? 'desktop'} [${forceMethod}]`)
-      try { await hostCall('capture_stream_start', { hwnd, tcpPort: 9999, method: forceMethod, transport: transportMethod }) }
-      catch (e) { addLog(`[Preview] start failed: ${e}`); return }
-
-      // Auto-expand panel
+      previewingRef.current = true; setPreviewing(true); setFps(0); setCapMethod('')
+      try { await hostCall('capture_stream_start', { hwnd, tcpPort: 9999, method: forceMethod, transport: 'shared' }) }
+      catch (e) { previewingRef.current = false; setPreviewing(false); addLog(`[Preview] start failed: ${e}`); return }
       if (!expanded) onToggle()
-      previewingRef.current = true; setPreviewing(true);
-      setFps(0)
-
-      // SharedBuffer (zero-copy): Canvas rendering, no MJPEG HTTP needed
-      if (transportMethod === 'shared') {
-        sharedBufActiveRef.current = true
-        setImgSrc('') // hide <img>, show <canvas>
-        setupSharedBufferListener()
-      } else {
-        // MJPEG stream — browser <img> natively handles multipart/x-mixed-replace
-        setImgSrc(`${MJPEG_URL}?t=${Date.now()}`)
-        sharedBufActiveRef.current = false
-      }
-
-      // Listen for 'tick' messages from C++ host for FPS counting
-      const tickHandler = (e: any) => {
-        if (!previewingRef.current) return
-        try {
-          const msg = JSON.parse(e.data)
-          if (msg.type === 'tick') {
-            if (msg.method) setCapMethod(msg.method)
-            framesRef.current++
-            const now = Date.now(); const elapsed = now - lastFpsRef.current
-            if (elapsed >= 1000) { setFps(Math.round(framesRef.current * 1000 / elapsed)); framesRef.current = 0; lastFpsRef.current = now }
-          }
-        } catch {}
-      }
-      const wv = (window as any).chrome?.webview
-      if (wv) {
-        wv.addEventListener('message', tickHandler)
-        unlistenRef.current = () => wv.removeEventListener('message', tickHandler)
-      }
     }
   }
 
-  // Cleanup: stop stream and unlisten on unmount
+  // Cleanup on unmount
   useEffect(() => { return () => {
-    previewingRef.current = false
-    sharedBufActiveRef.current = false
-    if (unlistenRef.current) { unlistenRef.current(); unlistenRef.current = null }
-    const wv = (window as any).chrome?.webview
-    if (wv && sharedBufHandlerRef.current) {
-      wv.removeEventListener('sharedbufferreceived', sharedBufHandlerRef.current)
-      sharedBufHandlerRef.current = null
-    }
-    // Stop backend stream to prevent resource leak
+    previewingRef.current = false; snapshotRef.current = false
     hostCall('capture_stream_stop').catch(() => {})
   } }, [])
 
@@ -722,23 +675,7 @@ function ScreenshotPanel({ selWin, screenRatio, forceMethod, transportMethod, wi
         </div>
         <div className="flex items-center gap-0.5 shrink-0">
           <Tooltip text="单帧截图">
-            <button onClick={e => { e.stopPropagation(); (async () => {
-              const hwnd = selWin?.hwnd ?? 0;
-              if (cantCaptureMinimized(forceMethod, winState)) {
-                addLog(`[Capture] blocked: window minimized, ${forceMethod} cannot capture`); return
-              }
-              addLog(`[Capture] ${METHOD_SHORT[forceMethod] || forceMethod} ${hwnd ? 'hwnd='+hwnd : 'desktop'}...`)
-              const t0 = Date.now()
-              try {
-                const json = await hostCall('capture_window', { hwnd, method: forceMethod })
-                const elapsed = Date.now() - t0
-                if (applyCaptureJson(json)) {
-                  try { const info = JSON.parse(json); addLog(`[Capture] OK (${elapsed}ms) [${info.method}]`) }
-                  catch { addLog(`[Capture] OK (${elapsed}ms)`) }
-                }
-                else { setImgSrc(''); setImgStyle({}); addLog(`[Capture] failed after ${elapsed}ms`) }
-              } catch { addLog(`[Capture] failed after ${Date.now() - t0}ms`) }
-            })() }}
+            <button onClick={e => { e.stopPropagation(); takeSnapshot() }}
               className="p-1 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-tertiary transition-colors">
               <Camera className="w-3.5 h-3.5" />
             </button>
@@ -757,25 +694,12 @@ function ScreenshotPanel({ selWin, screenRatio, forceMethod, transportMethod, wi
         <div className="overflow-hidden min-h-0" data-layout-measure="">
           <div className="border-t border-border" />
           <div className="p-3">
-            <div className="w-full rounded-lg bg-bg-primary overflow-hidden flex items-center justify-center relative"
+            <div className="w-full rounded-lg bg-bg-primary overflow-hidden flex items-center justify-center"
               style={{ aspectRatio: screenRatio }}>
-              {previewing ? (
-                sharedBufActiveRef.current ? (
-                  // SharedBuffer mode: raw BGRA → Canvas (zero-copy)
-                  <canvas ref={canvasRef}
-                    className="max-w-full max-h-full object-contain"
-                    style={{ aspectRatio: canvasDims.w && canvasDims.h ? `${canvasDims.w}/${canvasDims.h}` : '16/9' }} />
-                ) : (
-                  // MJPEG fallback: <img> GPU hardware decode
-                  <img src={imgSrc || `${MJPEG_URL}?t=${Date.now()}`}
-                    className="max-w-full max-h-full object-contain"
-                    alt="MJPEG stream" />
-                )
-              ) : imgSrc ? (
-                <img src={imgSrc} style={imgStyle} alt="preview" />
-              ) : (
-                <span className="text-sm text-text-muted">Press Preview</span>
-              )}
+              <canvas ref={canvasRef}
+                className={`max-w-full max-h-full object-contain ${hasContent ? '' : 'hidden'}`}
+                style={{ aspectRatio: canvasDims.w && canvasDims.h ? `${canvasDims.w}/${canvasDims.h}` : '16/9' }} />
+              {!hasContent && <span className="text-sm text-text-muted">点击 📷 单帧截图 或 ▶ 实时预览</span>}
             </div>
           </div>
         </div>
@@ -1145,7 +1069,7 @@ function StatusBar({ screen, appVersion }: { screen: string; appVersion: string 
   )
 }
 
-function SettingsView({ forceMethod, setForceMethod, autoMethod, setAutoMethod, transportMethod, setTransportMethod, autoTransport, setAutoTransport, selWin, winState, expectedCaptureState, setExpectedCaptureState, onSelect, onDisconnect, keepFiles, setKeepFiles, appVersion, theme, setTheme }: { forceMethod: string; setForceMethod: (m: string) => void; autoMethod?: boolean; setAutoMethod?: (v: boolean) => void; transportMethod: string; setTransportMethod: (m: string) => void; autoTransport?: boolean; setAutoTransport?: (v: boolean) => void; selWin?: WindowInfo; winState: string; expectedCaptureState?: string; setExpectedCaptureState?: (s: string) => void; onSelect: (w: WindowInfo) => void; onDisconnect: () => void; keepFiles: number; setKeepFiles: (n: number) => void; appVersion: string; theme: string; setTheme: (t: 'light'|'dark'|'system') => void }) {
+function SettingsView({ forceMethod, setForceMethod, autoMethod, setAutoMethod, selWin, winState, expectedCaptureState, setExpectedCaptureState, onSelect, onDisconnect, keepFiles, setKeepFiles, appVersion, theme, setTheme }: { forceMethod: string; setForceMethod: (m: string) => void; autoMethod?: boolean; setAutoMethod?: (v: boolean) => void; selWin?: WindowInfo; winState: string; expectedCaptureState?: string; setExpectedCaptureState?: (s: string) => void; onSelect: (w: WindowInfo) => void; onDisconnect: () => void; keepFiles: number; setKeepFiles: (n: number) => void; appVersion: string; theme: string; setTheme: (t: 'light'|'dark'|'system') => void }) {
   const colors = ['#3B82F6','#8B5CF6','#EC4899','#F59E0B','#10B981','#EF4444']
   const [accent, setAccent] = useState('#3B82F6')
   const [screenRes, setScreenRes] = useState('?×?')
@@ -1166,35 +1090,7 @@ function SettingsView({ forceMethod, setForceMethod, autoMethod, setAutoMethod, 
       <ConnectionPanel onSelect={onSelect} onDisconnect={onDisconnect} forceMethod={forceMethod} setForceMethod={setForceMethod} selWin={selWin} winState={winState} expectedCaptureState={expectedCaptureState} setExpectedCaptureState={setExpectedCaptureState} autoMethod={autoMethod} setAutoMethod={setAutoMethod} showMethod expanded={connExpanded} onToggle={() => setConnExpanded(v => !v)} />
 
       <SettingsCard icon={<Camera className="w-4 h-4 text-text-secondary" />} title="Capture">
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-text-muted">How frames are sent to the frontend for preview.</span>
-            {setAutoTransport && (
-              <label className="flex items-center gap-1.5 cursor-pointer select-none shrink-0">
-                <span className="text-[10px] text-text-muted">Auto</span>
-                <button onClick={e => { e.stopPropagation(); setAutoTransport(!autoTransport); addLog(`[Setting] auto transport = ${!autoTransport}`) }}
-                  className={`relative w-8 h-5 rounded-full transition-colors ${autoTransport ? 'bg-amber-500' : 'bg-bg-tertiary'}`}>
-                  <span className={`absolute top-[3px] w-3.5 h-3.5 rounded-full bg-white transition-transform ${autoTransport ? 'left-4' : 'left-0.5'}`} />
-                </button>
-              </label>
-            )}
-          </div>
-          <div className="flex flex-col gap-3">
-            {[
-              { v:'shared', name:'Canvas', eng:'SharedBuffer', rec:'首选', desc:'Zero-copy BGRA → Canvas — no encode, no HTTP, lowest latency' },
-              { v:'mjpeg',  name:'MJPEG',  eng:'HTTP Stream',  rec:'备用', desc:'JPEG stream via HTTP, browser GPU decode — stable fallback' },
-              { v:'base64', name:'Base64', eng:'JSON',         rec:'旧版', desc:'Raw RGBA via JSON/base64 — legacy, slow' },
-              { v:'h264',   name:'H.264',  eng:'GPU MFT',      rec:'实验', desc:'GPU MFT encode — experimental' },
-            ].map(t => {
-              const isActive = transportMethod === t.v
-              const ringClass = !autoTransport && isActive ? 'border-accent bg-accent/10 cursor-pointer'
-                : autoTransport && isActive ? 'border-amber-500 bg-amber-500/10 cursor-not-allowed'
-                : autoTransport ? 'border-border bg-bg-primary opacity-50 cursor-not-allowed'
-                : 'border-border bg-bg-primary hover:bg-bg-hover cursor-pointer'
-              return <Tooltip key={t.v} text={t.desc}><label className={`${SELECTABLE_BTN} ${ringClass}`}><input type="radio" name="transport" value={t.v} checked={isActive} disabled={autoTransport} onChange={e => { if (!autoTransport) { setTransportMethod(e.target.value); addLog(`[Transport] ${e.target.value}`) } }} className="sr-only" /><span className="text-xs font-medium text-text-primary">{t.name} <span className="text-text-muted">({t.eng})</span></span><span className="ml-auto text-xs font-medium text-text-primary">{t.rec}</span></label></Tooltip>
-            })}
-          </div>
-        </div>
+        <div className="text-xs text-text-muted">Frames delivered via SharedBuffer zero-copy — no encoding, no HTTP, lowest latency.</div>
       </SettingsCard>
 
       <SettingsCard icon={<Cpu className="w-4 h-4 text-text-secondary" />} title="Model">
@@ -1521,8 +1417,6 @@ export default function App() {
   const [forceMethod, setForceMethod] = useState('dxgi')
   const [autoMethod, setAutoMethod] = useState(true)
   const [expectedCaptureState, setExpectedCaptureState] = useState('desktop')
-  const [transportMethod, setTransportMethod] = useState('shared')
-  const [autoTransport, setAutoTransport] = useState(true)
   const [keepFiles, setKeepFiles] = useState(5)
   const [winState, setWinState] = useState('desktop')
   const lastWinStateRef = useRef('desktop')
@@ -1556,12 +1450,6 @@ export default function App() {
     }
   }, [winState, autoMethod])
 
-  // Auto-select transport based on availability (SharedBuffer > MJPEG > Base64)
-  useEffect(() => {
-    if (autoTransport) {
-      setTransportMethod('shared')
-    }
-  }, [autoTransport])
 
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
     autoCollapsedByWidth.current = false // manual drag overrides auto-collapse
@@ -1583,7 +1471,7 @@ export default function App() {
         dark={resolvedDark} onToggleTheme={() => setTheme(resolvedDark ? 'light' : 'dark')} />
       <div className="flex-1 flex overflow-hidden">
         <div className="flex-1 flex flex-col overflow-hidden border-r border-border" style={{ minWidth: MIN_LEFT_WIDTH }}>
-          {tab === 'Settings' && <SettingsView forceMethod={forceMethod} setForceMethod={setForceMethod} autoMethod={autoMethod} setAutoMethod={setAutoMethod} transportMethod={transportMethod} setTransportMethod={setTransportMethod} autoTransport={autoTransport} setAutoTransport={setAutoTransport} selWin={selWindow} winState={winState} expectedCaptureState={expectedCaptureState} setExpectedCaptureState={setExpectedCaptureState} onSelect={setSelWindow} onDisconnect={() => { setSelWindow({ title: ' Entire Desktop', category: 'desktop', hwnd: 0 }); setExpectedCaptureState('desktop'); addLog('[Connection] disconnected, back to desktop') }} keepFiles={keepFiles} setKeepFiles={setKeepFiles} appVersion={appVersion} theme={theme} setTheme={setTheme} />}
+          {tab === 'Settings' && <SettingsView forceMethod={forceMethod} setForceMethod={setForceMethod} autoMethod={autoMethod} setAutoMethod={setAutoMethod} selWin={selWindow} winState={winState} expectedCaptureState={expectedCaptureState} setExpectedCaptureState={setExpectedCaptureState} onSelect={setSelWindow} onDisconnect={() => { setSelWindow({ title: ' Entire Desktop', category: 'desktop', hwnd: 0 }); setExpectedCaptureState('desktop'); addLog('[Connection] disconnected, back to desktop') }} keepFiles={keepFiles} setKeepFiles={setKeepFiles} appVersion={appVersion} theme={theme} setTheme={setTheme} />}
           {tab === 'Monitor' && (
             <div className="flex-1 flex items-center justify-center p-6">
               <div className="rounded-xl bg-bg-secondary p-8 text-center space-y-3 max-w-md w-full">
@@ -1609,7 +1497,7 @@ export default function App() {
               setExpectedCaptureState('desktop')
               addLog('[Connection] disconnected, back to desktop')
             }} forceMethod={forceMethod} setForceMethod={setForceMethod} selWin={selWindow} winState={winState} expectedCaptureState={expectedCaptureState} setExpectedCaptureState={setExpectedCaptureState} autoMethod={autoMethod} setAutoMethod={setAutoMethod} expanded={connectionExpanded} onToggle={() => setConnectionExpanded(v => !v)} /></div>
-            <div className="shrink-0 overflow-hidden"><ScreenshotPanel selWin={selWindow} screenRatio={screenRatio} forceMethod={forceMethod} transportMethod={transportMethod} winState={winState} expanded={screenshotExpanded} onToggle={() => setScreenshotExpanded(v => !v)} /></div>
+            <div className="shrink-0 overflow-hidden"><ScreenshotPanel selWin={selWindow} screenRatio={screenRatio} forceMethod={forceMethod} winState={winState} expanded={screenshotExpanded} onToggle={() => setScreenshotExpanded(v => !v)} /></div>
             <div className="shrink-0"><LogPanel compact expanded={logExpanded} onToggle={() => setLogExpanded(v => !v)} /></div>
             <div className="flex-1" />
           </div>
