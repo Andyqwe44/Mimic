@@ -433,8 +433,19 @@ const cantCaptureMinimized = (method: string, ws: string) => ws === 'minimized' 
 const STATE_LABEL: Record<string,string> = { desktop:'Desktop', foreground:'前台', background:'后台', minimized:'最小化', hidden:'隐藏', closed:'已关闭', unknown:'未知' }
 const STATE_COLOR: Record<string,string> = { desktop:'text-text-muted', foreground:'text-success', background:'text-accent', minimized:'text-error', hidden:'text-error', closed:'text-error', unknown:'text-text-muted' }
 
+const CAPTURE_METHODS = [
+  { v: 'wgc',  name: 'WGC', eng: 'GPU FramePool', rec: '前台窗口/后台窗口/桌面', desc: 'GPU 加速，支持后台/遮挡窗口，前台后台及桌面首选' },
+  { v: 'dxgi', name: 'DXGI', eng: 'DesktopBlt',   rec: '最小化窗口', desc: '全桌面 GDI 位图，最小化窗口时唯一可行方案' },
+]
+
+const RENDER_METHODS = [
+  { v: 'shared', name: 'SharedBuffer', eng: 'Zero-copy COM', rec: '当前', desc: 'C++ COM SharedBuffer → JS ArrayBuffer → Canvas putImageData，零拷贝无编解码' },
+  { v: 'h264',   name: 'H.264',        eng: 'GPU MFT + MSE', rec: '未实现', desc: 'GPU MFT 硬件编码 → fMP4 分片 → MSE → <video> 标签，低延迟高压缩' },
+  { v: 'h265',   name: 'H.265',        eng: 'GPU MFT + MSE', rec: '未实现', desc: 'HEVC 硬件编码，压缩率更高但兼容性有限，需 Windows 11 + HEVC 扩展' },
+]
+
 // ═══ Connection Panel (MXU-style collapsible card) ═══
-function ConnectionPanel({ onSelect, onDisconnect, forceMethod, setForceMethod, selWin, winState, expectedCaptureState, setExpectedCaptureState, autoMethod, setAutoMethod, showMethod, expanded, onToggle }: { onSelect: (w: WindowInfo) => void; onDisconnect?: () => void; forceMethod: string; setForceMethod?: (m: string) => void; selWin?: WindowInfo; winState: string; expectedCaptureState?: string; setExpectedCaptureState?: (s: string) => void; autoMethod?: boolean; setAutoMethod?: (v: boolean) => void; showMethod?: boolean; expanded: boolean; onToggle: () => void }) {
+function ConnectionPanel({ onSelect, onDisconnect, snapMethod, setSnapMethod, streamMethod, setStreamMethod, selWin, winState, expectedCaptureState, setExpectedCaptureState, expanded, onToggle }: { onSelect: (w: WindowInfo) => void; onDisconnect?: () => void; snapMethod: string; setSnapMethod?: (m: string) => void; streamMethod: string; setStreamMethod?: (m: string) => void; selWin?: WindowInfo; winState: string; expectedCaptureState?: string; setExpectedCaptureState?: (s: string) => void; expanded: boolean; onToggle: () => void }) {
   const [pickerOpen, setPickerOpen] = useState(false)
   const [selTitle, setSelTitle] = useState(' Entire Desktop')
   const [ip, setIp] = useState('127.0.0.1')
@@ -446,7 +457,9 @@ function ConnectionPanel({ onSelect, onDisconnect, forceMethod, setForceMethod, 
   }
 
   const handleSelectMode = (method: string, expectedState: string) => {
-    if (setForceMethod) { setForceMethod(method) }
+    // Mode picker sets both methods (user's explicit choice)
+    if (setSnapMethod) { setSnapMethod(method) }
+    if (setStreamMethod) { setStreamMethod(method) }
     if (setExpectedCaptureState) { setExpectedCaptureState(expectedState) }
   }
 
@@ -457,13 +470,9 @@ function ConnectionPanel({ onSelect, onDisconnect, forceMethod, setForceMethod, 
     }
   }, [selWin?.title])
 
-  const cantCapture = !isDesktop && cantCaptureMinimized(forceMethod, winState)
+  const cantCapture = !isDesktop && cantCaptureMinimized(streamMethod, winState)
   const recommendedMethod = winState === 'minimized' ? 'dxgi' : 'wgc'
 
-  const methods = [
-    { v: 'wgc',  name: 'WGC', eng: 'GPU FramePool', rec: '前台窗口/后台窗口/桌面', desc: 'GPU 加速，支持后台/遮挡窗口，前台后台及桌面首选' },
-    { v: 'dxgi', name: 'DXGI', eng: 'DesktopBlt',   rec: '最小化窗口', desc: '全桌面 GDI 位图，最小化窗口时唯一可行方案' },
-  ]
 
   return (
     <div className="bg-bg-secondary rounded-xl ring-1 ring-inset ring-border overflow-hidden">
@@ -491,7 +500,7 @@ function ConnectionPanel({ onSelect, onDisconnect, forceMethod, setForceMethod, 
           <div className="max-h-[360px] overflow-y-auto p-3 space-y-2">
             {cantCapture && (
               <div className="text-xs text-error bg-red-500/10 rounded-lg px-2 py-1.5">
-                窗口已最小化，{forceMethod.toUpperCase()} 无法截取。请切换为 WGC 或将窗口恢复前台。
+                窗口已最小化，{streamMethod.toUpperCase()} 无法截取。请切换为 WGC 或将窗口恢复前台。
               </div>
             )}
             {/* DEV: expected state mismatch warning — disabled during development */}
@@ -528,28 +537,6 @@ function ConnectionPanel({ onSelect, onDisconnect, forceMethod, setForceMethod, 
                   className="w-20 h-8 rounded-lg border border-border bg-bg-primary px-2 text-xs text-text-primary outline-none focus:border-accent transition-colors placeholder:text-text-muted" />
               </Tooltip>
             </div>
-            {showMethod && setForceMethod && setAutoMethod && (
-              <div className="border-t border-border pt-2 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-text-muted">Capture Method</span>
-                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                    <span className="text-[10px] text-text-muted">Auto</span>
-                    <button onClick={e => { e.stopPropagation(); setAutoMethod(!autoMethod); addLog(`[Setting] auto method = ${!autoMethod}`) }}
-                      className={`relative w-8 h-5 rounded-full transition-colors ${autoMethod ? 'bg-amber-500' : 'bg-bg-tertiary'}`}>
-                      <span className={`absolute top-[3px] w-3.5 h-3.5 rounded-full bg-white transition-transform ${autoMethod ? 'left-4' : 'left-0.5'}`} />
-                    </button>
-                  </label>
-                </div>
-                <div className="flex flex-col gap-3">{methods.map(m => {
-                  const isActive = forceMethod === m.v
-                  const ringClass = !autoMethod && isActive ? 'border-accent bg-accent/10 cursor-pointer'
-                    : autoMethod && isActive ? 'border-amber-500 bg-amber-500/10 cursor-not-allowed'
-                    : autoMethod ? 'border-border bg-bg-primary opacity-50 cursor-not-allowed'
-                    : 'border-border bg-bg-primary hover:bg-bg-hover cursor-pointer'
-                  return <Tooltip key={m.v} text={m.desc}><label className={`${SELECTABLE_BTN} ${ringClass}`}><input type="radio" name="method" value={m.v} checked={isActive} disabled={autoMethod} onChange={e => { if (!autoMethod) { setForceMethod(e.target.value); addLog(`[Setting] capture method = ${e.target.value}`) } }} className="sr-only" /><span className="text-xs font-medium text-text-primary">{m.name} <span className="text-text-muted">({m.eng})</span></span><span className="ml-auto text-xs font-medium text-text-primary">{m.rec}</span></label></Tooltip>
-                })}</div>
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -561,7 +548,7 @@ function ConnectionPanel({ onSelect, onDisconnect, forceMethod, setForceMethod, 
 // ═══ Screenshot Panel ───
 // Single Canvas for both snapshot and real-time preview.
 // Frames arrive via SharedBuffer (zero-copy) → sharedbufferreceived event → putImageData.
-function ScreenshotPanel({ selWin, screenRatio, forceMethod, winState, expanded, onToggle }: { selWin?: WindowInfo; screenRatio: number; forceMethod: string; winState: string; expanded: boolean; onToggle: () => void }) {
+function ScreenshotPanel({ selWin, screenRatio, snapMethod, streamMethod, renderMethod, winState, expanded, onToggle }: { selWin?: WindowInfo; screenRatio: number; snapMethod: string; streamMethod: string; renderMethod: string; winState: string; expanded: boolean; onToggle: () => void }) {
   const [previewing, setPreviewing] = useState(false)
   const [hasContent, setHasContent] = useState(false)  // true when snapshot or preview rendered
   const [fps, setFps] = useState(0)
@@ -646,10 +633,7 @@ function ScreenshotPanel({ selWin, screenRatio, forceMethod, winState, expanded,
   // ── Snapshot (Camera button) ──
   const takeSnapshot = async () => {
     const hwnd = selWin?.hwnd ?? 0
-    // Frontend decides method based on target:
-    //   desktop (hwnd=0) → dxgi (DesktopBlt) — fast, reliable single-frame
-    //   window           → wgc — GPU capture for specific window
-    const method = hwnd === 0 ? 'dxgi' : 'wgc'
+    const method = snapMethod
     addLog(`[Capture] 📷 snapshot start: hwnd=${hwnd} method=${method} winState=${winState}`)
     if (cantCaptureMinimized(method, winState)) {
       addLog(`[Capture] blocked: window minimized, ${method} cannot capture`); return
@@ -684,12 +668,12 @@ function ScreenshotPanel({ selWin, screenRatio, forceMethod, winState, expanded,
       addLog('[Preview] stopped')
     } else {
       const hwnd = selWin?.hwnd ?? 0
-      if (cantCaptureMinimized(forceMethod, winState)) {
-        addLog(`[Preview] blocked: window minimized, ${forceMethod} cannot capture`); return
+      if (cantCaptureMinimized(streamMethod, winState)) {
+        addLog(`[Preview] blocked: window minimized, ${streamMethod} cannot capture`); return
       }
-      addLog(`[Preview] ${selWin?.title ?? 'desktop'} [${forceMethod}]`)
-      previewingRef.current = true; setPreviewing(true); setFps(0); setCapMethod(forceMethod); setSnapshotLatency(null)
-      try { await hostCall('capture_stream_start', { hwnd, tcpPort: 9999, method: forceMethod, transport: 'shared' }) }
+      addLog(`[Preview] ${selWin?.title ?? 'desktop'} [${streamMethod}]`)
+      previewingRef.current = true; setPreviewing(true); setFps(0); setCapMethod(streamMethod); setSnapshotLatency(null)
+      try { await hostCall('capture_stream_start', { hwnd, tcpPort: 9999, method: streamMethod, transport: renderMethod }) }
       catch (e) { previewingRef.current = false; setPreviewing(false); addLog(`[Preview] start failed: ${e}`); return }
       if (!expanded) onToggle()
     }
@@ -1110,7 +1094,7 @@ function StatusBar({ screen, appVersion }: { screen: string; appVersion: string 
   )
 }
 
-function SettingsView({ forceMethod, setForceMethod, autoMethod, setAutoMethod, selWin, winState, expectedCaptureState, setExpectedCaptureState, onSelect, onDisconnect, keepFiles, setKeepFiles, appVersion, theme, setTheme, devMode, setDevMode, saveCaptureFrames, setSaveCaptureFrames, saveStreamFrames, setSaveStreamFrames, frameDumpDir, setFrameDumpDir }: { forceMethod: string; setForceMethod: (m: string) => void; autoMethod?: boolean; setAutoMethod?: (v: boolean) => void; selWin?: WindowInfo; winState: string; expectedCaptureState?: string; setExpectedCaptureState?: (s: string) => void; onSelect: (w: WindowInfo) => void; onDisconnect: () => void; keepFiles: number; setKeepFiles: (n: number) => void; appVersion: string; theme: string; setTheme: (t: 'light'|'dark'|'system') => void; devMode: boolean; setDevMode: (v: boolean) => void; saveCaptureFrames: boolean; setSaveCaptureFrames: (v: boolean) => void; saveStreamFrames: boolean; setSaveStreamFrames: (v: boolean) => void; frameDumpDir: string; setFrameDumpDir: (d: string) => void }) {
+function SettingsView({ snapMethod, setSnapMethod, streamMethod, setStreamMethod, renderMethod, setRenderMethod, autoSnap, setAutoSnap, autoStream, setAutoStream, selWin, winState, expectedCaptureState, setExpectedCaptureState, onSelect, onDisconnect, keepFiles, setKeepFiles, appVersion, theme, setTheme, devMode, setDevMode, saveCaptureFrames, setSaveCaptureFrames, saveStreamFrames, setSaveStreamFrames, frameDumpDir, setFrameDumpDir }: { snapMethod: string; setSnapMethod: (m: string) => void; streamMethod: string; setStreamMethod: (m: string) => void; renderMethod: string; setRenderMethod: (m: string) => void; autoSnap?: boolean; setAutoSnap?: (v: boolean) => void; autoStream?: boolean; setAutoStream?: (v: boolean) => void; selWin?: WindowInfo; winState: string; expectedCaptureState?: string; setExpectedCaptureState?: (s: string) => void; onSelect: (w: WindowInfo) => void; onDisconnect: () => void; keepFiles: number; setKeepFiles: (n: number) => void; appVersion: string; theme: string; setTheme: (t: 'light'|'dark'|'system') => void; devMode: boolean; setDevMode: (v: boolean) => void; saveCaptureFrames: boolean; setSaveCaptureFrames: (v: boolean) => void; saveStreamFrames: boolean; setSaveStreamFrames: (v: boolean) => void; frameDumpDir: string; setFrameDumpDir: (d: string) => void }) {
   const colors = ['#3B82F6','#8B5CF6','#EC4899','#F59E0B','#10B981','#EF4444']
   const [accent, setAccent] = useState('#3B82F6')
   const [screenRes, setScreenRes] = useState('?×?')
@@ -1128,10 +1112,70 @@ function SettingsView({ forceMethod, setForceMethod, autoMethod, setAutoMethod, 
     <div className="flex-1 overflow-y-auto p-6 space-y-3">
       <StatusBar screen={screenRes} appVersion={appVersion} />
 
-      <ConnectionPanel onSelect={onSelect} onDisconnect={onDisconnect} forceMethod={forceMethod} setForceMethod={setForceMethod} selWin={selWin} winState={winState} expectedCaptureState={expectedCaptureState} setExpectedCaptureState={setExpectedCaptureState} autoMethod={autoMethod} setAutoMethod={setAutoMethod} showMethod expanded={connExpanded} onToggle={() => setConnExpanded(v => !v)} />
+      <ConnectionPanel onSelect={onSelect} onDisconnect={onDisconnect} snapMethod={snapMethod} setSnapMethod={setSnapMethod} streamMethod={streamMethod} setStreamMethod={setStreamMethod} selWin={selWin} winState={winState} expectedCaptureState={expectedCaptureState} setExpectedCaptureState={setExpectedCaptureState} expanded={connExpanded} onToggle={() => setConnExpanded(v => !v)} />
 
       <SettingsCard icon={<Camera className="w-4 h-4 text-text-secondary" />} title="Capture">
-        <div className="text-xs text-text-muted">Frames delivered via SharedBuffer zero-copy — no encoding, no HTTP, lowest latency.</div>
+        <div className="space-y-3">
+          {/* ── Snapshot + Stream side by side ── */}
+          <div className="flex gap-0">
+            <div className="flex-1 space-y-2 pr-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-text-muted">📷 Snapshot</span>
+                <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                  <span className="text-[10px] text-text-muted">Auto</span>
+                  <button onClick={e => { e.stopPropagation(); setAutoSnap(!autoSnap); addLog(`[Setting] auto snap = ${!autoSnap}`) }}
+                    className={`relative w-8 h-5 rounded-full transition-colors ${autoSnap ? 'bg-amber-500' : 'bg-bg-tertiary'}`}>
+                    <span className={`absolute top-[3px] w-3.5 h-3.5 rounded-full bg-white transition-transform ${autoSnap ? 'left-4' : 'left-0.5'}`} />
+                  </button>
+                </label>
+              </div>
+              <div className="flex flex-col gap-2">{CAPTURE_METHODS.map(m => {
+                const isActive = snapMethod === m.v
+                const ringClass = !autoSnap && isActive ? 'border-accent bg-accent/10 cursor-pointer'
+                  : autoSnap && isActive ? 'border-amber-500 bg-amber-500/10 cursor-not-allowed'
+                  : autoSnap ? 'border-border bg-bg-primary opacity-50 cursor-not-allowed'
+                  : 'border-border bg-bg-primary hover:bg-bg-hover cursor-pointer'
+                return <Tooltip key={m.v} text={m.desc}><label className={`${SELECTABLE_BTN} ${ringClass}`}><input type="radio" name="snapMethod" value={m.v} checked={isActive} disabled={autoSnap} onChange={e => { if (!autoSnap) { setSnapMethod(e.target.value); addLog(`[Setting] snap method = ${e.target.value}`) } }} className="sr-only" /><span className="text-xs font-medium text-text-primary">{m.name} <span className="text-text-muted">({m.eng})</span></span><span className="ml-auto text-xs font-medium text-text-primary">{m.rec}</span></label></Tooltip>
+              })}</div>
+            </div>
+            <div className="w-px bg-border shrink-0" />
+            <div className="flex-1 space-y-2 pl-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-text-muted">▶ Stream</span>
+                <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                  <span className="text-[10px] text-text-muted">Auto</span>
+                  <button onClick={e => { e.stopPropagation(); setAutoStream(!autoStream); addLog(`[Setting] auto stream = ${!autoStream}`) }}
+                    className={`relative w-8 h-5 rounded-full transition-colors ${autoStream ? 'bg-amber-500' : 'bg-bg-tertiary'}`}>
+                    <span className={`absolute top-[3px] w-3.5 h-3.5 rounded-full bg-white transition-transform ${autoStream ? 'left-4' : 'left-0.5'}`} />
+                  </button>
+                </label>
+              </div>
+              <div className="flex flex-col gap-2">{CAPTURE_METHODS.map(m => {
+                const unsupported = m.v === 'dxgi'
+                const isActive = streamMethod === m.v
+                const ringClass = !autoStream && isActive && !unsupported ? 'border-accent bg-accent/10 cursor-pointer'
+                  : autoStream && isActive ? 'border-amber-500 bg-amber-500/10 cursor-not-allowed'
+                  : autoStream || unsupported ? 'border-border bg-bg-primary opacity-50 cursor-not-allowed'
+                  : 'border-border bg-bg-primary hover:bg-bg-hover cursor-pointer'
+                return <Tooltip key={m.v} text={unsupported ? 'DXGI 流未实现，仅 WGC 支持实时预览' : m.desc}><label className={`${SELECTABLE_BTN} ${ringClass}`}><input type="radio" name="streamMethod" value={m.v} checked={isActive} disabled={autoStream || unsupported} onChange={e => { if (!autoStream && !unsupported) { setStreamMethod(e.target.value); addLog(`[Setting] stream method = ${e.target.value}`) } }} className="sr-only" /><span className="text-xs font-medium text-text-primary">{m.name} <span className="text-text-muted">({m.eng})</span></span><span className="ml-auto text-xs font-medium text-text-primary">{unsupported ? 'N/A' : m.rec}</span></label></Tooltip>
+              })}</div>
+            </div>
+          </div>
+          {/* ── Render Method ── */}
+          <div className="border-t border-border pt-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-text-muted">Render Method (🎨)</span>
+            </div>
+            <div className="flex flex-col gap-2">{RENDER_METHODS.map(m => {
+              const isActive = renderMethod === m.v
+              const implemented = m.v === 'shared'
+              const ringClass = isActive && implemented ? 'border-accent bg-accent/10 cursor-pointer'
+                : implemented ? 'border-border bg-bg-primary hover:bg-bg-hover cursor-pointer'
+                : 'border-border bg-bg-primary opacity-50 cursor-not-allowed'
+              return <Tooltip key={m.v} text={m.desc}><label className={`${SELECTABLE_BTN} ${ringClass}`}><input type="radio" name="renderMethod" value={m.v} checked={isActive} disabled={!implemented} onChange={e => { if (implemented) { setRenderMethod(e.target.value); addLog(`[Setting] render method = ${e.target.value}`) } }} className="sr-only" /><span className="text-xs font-medium text-text-primary">{m.name} <span className="text-text-muted">({m.eng})</span></span><span className={`ml-auto text-xs font-medium ${implemented ? 'text-text-primary' : 'text-text-muted'}`}>{m.rec}</span></label></Tooltip>
+            })}</div>
+          </div>
+        </div>
       </SettingsCard>
 
       <SettingsCard icon={<Cpu className="w-4 h-4 text-text-secondary" />} title="Model">
@@ -1487,8 +1531,11 @@ export default function App() {
   const isResizing = useRef(false)
   const [selWindow, setSelWindow] = useState<WindowInfo>({ title: ' Entire Desktop', category: 'desktop', hwnd: 0 })
   const [screenRatio, setScreenRatio] = useState(16/9)
-  const [forceMethod, setForceMethod] = useState('dxgi')
-  const [autoMethod, setAutoMethod] = useState(true)
+  const [snapMethod, setSnapMethod] = useState('dxgi')
+  const [streamMethod, setStreamMethod] = useState('wgc')
+  const [autoSnap, setAutoSnap] = useState(true)
+  const [autoStream, setAutoStream] = useState(true)
+  const [renderMethod, setRenderMethod] = useState('shared')
   const [expectedCaptureState, setExpectedCaptureState] = useState('desktop')
   const [keepFiles, setKeepFiles] = useState(5)
   const [devMode, setDevMode] = useState(false)
@@ -1520,12 +1567,18 @@ export default function App() {
     return () => clearInterval(iv)
   }, [selWindow.hwnd])
 
-  // Auto-select capture method based on actual window state
+  // Auto-select capture methods based on target and window state
   useEffect(() => {
-    if (autoMethod) {
-      setForceMethod(winState === 'minimized' ? 'dxgi' : 'wgc')
+    const isDesktop = selWindow.hwnd === 0
+    if (autoSnap) {
+      // Single-frame: desktop → dxgi (DesktopBlt fast), window → wgc (GPU), minimized → dxgi
+      setSnapMethod(isDesktop || winState === 'minimized' ? 'dxgi' : 'wgc')
     }
-  }, [winState, autoMethod])
+    if (autoStream) {
+      // Streaming: only WGC works (DXGI stream not implemented)
+      setStreamMethod('wgc')
+    }
+  }, [selWindow.hwnd, winState, autoSnap, autoStream])
 
 
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
@@ -1548,7 +1601,7 @@ export default function App() {
         dark={resolvedDark} onToggleTheme={() => setTheme(resolvedDark ? 'light' : 'dark')} />
       <div className="flex-1 flex overflow-hidden">
         <div className="flex-1 flex flex-col overflow-hidden border-r border-border" style={{ minWidth: MIN_LEFT_WIDTH }}>
-          {tab === 'Settings' && <SettingsView forceMethod={forceMethod} setForceMethod={setForceMethod} autoMethod={autoMethod} setAutoMethod={setAutoMethod} selWin={selWindow} winState={winState} expectedCaptureState={expectedCaptureState} setExpectedCaptureState={setExpectedCaptureState} onSelect={setSelWindow} onDisconnect={() => { setSelWindow({ title: ' Entire Desktop', category: 'desktop', hwnd: 0 }); setExpectedCaptureState('desktop'); addLog('[Connection] disconnected, back to desktop') }} keepFiles={keepFiles} setKeepFiles={setKeepFiles} appVersion={appVersion} theme={theme} setTheme={setTheme} devMode={devMode} setDevMode={setDevMode} saveCaptureFrames={saveCaptureFrames} setSaveCaptureFrames={setSaveCaptureFrames} saveStreamFrames={saveStreamFrames} setSaveStreamFrames={setSaveStreamFrames} frameDumpDir={frameDumpDir} setFrameDumpDir={setFrameDumpDir} />}
+          {tab === 'Settings' && <SettingsView snapMethod={snapMethod} setSnapMethod={setSnapMethod} streamMethod={streamMethod} setStreamMethod={setStreamMethod} renderMethod={renderMethod} setRenderMethod={setRenderMethod} autoSnap={autoSnap} setAutoSnap={setAutoSnap} autoStream={autoStream} setAutoStream={setAutoStream} selWin={selWindow} winState={winState} expectedCaptureState={expectedCaptureState} setExpectedCaptureState={setExpectedCaptureState} onSelect={setSelWindow} onDisconnect={() => { setSelWindow({ title: ' Entire Desktop', category: 'desktop', hwnd: 0 }); setExpectedCaptureState('desktop'); addLog('[Connection] disconnected, back to desktop') }} keepFiles={keepFiles} setKeepFiles={setKeepFiles} appVersion={appVersion} theme={theme} setTheme={setTheme} devMode={devMode} setDevMode={setDevMode} saveCaptureFrames={saveCaptureFrames} setSaveCaptureFrames={setSaveCaptureFrames} saveStreamFrames={saveStreamFrames} setSaveStreamFrames={setSaveStreamFrames} frameDumpDir={frameDumpDir} setFrameDumpDir={setFrameDumpDir} />}
           {tab === 'Monitor' && (
             <div className="flex-1 flex items-center justify-center p-6">
               <div className="rounded-xl bg-bg-secondary p-8 text-center space-y-3 max-w-md w-full">
@@ -1573,8 +1626,8 @@ export default function App() {
               setSelWindow({ title: ' Entire Desktop', category: 'desktop', hwnd: 0 })
               setExpectedCaptureState('desktop')
               addLog('[Connection] disconnected, back to desktop')
-            }} forceMethod={forceMethod} setForceMethod={setForceMethod} selWin={selWindow} winState={winState} expectedCaptureState={expectedCaptureState} setExpectedCaptureState={setExpectedCaptureState} autoMethod={autoMethod} setAutoMethod={setAutoMethod} expanded={connectionExpanded} onToggle={() => setConnectionExpanded(v => !v)} /></div>
-            <div className="shrink-0 overflow-hidden"><ScreenshotPanel selWin={selWindow} screenRatio={screenRatio} forceMethod={forceMethod} winState={winState} expanded={screenshotExpanded} onToggle={() => setScreenshotExpanded(v => !v)} /></div>
+            }} snapMethod={snapMethod} setSnapMethod={setSnapMethod} streamMethod={streamMethod} setStreamMethod={setStreamMethod} selWin={selWindow} winState={winState} expectedCaptureState={expectedCaptureState} setExpectedCaptureState={setExpectedCaptureState} expanded={connectionExpanded} onToggle={() => setConnectionExpanded(v => !v)} /></div>
+            <div className="shrink-0 overflow-hidden"><ScreenshotPanel selWin={selWindow} screenRatio={screenRatio} snapMethod={snapMethod} streamMethod={streamMethod} renderMethod={renderMethod} winState={winState} expanded={screenshotExpanded} onToggle={() => setScreenshotExpanded(v => !v)} /></div>
             <div className="shrink-0"><LogPanel compact expanded={logExpanded} onToggle={() => setLogExpanded(v => !v)} /></div>
             <div className="flex-1" />
           </div>

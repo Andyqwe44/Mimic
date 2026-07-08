@@ -448,6 +448,16 @@ Local type declarations in `monitor_web/src/webview2.d.ts` cover:
 Never use `any` for WebView2 event handlers — the `.d.ts` enables compile-time checking
 of method names (e.g. `e.additionalData` not `e.getAdditionalData()`).
 
+## Recent Fixes (2026-07-09)
+
+### Split capture method: snapshot vs stream + render method selector
+Settings → Capture card now has three independent selectors:
+- **📷 Snapshot** + **▶ Stream** side-by-side with vertical separator, each with Auto toggle
+- **🎨 Render Method**: SharedBuffer (current) / H.264 (planned) / H.265 (planned, grayed out)
+- `forceMethod`/`autoMethod` split into `snapMethod`/`streamMethod` + `autoSnap`/`autoStream` states
+- `renderMethod` state controls transport param in `capture_stream_start`
+- Method selectors moved from ConnectionPanel to Capture SettingsCard
+
 ## Recent Fixes (2026-07-08)
 
 ### Method routing — 铁律 5 full enforcement (major)
