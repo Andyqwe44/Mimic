@@ -351,7 +351,7 @@ static std::string cmd_capture_window(uint64_t hwnd, const std::string& method) 
     }
 
     auto json = frame_to_json(r, wx, wy, sw, sh, 0);
-    LOG("cmd", "capture_window: %dx%d method=%s → %zub", r.w, r.h, r.method.c_str(), json.size());
+    LOG("cmd", "capture_window: %dx%d method=%s -> %zub", r.w, r.h, r.method.c_str(), json.size());
     return json;
 }
 
@@ -511,7 +511,7 @@ static std::string cmd_read_logs(int max_files) {
     std::string files = fjson ? fjson : "[]";
     capture_log_free(fjson);
 
-    LOG("cmd", "read_logs: max_files=%d → %s", max_files, files.c_str());
+    LOG("cmd", "read_logs: max_files=%d -> %s", max_files, files.c_str());
     return "{\"files\":" + files + "}";
 }
 
@@ -525,18 +525,16 @@ static std::string cmd_read_log_file(const std::string& filename) {
     char* content = capture_log_read_file(filename.c_str());
     std::string result = content ? content : "";
     capture_log_free(content);
-    LOG("cmd", "read_log_file: %s → %zub", filename.c_str(), result.size());
+    LOG("cmd", "read_log_file: %s -> %zub", filename.c_str(), result.size());
     return "{\"filename\":\"" + json_escape(filename) + "\",\"content\":\"" + json_escape(result) + "\"}";
 }
 
 static std::string cmd_open_log_dir() {
-    // Get absolute path to log directory
-    char cwd[MAX_PATH];
-    GetCurrentDirectoryA(MAX_PATH, cwd);
-    std::string log_path = std::string(cwd) + "\\log";
-    // Open in Explorer
-    ShellExecuteA(nullptr, "open", log_path.c_str(), nullptr, nullptr, SW_SHOW);
-    LOG("cmd", "open_log_dir: %s", log_path.c_str());
+    const char* log_path = capture_log_get_dir();
+    if (log_path && log_path[0]) {
+        ShellExecuteA(nullptr, "open", log_path, nullptr, nullptr, SW_SHOW);
+        LOG("cmd", "open_log_dir: %s", log_path);
+    }
     return R"({"ok":true})";
 }
 
@@ -549,8 +547,8 @@ static std::string cmd_clear_log() {
         if (g_stream_handle) { wgc_stream_stop(g_stream_handle); g_stream_handle = nullptr; }
     }
     capture_log_shutdown();
-    capture_log_init("agent", APP_VERSION, "log/", 5, 5000);
-    LOG("cmd", "log cleared");
+    capture_log_init("agent", APP_VERSION, capture_log_get_dir(), 5, 5000);
+    LOG("cmd", "log cleared -- previous session archived, new session started");
     return R"({"ok":true})";
 }
 
@@ -690,10 +688,8 @@ std::string dispatch_command(const std::string& json) {
         result = "\"" APP_VERSION "\"";
     }
     else if (cmd == "get_log_dir") {
-        char cwd[MAX_PATH];
-        GetCurrentDirectoryA(MAX_PATH, cwd);
-        std::string log_dir = std::string(cwd) + "\\log";
-        result = "{\"dir\":\"" + json_escape(log_dir) + "\"}";
+        const char* log_dir = capture_log_get_dir();
+        result = "{\"dir\":\"" + json_escape(log_dir ? log_dir : "") + "\"}";
     }
     else if (cmd == "pick_log_dir") {
         // Windows folder picker via IFileDialog (Vista+)
@@ -784,7 +780,13 @@ static void mta_daemon() {
 
 void backend_init() {
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED); // STA for WebView2/WIC
-    capture_log_init("agent", APP_VERSION, "log/", 5, 5000);
+    // Compute absolute log path from exe directory (not CWD — avoid scattered logs)
+    char exe_dir[MAX_PATH];
+    GetModuleFileNameA(nullptr, exe_dir, MAX_PATH);
+    char* last_slash = strrchr(exe_dir, '\\');
+    if (last_slash) *last_slash = '\0';
+    std::string log_dir = std::string(exe_dir) + "\\log";
+    capture_log_init("agent", APP_VERSION, log_dir.c_str(), 5, 5000);
     capture_log_set_notify(on_log_notify);  // C++ LOG() → push to TS in real-time
     init_wic();
     tcp_server_start();

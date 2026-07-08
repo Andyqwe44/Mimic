@@ -36,21 +36,13 @@ static int                g_ring_idx = 0;  // write position (circular)
 static bool               g_ring_full = false;
 static bool               g_initialized = false;
 
-// ── High-precision timestamp ────────────────────────────
+// ── Local-time timestamp with milliseconds ──────────────
 static std::string _timestamp() {
-    LARGE_INTEGER freq, cnt;
-    QueryPerformanceFrequency(&freq);
-    QueryPerformanceCounter(&cnt);
-    uint64_t us = (uint64_t)(cnt.QuadPart * 1'000'000 / freq.QuadPart);
-
-    time_t sec = (time_t)(us / 1'000'000);
-    struct tm tm;
-    localtime_s(&tm, &sec);
-    uint64_t ms = (us / 1000) % 1000;
-
+    SYSTEMTIME st;
+    GetLocalTime(&st);
     char buf[16];
-    snprintf(buf, sizeof(buf), "%02d:%02d:%02d.%03lld",
-             tm.tm_hour, tm.tm_min, tm.tm_sec, (long long)ms);
+    snprintf(buf, sizeof(buf), "%02d:%02d:%02d.%03d",
+             st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
     return buf;
 }
 
@@ -140,6 +132,11 @@ void capture_log_init(const char* app_name,
     g_max_files = max_files > 0 ? max_files : 5;
     g_ring_cap = ring_size > 0 ? ring_size : 5000;
 
+    // Clear ring buffer — fresh start for new session
+    g_ring.clear();
+    g_ring_idx = 0;
+    g_ring_full = false;
+
     // Create log directory
     CreateDirectoryA(log_dir, nullptr);
 
@@ -170,12 +167,17 @@ void capture_log_init(const char* app_name,
         fflush(g_file);
     }
 
-    // Write to ring buffer
+    // Write session header to ring buffer (matches file content)
     {
         auto ts = _timestamp();
-        char buf[512];
-        snprintf(buf, sizeof(buf), "=== %s v%s ===", app_name, app_version);
-        _write_ring(ts, buf);
+        _write_ring(ts, "=== agent v0.3.0 ===");
+        char info[256];
+        snprintf(info, sizeof(info), "Session: %04d%02d%02d_%02d%02d%02d | PID: %lu",
+                 tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+                 tm.tm_hour, tm.tm_min, tm.tm_sec,
+                 (unsigned long)GetCurrentProcessId());
+        _write_ring(ts, info);
+        _write_ring(ts, fname);
     }
 
     // Cleanup old log files
@@ -307,12 +309,11 @@ char* capture_log_list_files(int max_files) {
         return CompareFileTime(&a.ft, &b.ft) > 0;
     });
 
-    // Build JSON — skip current session file, take up to max_files history files
+    // Build JSON — include current session file (matches what Explorer shows)
     std::string json = "[";
     int taken = 0;
     int limit = max_files > 0 ? max_files : 5;
     for (size_t i = 0; i < files.size() && taken < limit; i++) {
-        if (!g_current_file.empty() && files[i].name == g_current_file) continue;
         if (taken > 0) json += ",";
         char buf[512];
         snprintf(buf, sizeof(buf), R"({"name":"%s","size":%zu})",
@@ -329,7 +330,10 @@ char* capture_log_list_files(int max_files) {
 
 char* capture_log_read_file(const char* filename) {
     std::lock_guard<std::mutex> lk(g_mutex);
-    std::string path = g_log_dir + filename;
+    std::string path = g_log_dir;
+    if (!path.empty() && path.back() != '\\' && path.back() != '/')
+        path += '\\';
+    path += filename;
     FILE* f = fopen(path.c_str(), "rb");
     if (!f) {
         char* empty = (char*)malloc(1);
@@ -354,4 +358,8 @@ void capture_log_free(char* s) {
 void capture_log_flush(void) {
     std::lock_guard<std::mutex> lk(g_mutex);
     if (g_file) fflush(g_file);
+}
+
+const char* capture_log_get_dir(void) {
+    return g_log_dir.c_str();
 }

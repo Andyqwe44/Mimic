@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { Play, Square, Camera, Monitor, Settings, Moon, Sun, ChevronDown, ChevronLeft, FileText, Trash2, X, MonitorUp, Search, MonitorSmartphone, RefreshCw, FolderOpen, Cpu, Pencil } from 'lucide-react'
+import { Play, Square, Camera, Monitor, Settings, Moon, Sun, ChevronDown, ChevronLeft, FileText, Scissors, X, MonitorUp, Search, MonitorSmartphone, RefreshCw, FolderOpen, Cpu, Pencil, Copy, Check } from 'lucide-react'
 // ── WebView2 WebMessage bridge (replaces Tauri invoke) ──
 type PendingCall = {
   resolve: (value: any) => void;
@@ -844,8 +844,10 @@ class LogManager {
   clear() {
     this.entries = []
     this.listeners.forEach(f => f())
+    this.initialSyncDone = false  // allow re-sync after C++ ring buffer reset
     hostCall('clear_log').catch(() => {})
-    this.add('[Session] new session started (previous log archived)')
+    // Re-sync C++ ring buffer (header + initial LOG entries)
+    setTimeout(() => this.initSync(), 100)
   }
 
   async loadHistory(maxFiles: number): Promise<HistoryFile[]> {
@@ -876,6 +878,8 @@ function LogPanel({ compact, expanded: exp, onToggle, keepFiles }: { compact?: b
   const [historyFiles, setHistoryFiles] = useState<HistoryFile[]>([])
   const [openFiles, setOpenFiles] = useState<Set<number>>(new Set())
   const [currentExpanded, setCurrentExpanded] = useState(true)
+  const [sessionCopied, setSessionCopied] = useState(false)
+  const [copiedFileIdx, setCopiedFileIdx] = useState<number | null>(null)
   const [entries, setEntries] = useState(logMgr.getAll())
 
   // Subscribe to LogManager for live updates
@@ -929,8 +933,10 @@ function LogPanel({ compact, expanded: exp, onToggle, keepFiles }: { compact?: b
               <span className="text-xs text-text-muted">({displayLines.length})</span>
             </div>
             <div className="flex items-center gap-0.5">
-              <Tooltip text="清空当前日志"><button onClick={e => { e.stopPropagation(); logMgr.clear() }}
-                className="p-1 rounded-md text-text-secondary hover:text-error hover:bg-bg-tertiary transition-colors"><Trash2 className="w-3.5 h-3.5" /></button></Tooltip>
+              <Tooltip text="截断日志（保存当前并重新开始）"><button onClick={e => { e.stopPropagation(); logMgr.clear(); setOpenFiles(new Set()); logMgr.loadHistory(keepFiles ?? 5).then(setHistoryFiles) }}
+                className="p-1 rounded-md text-text-secondary hover:text-amber-400 hover:bg-bg-tertiary transition-colors"><Scissors className="w-3.5 h-3.5" /></button></Tooltip>
+              <Tooltip text="复制全部日志"><button onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(displayLines.join('\n')); setSessionCopied(true); setTimeout(() => setSessionCopied(false), 1500) }}
+                className="p-1 rounded-md text-text-secondary hover:text-accent hover:bg-bg-tertiary transition-colors">{sessionCopied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}</button></Tooltip>
               <ChevronDown className={`w-4 h-4 text-text-muted transition-transform duration-150 shrink-0 ${currentExpanded?'rotate-180':''}`} />
             </div>
           </div>
@@ -942,7 +948,7 @@ function LogPanel({ compact, expanded: exp, onToggle, keepFiles }: { compact?: b
                 {displayLines.length === 0
                   ? <div className="text-text-muted text-center py-4">No logs yet</div>
                   : displayLines.map((l, i) => (
-                      <div key={`cur-${i}`} className="text-text-muted">{l}</div>
+                      <div key={`cur-${i}`} className="text-text-muted whitespace-pre-wrap break-all" style={{paddingLeft:'16ch',textIndent:'-16ch'}}>{l}</div>
                     ))
                 }
               </div>
@@ -979,7 +985,11 @@ function LogPanel({ compact, expanded: exp, onToggle, keepFiles }: { compact?: b
                   <span className="text-sm font-medium text-text-primary truncate">{f.name}</span>
                   <span className="text-xs text-text-muted shrink-0">{f.lines.length > 0 ? `${f.lines.length} lines` : 'click to load'}</span>
                 </div>
-                <ChevronDown className={`w-4 h-4 text-text-muted transition-transform duration-150 shrink-0 ${open?'rotate-180':''}`} />
+                <div className="flex items-center gap-0.5">
+                  <Tooltip text="复制文件内容"><button onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(f.lines.join('\n')); setCopiedFileIdx(fi); setTimeout(() => setCopiedFileIdx(null), 1500) }}
+                    className="p-1 rounded-md text-text-secondary hover:text-accent hover:bg-bg-tertiary transition-colors">{copiedFileIdx === fi ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}</button></Tooltip>
+                  <ChevronDown className={`w-4 h-4 text-text-muted transition-transform duration-150 shrink-0 ${open?'rotate-180':''}`} />
+                </div>
               </div>
               <div className="grid transition-[grid-template-rows] duration-150 ease-out"
                 style={{ gridTemplateRows: open ? '1fr' : '0fr' }}>
@@ -989,7 +999,7 @@ function LogPanel({ compact, expanded: exp, onToggle, keepFiles }: { compact?: b
                     {f.lines.length === 0
                       ? <div className="text-text-muted text-center py-4">Loading...</div>
                       : f.lines.map((l, i) => (
-                          <div key={i} className="text-text-muted">{l}</div>
+                          <div key={i} className="text-text-muted whitespace-pre-wrap break-all" style={{paddingLeft:'16ch',textIndent:'-16ch'}}>{l}</div>
                         ))
                     }
                   </div>
@@ -1018,10 +1028,10 @@ function LogPanel({ compact, expanded: exp, onToggle, keepFiles }: { compact?: b
           <span className="text-xs text-text-muted">({displayLines.length})</span>
         </div>
         <div className="flex items-center gap-0.5">
-          <Tooltip text="清空日志">
-            <button onClick={e => { e.stopPropagation(); logMgr.clear() }}
-              className="p-1 rounded-md text-text-secondary hover:text-error hover:bg-bg-tertiary transition-colors">
-              <Trash2 className="w-3.5 h-3.5" />
+          <Tooltip text="截断日志（保存当前并重新开始）">
+            <button onClick={e => { e.stopPropagation(); logMgr.clear(); setOpenFiles(new Set()); logMgr.loadHistory(keepFiles ?? 5).then(setHistoryFiles) }}
+              className="p-1 rounded-md text-text-secondary hover:text-amber-400 hover:bg-bg-tertiary transition-colors">
+              <Scissors className="w-3.5 h-3.5" />
             </button>
           </Tooltip>
           <ChevronDown className={`w-4 h-4 text-text-muted transition-transform duration-150 ${expanded?'rotate-180':''}`} />

@@ -67,6 +67,10 @@ void capture_log_set_notify(capture_log_notify_cb cb);
 /// (avoids pushing back to TS what TS just sent).
 void capture_log_write_ui(const char* msg);
 
+/// Return the absolute log directory path (set at init).
+/// Returns "" if logger not initialized.
+const char* capture_log_get_dir(void);
+
 #ifdef __cplusplus
 }
 #endif

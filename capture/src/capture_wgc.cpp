@@ -372,7 +372,7 @@ bool WgcCapture::capture(WgcFrame& out, WgcTiming* timing) {
 
     // Format change detection
     if (desc.Format != format_) {
-        LOG("wgc", "format changed %d→%d, marking inactive",
+        LOG("wgc", "format changed %d->%d, marking inactive",
                 (int)format_, (int)desc.Format);
         ok_ = false;
         frame_cv_.notify_all();

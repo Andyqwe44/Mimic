@@ -218,6 +218,13 @@ Key logger functions:
 | `capture_log_write_msg(tag, msg)` | C++ LOG() — writes file + ring, triggers notify callback |
 | `capture_log_write_ui(msg)` | TS log_ui_event — writes file + ring, NO notify (TS already knows) |
 | `capture_log_set_notify(cb)` | Register callback for C++ → TS real-time push |
+| `capture_log_get_dir()` | Return absolute log directory path (set at init) |
+
+### Log rotation (截断)
+
+`clear_log` does NOT delete — it archives: `capture_log_shutdown` → `capture_log_init`.
+Old file closed (becomes history), new file created, `_cleanup_old_logs` keeps only newest N.
+Ring buffer cleared and re-synced via `read_live_log`.
 
 ### Streaming pipeline
 
