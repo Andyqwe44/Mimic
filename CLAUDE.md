@@ -220,11 +220,13 @@ Key logger functions:
 | `capture_log_set_notify(cb)` | Register callback for C++ → TS real-time push |
 | `capture_log_get_dir()` | Return absolute log directory path (set at init) |
 
-### Log rotation (截断)
+### Log lifecycle
 
-`clear_log` does NOT delete — it archives: `capture_log_shutdown` → `capture_log_init`.
-Old file closed (becomes history), new file created, `_cleanup_old_logs` keeps only newest N.
-Ring buffer cleared and re-synced via `read_live_log`.
+Single log session from app start to close/crash. No truncation/split in UI.
+`capture_log_init` at startup, `capture_log_shutdown` at exit.
+`clear_log` C++ command preserved (archives + rotates) but not exposed in UI.
+Ring buffer + file cleared on each new session.
+History files accessible via Log tab; each tile has refresh + copy buttons.
 
 ### Streaming pipeline
 
@@ -359,3 +361,10 @@ Yellow border overlay windows now use `WS_EX_TOOLWINDOW` — no longer appear in
 
 ### Vite HMR fix
 Explicit `hmr: { protocol: 'ws', host: 'localhost' }` in vite.config.ts for WebView2 compatibility.
+
+### Log UX: remove truncation, add copy + refresh (2026-07-08)
+Removed 截断 (scissors) button from Current Session + right panel Log.
+Replaced with copy button (checkmark animation) in right panel Log.
+Added refresh button (with spin animation) to each history file tile.
+History tile buttons ordered: refresh → copy → expand (copy rightmost).
+Removed unused `IconBtn` component; fixed TS errors (`_setPendingWin`, `STATE_LABEL` index).

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { Play, Square, Camera, Monitor, Settings, Moon, Sun, ChevronDown, ChevronLeft, FileText, Scissors, X, MonitorUp, Search, MonitorSmartphone, RefreshCw, FolderOpen, Cpu, Pencil, Copy, Check } from 'lucide-react'
+import { Play, Square, Camera, Monitor, Settings, Moon, Sun, ChevronDown, ChevronLeft, FileText, X, MonitorUp, Search, MonitorSmartphone, RefreshCw, FolderOpen, Cpu, Pencil, Copy, Check } from 'lucide-react'
 // ── WebView2 WebMessage bridge (replaces Tauri invoke) ──
 type PendingCall = {
   resolve: (value: any) => void;
@@ -123,17 +123,6 @@ function ThemeBtn() {
 }
 
 // ═══ Reusable components with REQUIRED title (compile-time enforced) ═══
-function IconBtn({ icon, onClick, title, active }: { icon: React.ReactNode; onClick?: () => void; title: string; active?: boolean }) {
-  return (
-    <Tooltip text={title}>
-      <button onClick={onClick}
-        className={`p-2 rounded-md transition-colors ${active ? 'bg-accent/10 text-accent' : 'hover:bg-bg-hover text-text-secondary'}`}>
-        {icon}
-      </button>
-    </Tooltip>
-  )
-}
-
 function ActionBtn({ icon, label, title, variant, onClick, className }: {
   icon: React.ReactNode; label: string; title: string;
   variant: 'primary' | 'danger' | 'outline';
@@ -236,7 +225,7 @@ function TargetPickerModal({ open, onClose, onSelectWindow, onSelectMode }: {
   const [filter, setFilter] = useState('all')
   const [loading, setLoading] = useState(false)
   // ── page 2: pending window (awaiting mode) ──
-  const [pendingWin, setPendingWin] = useState<WindowInfo | null>(null)
+  const [pendingWin, _setPendingWin] = useState<WindowInfo | null>(null)
 
   // Reset on open — delay transition enable so stale page state doesn't animate
   useEffect(() => {
@@ -493,7 +482,7 @@ function ConnectionPanel({ onSelect, onDisconnect, forceMethod, setForceMethod, 
             {false && expectedCaptureState && winState !== 'desktop' && expectedCaptureState !== winState && (
               <div className="text-xs text-amber-400 bg-amber-500/10 rounded-lg px-2 py-1.5 flex items-center gap-1.5">
                 <span className="shrink-0">⚠</span>
-                <span>预期状态: <b>{STATE_LABEL[expectedCaptureState] || expectedCaptureState}</b>，实际状态: <b>{STATE_LABEL[winState] || winState}</b>。截图可能失败或画面异常。</span>
+                <span>预期状态: <b>{STATE_LABEL[expectedCaptureState || 'unknown'] || expectedCaptureState}</b>，实际状态: <b>{STATE_LABEL[winState] || winState}</b>。截图可能失败或画面异常。</span>
               </div>
             )}
             <div className="flex justify-between">
@@ -880,6 +869,7 @@ function LogPanel({ compact, expanded: exp, onToggle, keepFiles }: { compact?: b
   const [currentExpanded, setCurrentExpanded] = useState(true)
   const [sessionCopied, setSessionCopied] = useState(false)
   const [copiedFileIdx, setCopiedFileIdx] = useState<number | null>(null)
+  const [refreshingIdx, setRefreshingIdx] = useState<number | null>(null)
   const [entries, setEntries] = useState(logMgr.getAll())
 
   // Subscribe to LogManager for live updates
@@ -933,8 +923,6 @@ function LogPanel({ compact, expanded: exp, onToggle, keepFiles }: { compact?: b
               <span className="text-xs text-text-muted">({displayLines.length})</span>
             </div>
             <div className="flex items-center gap-0.5">
-              <Tooltip text="截断日志（保存当前并重新开始）"><button onClick={e => { e.stopPropagation(); logMgr.clear(); setOpenFiles(new Set()); logMgr.loadHistory(keepFiles ?? 5).then(setHistoryFiles) }}
-                className="p-1 rounded-md text-text-secondary hover:text-amber-400 hover:bg-bg-tertiary transition-colors"><Scissors className="w-3.5 h-3.5" /></button></Tooltip>
               <Tooltip text="复制全部日志"><button onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(displayLines.join('\n')); setSessionCopied(true); setTimeout(() => setSessionCopied(false), 1500) }}
                 className="p-1 rounded-md text-text-secondary hover:text-accent hover:bg-bg-tertiary transition-colors">{sessionCopied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}</button></Tooltip>
               <ChevronDown className={`w-4 h-4 text-text-muted transition-transform duration-150 shrink-0 ${currentExpanded?'rotate-180':''}`} />
@@ -986,6 +974,8 @@ function LogPanel({ compact, expanded: exp, onToggle, keepFiles }: { compact?: b
                   <span className="text-xs text-text-muted shrink-0">{f.lines.length > 0 ? `${f.lines.length} lines` : 'click to load'}</span>
                 </div>
                 <div className="flex items-center gap-0.5">
+                  <Tooltip text="刷新文件内容"><button onClick={e => { e.stopPropagation(); setRefreshingIdx(fi); hostCall('read_log_file', { filename: f.name }).then(res => { const content = res?.content || ''; const newLines = content ? content.split('\n') : [] as string[]; setHistoryFiles(prev => prev.map((hf, i) => i === fi ? { ...hf, lines: newLines } : hf)); }).catch(() => {}).finally(() => setRefreshingIdx(null)) }}
+                    className={`p-1 rounded-md text-text-secondary hover:text-accent hover:bg-bg-tertiary transition-colors ${refreshingIdx === fi ? 'animate-spin' : ''}`}><RefreshCw className="w-3.5 h-3.5" /></button></Tooltip>
                   <Tooltip text="复制文件内容"><button onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(f.lines.join('\n')); setCopiedFileIdx(fi); setTimeout(() => setCopiedFileIdx(null), 1500) }}
                     className="p-1 rounded-md text-text-secondary hover:text-accent hover:bg-bg-tertiary transition-colors">{copiedFileIdx === fi ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}</button></Tooltip>
                   <ChevronDown className={`w-4 h-4 text-text-muted transition-transform duration-150 shrink-0 ${open?'rotate-180':''}`} />
@@ -1028,10 +1018,10 @@ function LogPanel({ compact, expanded: exp, onToggle, keepFiles }: { compact?: b
           <span className="text-xs text-text-muted">({displayLines.length})</span>
         </div>
         <div className="flex items-center gap-0.5">
-          <Tooltip text="截断日志（保存当前并重新开始）">
-            <button onClick={e => { e.stopPropagation(); logMgr.clear(); setOpenFiles(new Set()); logMgr.loadHistory(keepFiles ?? 5).then(setHistoryFiles) }}
-              className="p-1 rounded-md text-text-secondary hover:text-amber-400 hover:bg-bg-tertiary transition-colors">
-              <Scissors className="w-3.5 h-3.5" />
+          <Tooltip text="复制日志">
+            <button onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(displayLines.join('\n')); setSessionCopied(true); setTimeout(() => setSessionCopied(false), 1500) }}
+              className="p-1 rounded-md text-text-secondary hover:text-accent hover:bg-bg-tertiary transition-colors">
+              {sessionCopied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
             </button>
           </Tooltip>
           <ChevronDown className={`w-4 h-4 text-text-muted transition-transform duration-150 ${expanded?'rotate-180':''}`} />
