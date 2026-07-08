@@ -53,7 +53,7 @@ function hostCall(cmd: string, args?: Record<string, any>): Promise<any> {
 }
 
 // ═══ Tooltip ── 300ms delay, portal to body, smart positioning ═══
-function Tooltip({ text, children }: { text: string; children: React.ReactElement }) {
+function Tooltip({ text, children, className }: { text: string; children: React.ReactElement; className?: string }) {
   const [show, setShow] = useState(false)
   const [pos, setPos] = useState({ x: 0, y: 0, placement: 'top' as 'top'|'bottom' })
   const timer = useRef<number>(0)
@@ -75,7 +75,7 @@ function Tooltip({ text, children }: { text: string; children: React.ReactElemen
   }
 
   return (
-    <div ref={ref} className="relative inline-flex"
+    <div ref={ref} className={`relative inline-flex ${className || ''}`}
       onMouseEnter={() => { updatePos(); timer.current = window.setTimeout(() => { updatePos(); setShow(true) }, 300) }}
       onMouseLeave={() => { clearTimeout(timer.current); setShow(false) }}
       onMouseMove={() => { if (!show) { clearTimeout(timer.current); timer.current = window.setTimeout(() => { updatePos(); setShow(true) }, 300) } }}>
@@ -98,6 +98,11 @@ function Tooltip({ text, children }: { text: string; children: React.ReactElemen
 // ═══ Layout ───
 const MIN_LEFT_WIDTH = 360
 const DEFAULT_RIGHT_WIDTH = 324
+
+// Shared CSS: collapsible card header (used in 6 places)
+const COLLAPSIBLE_HEADER = 'w-full flex items-center justify-between px-3 py-2 hover:bg-bg-hover cursor-pointer transition-colors outline-none'
+// Shared CSS: selectable option button (capture method + transport)
+const SELECTABLE_BTN = 'flex items-center w-full px-3 py-2 rounded-lg border transition-colors'
 
 // ═══ Theme btn ───
 function ThemeBtn() {
@@ -160,8 +165,8 @@ function TopBar({ tab, setTab, running, onStart, onStop }: {
       <div className="flex-1 flex items-center h-full overflow-x-auto">
         {tabs.map(t => (
           <button key={t.id} onClick={() => { setTab(t.id); addLog(`[Tab] ${t.label}`) }}
-            className={`group flex items-center gap-1.5 h-full px-3 cursor-pointer border-r border-border min-w-[100px] transition-colors
-              ${t.id === tab ? 'bg-bg-primary text-accent border-b-[3px] border-b-accent' : 'bg-bg-tertiary text-text-secondary hover:bg-bg-hover border-b-[3px] border-b-transparent'}`}>
+            className={`group flex items-center gap-1.5 h-full px-3 cursor-pointer border-r border-border border-b-[3px] min-w-[100px] transition-colors
+              ${t.id === tab ? 'bg-bg-primary text-accent border-b-accent' : 'bg-bg-tertiary text-text-secondary hover:bg-bg-hover border-b-transparent'}`}>
             {t.icon}
             <span className="text-sm font-medium">{t.label}</span>
           </button>
@@ -454,7 +459,7 @@ function ConnectionPanel({ onSelect, onDisconnect, forceMethod, setForceMethod, 
   return (
     <div className="bg-bg-secondary rounded-xl ring-1 ring-inset ring-border overflow-hidden">
       <div role="button" tabIndex={0} onClick={() => { onToggle(); addLog(`[Connection] ${!expanded ? 'expanded' : 'collapsed'}`) }} onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){(e.currentTarget as HTMLElement).click()}}}
-        className="w-full flex items-center justify-between px-3 py-2 hover:bg-bg-hover cursor-pointer transition-colors outline-none">
+        className={COLLAPSIBLE_HEADER}>
         <div className="flex items-center gap-2 min-w-0">
           <MonitorUp className="w-4 h-4 text-text-secondary shrink-0" />
           <span className="text-sm font-medium text-text-primary shrink-0">Connection</span>
@@ -472,7 +477,7 @@ function ConnectionPanel({ onSelect, onDisconnect, forceMethod, setForceMethod, 
       </div>
       <div className="grid transition-[grid-template-rows] duration-150 ease-out"
         style={{ gridTemplateRows: expanded ? '1fr' : '0fr' }}>
-        <div className="overflow-hidden min-h-0">
+        <div className="overflow-hidden min-h-0" data-layout-measure="">
           <div className="border-t border-border" />
           <div className="max-h-[360px] overflow-y-auto p-3 space-y-2">
             {cantCapture && (
@@ -491,7 +496,7 @@ function ConnectionPanel({ onSelect, onDisconnect, forceMethod, setForceMethod, 
               <div className="flex items-center gap-1.5">
                 <Tooltip text="已选择的目标窗口（只读，请用Select选择）">
                   <input value={selTitle} readOnly placeholder="Window Title"
-                    className="w-36 h-8 rounded-lg border border-border bg-bg-primary px-2 text-xs text-text-primary outline-none cursor-default text-text-muted truncate" />
+                    className="w-36 h-8 rounded-lg border border-border bg-bg-primary px-2 text-xs outline-none cursor-default text-text-muted truncate" />
                 </Tooltip>
                 {onDisconnect && (
                   <Tooltip text="断开当前窗口连接，回到桌面">
@@ -532,7 +537,7 @@ function ConnectionPanel({ onSelect, onDisconnect, forceMethod, setForceMethod, 
                     : autoMethod && isActive ? 'border-amber-500 bg-amber-500/10 cursor-not-allowed'
                     : autoMethod ? 'border-border bg-bg-primary opacity-50 cursor-not-allowed'
                     : 'border-border bg-bg-primary hover:bg-bg-hover cursor-pointer'
-                  return <Tooltip key={m.v} text={m.desc}><label className={`flex items-center w-full px-3 py-2 rounded-lg border transition-colors ${ringClass}`}><input type="radio" name="method" value={m.v} checked={isActive} disabled={autoMethod} onChange={e => { if (!autoMethod) { setForceMethod(e.target.value); addLog(`[Setting] capture method = ${e.target.value}`) } }} className="sr-only" /><span className="text-xs font-medium text-text-primary">{m.name} <span className="text-text-muted">({m.eng})</span></span><span className="ml-auto text-xs font-medium text-text-primary">{m.rec}</span></label></Tooltip>
+                  return <Tooltip key={m.v} text={m.desc}><label className={`${SELECTABLE_BTN} ${ringClass}`}><input type="radio" name="method" value={m.v} checked={isActive} disabled={autoMethod} onChange={e => { if (!autoMethod) { setForceMethod(e.target.value); addLog(`[Setting] capture method = ${e.target.value}`) } }} className="sr-only" /><span className="text-xs font-medium text-text-primary">{m.name} <span className="text-text-muted">({m.eng})</span></span><span className="ml-auto text-xs font-medium text-text-primary">{m.rec}</span></label></Tooltip>
                 })}</div>
               </div>
             )}
@@ -699,7 +704,7 @@ function ScreenshotPanel({ selWin, screenRatio, forceMethod, transportMethod, wi
   return (
     <div className="bg-bg-secondary rounded-xl ring-1 ring-inset ring-border overflow-hidden">
       <div role="button" tabIndex={0} onClick={() => { onToggle(); addLog(`[Screenshot] ${!expanded ? 'expanded' : 'collapsed'}`) }} onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){(e.currentTarget as HTMLElement).click()}}}
-        className="w-full flex items-center justify-between px-3 py-2 hover:bg-bg-hover cursor-pointer transition-colors outline-none">
+        className={COLLAPSIBLE_HEADER}>
         <div className="flex items-center gap-2 min-w-0">
           <Camera className="w-4 h-4 text-text-secondary shrink-0" />
           <span className="text-sm font-medium text-text-primary shrink-0">Screenshot</span>
@@ -740,7 +745,7 @@ function ScreenshotPanel({ selWin, screenRatio, forceMethod, transportMethod, wi
       </div>
       <div className="grid transition-[grid-template-rows] duration-150 ease-out"
         style={{ gridTemplateRows: expanded ? '1fr' : '0fr' }}>
-        <div className="overflow-hidden min-h-0">
+        <div className="overflow-hidden min-h-0" data-layout-measure="">
           <div className="border-t border-border" />
           <div className="p-3">
             <div className="w-full rounded-lg bg-bg-primary overflow-hidden flex items-center justify-center relative"
@@ -877,7 +882,7 @@ function LogPanel({ compact, expanded: exp, onToggle, keepFiles }: { compact?: b
           <div role="button" tabIndex={0}
             onClick={() => { setCurrentExpanded(v => !v); addLog(`[Log] Current Session ${currentExpanded ? 'collapsed' : 'expanded'}`) }}
             onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){(e.currentTarget as HTMLElement).click()}}}
-            className="w-full flex items-center justify-between px-3 py-2 hover:bg-bg-hover cursor-pointer transition-colors outline-none">
+            className={COLLAPSIBLE_HEADER}>
             <div className="flex items-center gap-2">
               <FileText className="w-4 h-4 text-accent shrink-0" />
               <span className="text-sm font-medium text-text-primary">Current Session</span>
@@ -928,7 +933,7 @@ function LogPanel({ compact, expanded: exp, onToggle, keepFiles }: { compact?: b
                   setOpenFiles(s)
                 }}
                 onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){(e.currentTarget as HTMLElement).click()}}}
-                className="w-full flex items-center justify-between px-3 py-2 hover:bg-bg-hover cursor-pointer transition-colors outline-none">
+                className={COLLAPSIBLE_HEADER}>
                 <div className="flex items-center gap-2 min-w-0">
                   <FileText className="w-4 h-4 text-text-muted shrink-0" />
                   <span className="text-sm font-medium text-text-primary truncate">{f.name}</span>
@@ -966,7 +971,7 @@ function LogPanel({ compact, expanded: exp, onToggle, keepFiles }: { compact?: b
   return (
     <div className="bg-bg-secondary rounded-xl ring-1 ring-inset ring-border overflow-hidden flex flex-col min-h-0">
       <div role="button" tabIndex={0} onClick={() => { toggle(); addLog(`[Log] ${!expanded ? 'expanded' : 'collapsed'}`) }} onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){(e.currentTarget as HTMLElement).click()}}}
-        className="w-full flex items-center justify-between px-3 py-2 hover:bg-bg-hover cursor-pointer transition-colors outline-none shrink-0">
+        className={`${COLLAPSIBLE_HEADER} shrink-0`}>
         <div className="flex items-center gap-2">
           <FileText className="w-4 h-4 text-text-secondary" />
           <span className="text-sm font-medium text-text-primary">Log</span>
@@ -984,7 +989,7 @@ function LogPanel({ compact, expanded: exp, onToggle, keepFiles }: { compact?: b
       </div>
       <div className="grid transition-[grid-template-rows] duration-150 ease-out flex-1 min-h-0"
         style={{ gridTemplateRows: expanded ? '1fr' : '0fr' }}>
-        <div className="overflow-hidden min-h-0">
+        <div className="overflow-hidden min-h-0" data-layout-measure="">
           <div className="border-t border-border" />
           <div ref={scrollRef} className="h-[180px] overflow-y-auto p-4">
             {displayLines.length === 0 ? (
@@ -1011,7 +1016,7 @@ function SettingsCard({ icon, title, defaultExpanded, children }: {
   return (
     <div className="bg-bg-secondary rounded-xl ring-1 ring-inset ring-border overflow-hidden">
       <div role="button" tabIndex={0} onClick={() => { setExpanded(!expanded); addLog(`[Settings] ${title} ${!expanded ? 'expanded' : 'collapsed'}`) }} onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){(e.currentTarget as HTMLElement).click()}}}
-        className="w-full flex items-center justify-between px-3 py-2 hover:bg-bg-hover cursor-pointer transition-colors outline-none">
+        className={COLLAPSIBLE_HEADER}>
         <div className="flex items-center gap-2">
           {icon}
           <span className="text-sm font-medium text-text-primary">{title}</span>
@@ -1048,7 +1053,7 @@ function SettingsPage({ forceMethod, setForceMethod, autoMethod, setAutoMethod, 
             { v:'h264',   name:'H.264',  eng:'GPU MFT',      rec:'实验', desc:'GPU MFT encode — experimental' },
           ].map(t =>
             <Tooltip key={t.v} text={t.desc}><button onClick={() => { setTransportMethod(t.v); addLog(`[Transport] ${t.v}`) }}
-              className={`flex items-center w-full px-3 py-2 rounded-lg border transition-colors ${transportMethod === t.v ? 'border-accent bg-accent/10' : 'border-border bg-bg-primary hover:bg-bg-hover'}`}>
+              className={`${SELECTABLE_BTN} ${transportMethod === t.v ? 'border-accent bg-accent/10' : 'border-border bg-bg-primary hover:bg-bg-hover'}`}>
               <span className="text-xs font-medium text-text-primary">{t.name} <span className="text-text-muted">({t.eng})</span></span>
               <span className="ml-auto text-xs font-medium text-text-primary">{t.rec}</span>
             </button></Tooltip>
@@ -1079,8 +1084,8 @@ function SettingsPage({ forceMethod, setForceMethod, autoMethod, setAutoMethod, 
 
       <SettingsCard icon={<Settings className="w-4 h-4 text-text-secondary" />} title="Model Context" defaultExpanded={false}>
         <div className="text-xs text-text-muted mb-2">Base model + fine-tuning adapter for specific games.</div>
-        <div className="flex items-center gap-3 mb-2"><label className="text-sm text-text-secondary w-28 shrink-0">Base Model</label><Tooltip text="基础视觉模型"><input defaultValue="GenericAgent v1" onBlur={e => addLog(`[Setting] base model = ${e.target.value}`)} className="flex-1 h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent" /></Tooltip></div>
-        <div className="flex items-center gap-3"><label className="text-sm text-text-secondary w-28 shrink-0">Adapter</label><Tooltip text="游戏微调权重"><input defaultValue="tictactoe-finetune" onBlur={e => addLog(`[Setting] adapter = ${e.target.value}`)} className="flex-1 h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent" /></Tooltip></div>
+        <div className="flex items-center gap-3 mb-2"><label className="text-sm text-text-secondary w-28 shrink-0">Base Model</label><Tooltip text="基础视觉模型" className="flex-1 min-w-0"><input defaultValue="GenericAgent v1" onBlur={e => addLog(`[Setting] base model = ${e.target.value}`)} className="w-full h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent" /></Tooltip></div>
+        <div className="flex items-center gap-3"><label className="text-sm text-text-secondary w-28 shrink-0">Adapter</label><Tooltip text="游戏微调权重" className="flex-1 min-w-0"><input defaultValue="tictactoe-finetune" onBlur={e => addLog(`[Setting] adapter = ${e.target.value}`)} className="w-full h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent" /></Tooltip></div>
       </SettingsCard>
 
       <SettingsCard icon={<RefreshCw className="w-4 h-4 text-text-secondary" />} title="Update">
@@ -1091,7 +1096,7 @@ function SettingsPage({ forceMethod, setForceMethod, autoMethod, setAutoMethod, 
       </SettingsCard>
 
       <SettingsCard icon={<FileText className="w-4 h-4 text-text-secondary" />} title="Log">
-        <div className="flex items-center gap-3 mb-2"><label className="text-sm text-text-secondary w-28 shrink-0">Directory</label><Tooltip text="日志文件存放路径"><input defaultValue="logs/" className="flex-1 h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent" /></Tooltip><Tooltip text="在资源管理器中打开日志目录"><button onClick={() => hostCall('open_log_dir').catch(() => {})} className="shrink-0 p-1.5 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-tertiary transition-colors"><FolderOpen className="w-4 h-4" /></button></Tooltip></div>
+        <div className="flex items-center gap-3 mb-2"><label className="text-sm text-text-secondary w-28 shrink-0">Directory</label><Tooltip text="日志文件存放路径" className="flex-1 min-w-0"><input defaultValue="logs/" className="w-full h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent" /></Tooltip><Tooltip text="在资源管理器中打开日志目录"><button onClick={() => hostCall('open_log_dir').catch(() => {})} className="shrink-0 p-1.5 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-tertiary transition-colors"><FolderOpen className="w-4 h-4" /></button></Tooltip></div>
         <div className="flex items-center gap-3"><label className="text-sm text-text-secondary w-28 shrink-0">Keep Files</label><Tooltip text="Log 菜单中显示的历史日志文件数"><select value={keepFiles} onChange={e => setKeepFiles(Number(e.target.value))} className="h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent">{[3,5,7,10].map(n=><option key={n} value={n}>{n} files</option>)}</select></Tooltip></div>
       </SettingsCard>
 
@@ -1204,16 +1209,17 @@ export default function App() {
     if (screenshotExpandedRef.current) H.current.S = gh(1); else H.current.Sp = gh(1)
     if (logExpandedRef.current) H.current.L = gh(2); else H.current.Lp = gh(2)
     // Estimate expanded height from collapsed state via inner scrollHeight
+    // Uses data-layout-measure attribute instead of CSS class string (resilient to refactoring)
     if (!connectionExpandedRef.current) {
-      const inner = kids[0].querySelector('.overflow-hidden.min-h-0') as HTMLElement | null
+      const inner = kids[0].querySelector('[data-layout-measure]') as HTMLElement | null
       if (inner) H.current.C = Math.max(H.current.C, gh(0) + inner.scrollHeight)
     }
     if (!screenshotExpandedRef.current) {
-      const inner = kids[1].querySelector('.overflow-hidden.min-h-0') as HTMLElement | null
+      const inner = kids[1].querySelector('[data-layout-measure]') as HTMLElement | null
       if (inner) H.current.S = Math.max(H.current.S, gh(1) + inner.scrollHeight)
     }
     if (!logExpandedRef.current) {
-      const inner = kids[2].querySelector('.overflow-hidden.min-h-0') as HTMLElement | null
+      const inner = kids[2].querySelector('[data-layout-measure]') as HTMLElement | null
       if (inner) H.current.L = Math.max(H.current.L, gh(2) + inner.scrollHeight)
     }
   }, [])
@@ -1316,6 +1322,29 @@ export default function App() {
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
+  // ── Horizontal auto-collapse: when window too narrow for left + right panels ──
+  const H_COLLAPSE_THRESHOLD = MIN_LEFT_WIDTH + DEFAULT_RIGHT_WIDTH + 24 // 360+324+24=708
+  const autoCollapsedByWidth = useRef(false)
+
+  useEffect(() => {
+    const onResize = () => {
+      const w = window.innerWidth
+      if (w < H_COLLAPSE_THRESHOLD && !rightCollapsed) {
+        autoCollapsedByWidth.current = true
+        setRightCollapsed(true)
+        addLog('[Layout] window too narrow → auto-collapse right panel')
+      } else if (w >= H_COLLAPSE_THRESHOLD && rightCollapsed && autoCollapsedByWidth.current) {
+        autoCollapsedByWidth.current = false
+        setRightCollapsed(false)
+        addLog('[Layout] window wide enough → auto-expand right panel')
+      }
+    }
+    window.addEventListener('resize', onResize)
+    // Also check on mount
+    onResize()
+    return () => window.removeEventListener('resize', onResize)
+  }, [rightCollapsed])
+
   const isResizing = useRef(false)
   const [selWindow, setSelWindow] = useState<WindowInfo>({ title: ' Entire Desktop', category: 'desktop', hwnd: 0 })
   const [screenRatio, setScreenRatio] = useState(16/9)
@@ -1373,6 +1402,7 @@ export default function App() {
   }, [winState, autoMethod])
 
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    autoCollapsedByWidth.current = false // manual drag overrides auto-collapse
     e.preventDefault(); isResizing.current = true
     document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none'
     const onMove = (ev: MouseEvent) => {
