@@ -8,7 +8,7 @@
  * Thread-safe. Auto-timestamp. Used by C++ + Rust (FFI) + standalone tools.
  *
  * Usage:
- *   capture_log_init("agent", "0.2.0", "log/", 5, 5000);
+ *   capture_log_init("agent", APP_VERSION, "log/", 5, 5000);  // from monitor_app/src/version.h
  *   LOG("wgc", "init OK: %dx%d", w, h);           // C++
  *   dlog!("stream started for hwnd={}", hwnd);     // Rust → same pipe
  *   char* mem = capture_log_read_memory();
@@ -52,6 +52,20 @@ void capture_log_free(char* s);
 
 /// Flush the log file to disk.
 void capture_log_flush(void);
+
+/// ── Notify callback (push C++ LOG entries to TS) ──
+/// Called every time capture_log_write_msg() writes an entry.
+/// ts=timestamp, tag=log tag, msg=formatted message body (without [tag] prefix).
+/// NOT called for capture_log_write_ui() — TS already knows about its own entries.
+typedef void (*capture_log_notify_cb)(const char* ts, const char* tag, const char* msg);
+
+/// Register a callback for real-time log push (C++ → TS).
+void capture_log_set_notify(capture_log_notify_cb cb);
+
+/// Write a UI-side log entry with [ui] tag.
+/// Same as LOG("ui", msg) but does NOT trigger notify callback
+/// (avoids pushing back to TS what TS just sent).
+void capture_log_write_ui(const char* msg);
 
 #ifdef __cplusplus
 }

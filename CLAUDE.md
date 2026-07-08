@@ -117,7 +117,8 @@ tictactoe/
 │   │   ├── main.cpp              Win32 window + WebView2 + message loop
 │   │   ├── commands.h/cpp        Command dispatch (list_windows, capture, log, stream)
 │   │   ├── mjpeg_server.h/cpp    MJPEG HTTP server (Winsock2 + WIC)
-│   │   └── json_helper.h         Minimal JSON parser for WebMessage
+│   │   ├── json_helper.h         Minimal JSON parser for WebMessage
+│   │   └── version.h             Single canonical APP_VERSION for entire project
 │   ├── dep/                      WebView2 SDK (header + static lib)
 │   │   ├── WebView2.h
 │   │   ├── WebView2EnvironmentOptions.h
@@ -184,9 +185,39 @@ Key: `hostCall` internally extracts `.result` from the `{id, result}` envelope, 
 | `read_log_file` | `{filename}` | `{filename, content}` (按需加载历史文件内容) |
 | `open_log_dir` | — | `{ok:true}` (ShellExecute 打开日志目录) |
 | `clear_log` | — | `{ok:true}` |
-| `log_ui_event` | `{event, detail}` | `{ok:true}` |
+| `log_ui_event` | `{event, detail}` | `{ok:true}` (→ `capture_log_write_ui`, no echo back) |
+| `get_version` | — | `"0.3.0"` (canonical version, single source of truth) |
+| `get_log_dir` | — | `{dir}` — absolute log directory path |
+| `pick_log_dir` | — | `{dir}` — Windows folder picker, returns selected path |
+| `read_live_log` | — | `{lines}` — ring buffer content (init sync only) |
 | `benchmark_methods` | `{hwnd, method}` | `{results:[{method, time_ms, size, ok},...]}` |
 | `debug_dump_frames` | `{enable}` | `{ok:true}` |
+
+### Logging architecture (event-driven, zero polling)
+
+All logs (C++ LOG + TS addLog) flow through the same pipeline — ring buffer + log file.
+Three views (right panel, Log tab, disk files) show identical content in real-time.
+
+```
+TS addLog(msg)
+  ├─ immediate: LogManager.entries → React → GUI (0ms)
+  └─ hostCall('log_ui_event') → capture_log_write_ui(msg)
+       └─ ring buffer + file (no echo back to TS)
+
+C++ LOG(tag, msg)
+  ├─ ring buffer + file
+  └─ on_log_notify(tag, msg) → PostWebMessage({type:'log',...})
+       └─ TS 'message' event → logMgr.addRemote(ts, tag, msg) → GUI
+
+Startup: hostCall('read_live_log') — one-time catch-up of entries before WebView2 was ready.
+```
+
+Key logger functions:
+| Function | Purpose |
+|----------|---------|
+| `capture_log_write_msg(tag, msg)` | C++ LOG() — writes file + ring, triggers notify callback |
+| `capture_log_write_ui(msg)` | TS log_ui_event — writes file + ring, NO notify (TS already knows) |
+| `capture_log_set_notify(cb)` | Register callback for C++ → TS real-time push |
 
 ### Streaming pipeline
 

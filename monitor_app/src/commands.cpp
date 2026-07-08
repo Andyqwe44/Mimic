@@ -10,6 +10,7 @@
 #include "commands.h"
 #include "json_helper.h"
 #include "mjpeg_server.h"
+#include "version.h"
 #include "../../logger/logger.h"
 #include "../../capture/include/capture_methods.h"
 #include "../../capture/include/capture_wgc_ffi.h"
@@ -33,6 +34,7 @@ using Microsoft::WRL::ComPtr;
 
 // Shared by main.cpp — pushed from stream thread
 extern void shared_buffer_push_frame(const uint8_t* bgra, int w, int h);
+extern void PostJsonToWebView(const std::string& json);
 
 static constexpr int MAX_PX = 3840 * 2160 * 4;
 
@@ -111,6 +113,14 @@ static std::string json_escape(const std::string& s) {
         else o.push_back(c);
     }
     return o;
+}
+
+// ── Logger → TS push callback ──────────────────────────────
+static void on_log_notify(const char* ts, const char* tag, const char* msg) {
+    std::string json = "{\"type\":\"log\",\"ts\":\"" + json_escape(ts)
+                     + "\",\"tag\":\"" + json_escape(tag)
+                     + "\",\"msg\":\"" + json_escape(msg) + "\"}";
+    PostJsonToWebView(json);
 }
 
 // ── list_windows ──────────────────────────────────────────
@@ -539,14 +549,26 @@ static std::string cmd_clear_log() {
         if (g_stream_handle) { wgc_stream_stop(g_stream_handle); g_stream_handle = nullptr; }
     }
     capture_log_shutdown();
-    capture_log_init("agent", "0.2.0", "log/", 5, 5000);
+    capture_log_init("agent", APP_VERSION, "log/", 5, 5000);
     LOG("cmd", "log cleared");
     return R"({"ok":true})";
 }
 
 static std::string cmd_log_ui_event(const std::string& event, const std::string& detail) {
-    LOG("ui", "event=%s detail=%s", event.c_str(), detail.c_str());
+    if (detail.empty()) {
+        capture_log_write_ui(event.c_str());
+    } else {
+        std::string combined = event + " | " + detail;
+        capture_log_write_ui(combined.c_str());
+    }
     return R"({"ok":true})";
+}
+
+static std::string cmd_read_live_log() {
+    char* mem = capture_log_read_memory();
+    std::string content = mem ? mem : "";
+    capture_log_free(mem);
+    return "{\"lines\":\"" + json_escape(content) + "\"}";
 }
 
 // ── Benchmark ─────────────────────────────────────────────
@@ -654,6 +676,7 @@ std::string dispatch_command(const std::string& json) {
     else if (cmd == "log_ui_event") {
         result = cmd_log_ui_event(json_get_str(args, "event"), json_get_str(args, "detail"));
     }
+    else if (cmd == "read_live_log") result = cmd_read_live_log();
     else if (cmd == "benchmark_methods") {
         result = cmd_benchmark_methods(json_get_uint64(args, "hwnd"), json_get_str(args, "method"));
     }
@@ -662,6 +685,52 @@ std::string dispatch_command(const std::string& json) {
     }
     else if (cmd == "highlight_window") {
         result = cmd_highlight_window(json_get_uint64(args, "hwnd"));
+    }
+    else if (cmd == "get_version") {
+        result = "\"" APP_VERSION "\"";
+    }
+    else if (cmd == "get_log_dir") {
+        char cwd[MAX_PATH];
+        GetCurrentDirectoryA(MAX_PATH, cwd);
+        std::string log_dir = std::string(cwd) + "\\log";
+        result = "{\"dir\":\"" + json_escape(log_dir) + "\"}";
+    }
+    else if (cmd == "pick_log_dir") {
+        // Windows folder picker via IFileDialog (Vista+)
+        HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        bool alreadyCOM = (hr == S_FALSE || hr == RPC_E_CHANGED_MODE);
+        if (FAILED(hr) && !alreadyCOM) { result = "{\"dir\":\"\"}"; }
+        else {
+            IFileDialog* pfd = nullptr;
+            hr = CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER,
+                                  IID_PPV_ARGS(&pfd));
+            if (SUCCEEDED(hr) && pfd) {
+                DWORD opts;
+                pfd->GetOptions(&opts);
+                pfd->SetOptions(opts | FOS_PICKFOLDERS);
+                hr = pfd->Show(nullptr);
+                if (SUCCEEDED(hr)) {
+                    IShellItem* psi;
+                    hr = pfd->GetResult(&psi);
+                    if (SUCCEEDED(hr) && psi) {
+                        PWSTR pszPath = nullptr;
+                        hr = psi->GetDisplayName(SIGDN_FILESYSPATH, &pszPath);
+                        if (SUCCEEDED(hr) && pszPath) {
+                            int len = WideCharToMultiByte(CP_UTF8, 0, pszPath, -1, nullptr, 0, nullptr, nullptr);
+                            std::string path(len, '\0');
+                            WideCharToMultiByte(CP_UTF8, 0, pszPath, -1, &path[0], len, nullptr, nullptr);
+                            while (!path.empty() && path.back() == '\0') path.pop_back();
+                            result = "{\"dir\":\"" + json_escape(path) + "\"}";
+                            CoTaskMemFree(pszPath);
+                        }
+                        psi->Release();
+                    }
+                }
+                pfd->Release();
+            }
+            if (result.empty()) result = "{\"dir\":\"\"}";
+            if (!alreadyCOM) CoUninitialize();
+        }
     }
     else if (cmd == "screen_info") {
         int sw = GetSystemMetrics(SM_CXSCREEN);
@@ -686,8 +755,8 @@ std::string dispatch_command(const std::string& json) {
     }
 
     if (id <= 0) return result; // fire-and-forget (no id field)
-    if (result.empty()) return "{\"id\":" + std::to_string(id) + ",\"error\":\"unknown command\"}";
-    return "{\"id\":" + std::to_string(id) + ",\"result\":" + result + "}";
+    if (result.empty()) return "{\"error\":\"unknown command\"}";
+    return result;  // HandleWebMessage in main.cpp wraps with {id, result}
 }
 
 // ── Init / Shutdown ───────────────────────────────────────
@@ -715,7 +784,8 @@ static void mta_daemon() {
 
 void backend_init() {
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED); // STA for WebView2/WIC
-    capture_log_init("agent", "0.2.0", "log/", 5, 5000);
+    capture_log_init("agent", APP_VERSION, "log/", 5, 5000);
+    capture_log_set_notify(on_log_notify);  // C++ LOG() → push to TS in real-time
     init_wic();
     tcp_server_start();
 

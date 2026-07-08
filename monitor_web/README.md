@@ -1,13 +1,13 @@
-# Game Agent Monitor v0.2.0
+# Game Agent Monitor v0.3.0
 
-Tauri 2 desktop app for screen capture + monitoring. Part of the TicTacToe → Visual Game AI project.
+Pure C++ WebView2 host for screen capture + monitoring. Part of the TicTacToe → Visual Game AI project.
 
 ## Quick start
 
 ```bash
 cd monitor_web
 npm install
-npm run tauri dev
+npm run dev
 ```
 
 ## Architecture
@@ -37,7 +37,7 @@ monitor_web/
     │   └── transport/pipe.rs         # TCP frame transport
     ├── build.rs                      # Invokes MSVC → capture_lib.lib
     ├── tauri.conf.json               # App metadata + window config
-    └── Cargo.toml                    # v0.2.0
+    └── Cargo.toml                    # v0.3.0 (removed — migrated to C++ WebView2 host)
 
 capture/
 ├── src/

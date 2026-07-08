@@ -195,15 +195,45 @@ void capture_log_shutdown(void) {
     g_initialized = false;
 }
 
+// ── Notify callback (C++ → TS push) ──────────────────────
+static capture_log_notify_cb g_notify_cb = nullptr;
+
 // ── THE ONE write function ───────────────────────────────
 void capture_log_write_msg(const char* tag, const char* msg) {
     auto ts = _timestamp();
     char formatted[4096];
     snprintf(formatted, sizeof(formatted), "[%s] %s", tag, msg);
-    std::lock_guard<std::mutex> lk(g_mutex);
-    _write_file(ts, formatted);
-    _write_ring(ts, formatted);
-    fflush(g_file);
+
+    capture_log_notify_cb cb_copy = nullptr;
+    {
+        std::lock_guard<std::mutex> lk(g_mutex);
+        _write_file(ts, formatted);
+        _write_ring(ts, formatted);
+        fflush(g_file);
+        cb_copy = g_notify_cb;
+    }
+    // Notify TS outside lock to avoid re-entrancy deadlock
+    if (cb_copy) {
+        cb_copy(ts.c_str(), tag, msg);
+    }
+}
+
+void capture_log_set_notify(capture_log_notify_cb cb) {
+    g_notify_cb = cb;
+}
+
+// ── UI-side log (TS → C++, no echo back) ─────────────────
+void capture_log_write_ui(const char* msg) {
+    auto ts = _timestamp();
+    char formatted[4096];
+    snprintf(formatted, sizeof(formatted), "[ui] %s", msg);
+    {
+        std::lock_guard<std::mutex> lk(g_mutex);
+        _write_file(ts, formatted);
+        _write_ring(ts, formatted);
+        fflush(g_file);
+    }
+    // No notify — TS already knows about its own log entries
 }
 
 char* capture_log_read_memory(void) {

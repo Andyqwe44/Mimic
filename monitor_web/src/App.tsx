@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { Play, Square, Camera, Monitor, Settings, Moon, Sun, ChevronDown, ChevronLeft, FileText, Trash2, X, MonitorUp, Search, MonitorSmartphone, RefreshCw, FolderOpen } from 'lucide-react'
+import { Play, Square, Camera, Monitor, Settings, Moon, Sun, ChevronDown, ChevronLeft, FileText, Trash2, X, MonitorUp, Search, MonitorSmartphone, RefreshCw, FolderOpen, Cpu, Pencil } from 'lucide-react'
 // ── WebView2 WebMessage bridge (replaces Tauri invoke) ──
 type PendingCall = {
   resolve: (value: any) => void;
@@ -16,6 +16,11 @@ if (typeof (window as any).chrome?.webview !== 'undefined') {
     try {
       // PostWebMessageAsJson sends a pre-parsed object, not a JSON string
       const msg = typeof e.data === 'string' ? JSON.parse(e.data) : e.data;
+      // Real-time log push from C++ (capture_log_set_notify callback)
+      if (msg.type === 'log') {
+        logMgr.addRemote(msg.ts, msg.tag, msg.msg);
+        return;
+      }
       const pending = _pending.get(msg.id);
       if (pending) {
         clearTimeout(pending.timer);
@@ -153,12 +158,12 @@ function ActionBtn({ icon, label, title, variant, onClick, className }: {
 
 // ═══ TopBar (MXU-style tab bar) ───
 function TopBar({ tab, setTab, running, onStart, onStop }: {
-  tab: string; setTab: (t: 'Dashboard'|'Monitor'|'Log'|'Settings') => void; running: boolean; onStart: () => void; onStop: () => void
+  tab: string; setTab: (t: 'Monitor'|'Log'|'Settings') => void; running: boolean; onStart: () => void; onStop: () => void
 }) {
   const tabs = [
-    { id: 'Dashboard' as const, icon: <Settings className="w-3.5 h-3.5" />, label: 'Dashboard' },
     { id: 'Monitor' as const, icon: <Monitor className="w-3.5 h-3.5" />, label: 'Monitor' },
     { id: 'Log' as const, icon: <FileText className="w-3.5 h-3.5" />, label: 'Log' },
+    { id: 'Settings' as const, icon: <Settings className="w-3.5 h-3.5" />, label: 'Settings' },
   ]
   return (
     <div className="flex items-center h-10 bg-bg-secondary border-b border-border select-none shrink-0">
@@ -179,7 +184,6 @@ function TopBar({ tab, setTab, running, onStart, onStop }: {
         }
         <div className="mx-1 h-4 w-px bg-border" />
         <ThemeBtn />
-        <IconBtn title="设置" icon={<Settings className="w-4 h-4" />} onClick={() => { setTab('Settings'); addLog('[Tab] Settings') }} />
       </div>
     </div>
   )
@@ -777,17 +781,35 @@ function ScreenshotPanel({ selWin, screenRatio, forceMethod, transportMethod, wi
 
 
 // ═══ LogManager — single source of truth for all log views ═══
+// All logs (C++ LOG + TS addLog) flow through C++ ring buffer + log file.
+// TS addLog sends to C++ via log_ui_event → C++ writes to ring buffer + file.
+// LogManager periodically syncs from C++ ring buffer so all three views
+// (right panel, Log tab, log files) show identical content.
 type LogEntry = { ts: string; msg: string }
 function timeStr() { const d = new Date(); return `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}:${d.getSeconds().toString().padStart(2,'0')}.${d.getMilliseconds().toString().padStart(3,'0')}` }
 
 class LogManager {
   private entries: LogEntry[] = []
   private listeners = new Set<() => void>()
+  private initialSyncDone = false
 
   add(msg: string) {
-    this.entries.push({ ts: timeStr(), msg })
+    // Immediate local entry for instant UI feedback (matching C++ ring buffer format)
+    this.entries.push({ ts: timeStr(), msg: `[ui] ${msg}` })
     this.listeners.forEach(f => f())
+    // Also write to C++ log file via log_ui_event → capture_log_write_ui()
     hostCall('log_ui_event', { event: msg, detail: '' }).catch(() => {})
+  }
+
+  // Called from C++ push (capture_log_set_notify callback via WebMessage type:'log')
+  addRemote(ts: string, tag: string, msg: string) {
+    // Don't duplicate if we already have this exact entry
+    const dup = this.entries.find(e => e.ts === ts && e.msg === `[${tag}] ${msg}`)
+    if (dup) return
+    this.entries.push({ ts, msg: `[${tag}] ${msg}` })
+    // Cap at 500 entries
+    if (this.entries.length > 500) this.entries = this.entries.slice(-500)
+    this.listeners.forEach(f => f())
   }
 
   getAll(): LogEntry[] { return this.entries }
@@ -797,24 +819,42 @@ class LogManager {
     return () => { this.listeners.delete(fn) }
   }
 
+  // One-time sync from C++ ring buffer at startup (catches entries before WebView2 was ready)
+  async initSync() {
+    if (this.initialSyncDone) return
+    this.initialSyncDone = true
+    try {
+      const res = await hostCall('read_live_log')
+      const raw = (typeof res === 'string') ? res : (res?.lines || '')
+      if (!raw) return
+      const lines = raw.split('\n').filter((l: string) => l.trim())
+      for (const line of lines) {
+        const m = line.match(/^\[(\d{2}:\d{2}:\d{2}\.\d{3})\]\s\[(\w+)\]\s(.+)$/)
+        if (m) {
+          this.entries.push({ ts: m[1], msg: `[${m[2]}] ${m[3]}` })
+        }
+      }
+      // Sort + cap
+      this.entries.sort((a, b) => a.ts.localeCompare(b.ts))
+      if (this.entries.length > 500) this.entries = this.entries.slice(-500)
+      this.listeners.forEach(f => f())
+    } catch (_) {}
+  }
+
   clear() {
     this.entries = []
     this.listeners.forEach(f => f())
     hostCall('clear_log').catch(() => {})
-    // Start new session marker
     this.add('[Session] new session started (previous log archived)')
   }
 
   async loadHistory(maxFiles: number): Promise<HistoryFile[]> {
     try {
       const data = await hostCall('read_logs', { max_files: maxFiles })
-      // Handle both {files} and {id,result:{files}} wrapping
       const payload = data?.result || data
       const files = payload?.files || []
-      this.add(`[LogMgr] loaded ${files.length} history files (keep=${maxFiles})`)
       return files.map((f: any) => ({ name: f.name, lines: [] as string[] }))
     } catch (e) {
-      this.add(`[LogMgr] loadHistory failed: ${e}`)
       return []
     }
   }
@@ -1034,152 +1074,141 @@ function SettingsCard({ icon, title, defaultExpanded, children }: {
   )
 }
 
-// ═══ Settings Page ═══
-function SettingsPage({ forceMethod, setForceMethod, autoMethod, setAutoMethod, transportMethod, setTransportMethod, selWin, winState, expectedCaptureState, setExpectedCaptureState, onSelect, onDisconnect, keepFiles, setKeepFiles }: { forceMethod: string; setForceMethod: (m: string) => void; autoMethod?: boolean; setAutoMethod?: (v: boolean) => void; transportMethod: string; setTransportMethod: (m: string) => void; selWin?: WindowInfo; winState: string; expectedCaptureState?: string; setExpectedCaptureState?: (s: string) => void; onSelect: (w: WindowInfo) => void; onDisconnect: () => void; keepFiles: number; setKeepFiles: (n: number) => void }) {
-  const colors = ['#3B82F6','#8B5CF6','#EC4899','#F59E0B','#10B981','#EF4444']
-  const [accent, setAccent] = useState('#3B82F6')
-  const [connExpanded, setConnExpanded] = useState(true)
+// ═══ Settings Page (unified Dashboard + Settings) ═══
+
+// ── Status Bar (compact read-only metrics) ──
+function StatusBar({ screen, appVersion }: { screen: string; appVersion: string }) {
   return (
-    <div className="flex-1 overflow-y-auto p-6 space-y-3">
-      <ConnectionPanel onSelect={onSelect} onDisconnect={onDisconnect} forceMethod={forceMethod} setForceMethod={setForceMethod} selWin={selWin} winState={winState} expectedCaptureState={expectedCaptureState} setExpectedCaptureState={setExpectedCaptureState} autoMethod={autoMethod} setAutoMethod={setAutoMethod} showMethod expanded={connExpanded} onToggle={() => setConnExpanded(v => !v)} />
-
-      <SettingsCard icon={<Monitor className="w-4 h-4 text-text-secondary" />} title="Transport">
-        <div className="text-xs text-text-muted mb-2">How frames are sent to the frontend for preview.</div>
-        <div className="flex flex-col gap-3">
-          {[
-            { v:'shared', name:'Canvas', eng:'SharedBuffer', rec:'首选', desc:'Zero-copy BGRA → Canvas — no encode, no HTTP, lowest latency' },
-            { v:'mjpeg',  name:'MJPEG',  eng:'HTTP Stream',  rec:'备用', desc:'JPEG stream via HTTP, browser GPU decode — stable fallback' },
-            { v:'base64', name:'Base64', eng:'JSON',         rec:'旧版', desc:'Raw RGBA via JSON/base64 — legacy, slow' },
-            { v:'h264',   name:'H.264',  eng:'GPU MFT',      rec:'实验', desc:'GPU MFT encode — experimental' },
-          ].map(t =>
-            <Tooltip key={t.v} text={t.desc}><button onClick={() => { setTransportMethod(t.v); addLog(`[Transport] ${t.v}`) }}
-              className={`${SELECTABLE_BTN} ${transportMethod === t.v ? 'border-accent bg-accent/10' : 'border-border bg-bg-primary hover:bg-bg-hover'}`}>
-              <span className="text-xs font-medium text-text-primary">{t.name} <span className="text-text-muted">({t.eng})</span></span>
-              <span className="ml-auto text-xs font-medium text-text-primary">{t.rec}</span>
-            </button></Tooltip>
-          )}
-        </div>
-      </SettingsCard>
-
-      <SettingsCard icon={<Sun className="w-4 h-4 text-text-secondary" />} title="Theme">
-        <div className="flex items-center gap-2 mb-2">
-          <label className="text-sm text-text-secondary w-28 shrink-0">Mode</label>
-          <div className="flex gap-1">
-            {[['Light','light'],['Dark','dark'],['System','system']].map(([l,v])=>
-              <button key={v} onClick={()=>{document.documentElement.classList.toggle('dark',v==='dark'); addLog(`[Theme] ${l}`)}}
-                className="px-3 py-1 rounded-full text-xs font-medium bg-bg-tertiary text-text-secondary hover:bg-bg-hover transition-colors">{l}</button>
-            )}
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <label className="text-sm text-text-secondary w-28 shrink-0">Accent</label>
-          <div className="flex gap-1.5">
-            {colors.map(c=>(
-              <button key={c} onClick={()=>{setAccent(c); addLog(`[Theme] accent = ${c}`)}}
-                className="w-6 h-6 rounded-full border-2 transition-all" style={{background:c,borderColor:accent===c?'white':'transparent'}} />
-            ))}
-          </div>
-        </div>
-      </SettingsCard>
-
-      <SettingsCard icon={<Settings className="w-4 h-4 text-text-secondary" />} title="Model Context" defaultExpanded={false}>
-        <div className="text-xs text-text-muted mb-2">Base model + fine-tuning adapter for specific games.</div>
-        <div className="flex items-center gap-3 mb-2"><label className="text-sm text-text-secondary w-28 shrink-0">Base Model</label><Tooltip text="基础视觉模型" className="flex-1 min-w-0"><input defaultValue="GenericAgent v1" onBlur={e => addLog(`[Setting] base model = ${e.target.value}`)} className="w-full h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent" /></Tooltip></div>
-        <div className="flex items-center gap-3"><label className="text-sm text-text-secondary w-28 shrink-0">Adapter</label><Tooltip text="游戏微调权重" className="flex-1 min-w-0"><input defaultValue="tictactoe-finetune" onBlur={e => addLog(`[Setting] adapter = ${e.target.value}`)} className="w-full h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent" /></Tooltip></div>
-      </SettingsCard>
-
-      <SettingsCard icon={<RefreshCw className="w-4 h-4 text-text-secondary" />} title="Update">
-        <div className="flex items-center justify-between">
-          <div><div className="text-sm text-text-secondary">Version v0.1.0</div><div className="text-xs text-text-muted">Latest version</div></div>
-          <ActionBtn icon={<Settings className="w-3.5 h-3.5" />} label="Check" title="检查新版本" variant="outline" />
-        </div>
-      </SettingsCard>
-
-      <SettingsCard icon={<FileText className="w-4 h-4 text-text-secondary" />} title="Log">
-        <div className="flex items-center gap-3 mb-2"><label className="text-sm text-text-secondary w-28 shrink-0">Directory</label><Tooltip text="日志文件存放路径" className="flex-1 min-w-0"><input defaultValue="logs/" className="w-full h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent" /></Tooltip><Tooltip text="在资源管理器中打开日志目录"><button onClick={() => hostCall('open_log_dir').catch(() => {})} className="shrink-0 p-1.5 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-tertiary transition-colors"><FolderOpen className="w-4 h-4" /></button></Tooltip></div>
-        <div className="flex items-center gap-3"><label className="text-sm text-text-secondary w-28 shrink-0">Keep Files</label><Tooltip text="Log 菜单中显示的历史日志文件数"><select value={keepFiles} onChange={e => setKeepFiles(Number(e.target.value))} className="h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent">{[3,5,7,10].map(n=><option key={n} value={n}>{n} files</option>)}</select></Tooltip></div>
-      </SettingsCard>
-
-      <SettingsCard icon={<Monitor className="w-4 h-4 text-text-secondary" />} title="Project">
-        <div className="text-xs text-text-muted mb-3">If this project helps you, please star!</div>
-        <ActionBtn icon={<span>★</span>} label="Star on GitHub" title="给项目点Star支持开发" variant="primary" />
-        <div className="mt-4 pt-4 border-t border-border">
-          <div className="text-xs font-medium text-text-secondary mb-1">Links</div>
-          {[{l:'GitHub',u:'https://github.com/Andyqwe44/tictactoe'},{l:'Slint',u:'https://slint.dev'},{l:'Tauri 2',u:'https://v2.tauri.app'}].map(x=>
-          <button key={x.l} onClick={()=>{try{window.open(x.u,'_blank')}catch{}; addLog(`[Project] open link: ${x.l}`)}}
-            className="block text-sm text-accent hover:underline py-0.5 cursor-pointer">{x.l}</button>
-        )}
-          <div className="text-xs font-medium text-text-secondary mt-3 mb-1">Credits</div>
-          <div className="text-xs text-text-muted">Andyqwe44 · Tauri 2 · React · Tailwind · DXGI · Interception · PyTorch</div>
-        </div>
-      </SettingsCard>
-      <div className="h-4" />
+    <div className="flex items-center gap-4 px-4 py-2.5 bg-bg-secondary rounded-xl ring-1 ring-inset ring-border text-xs text-text-secondary">
+      <span className="flex items-center gap-1.5"><Monitor className="w-3.5 h-3.5" />{screen}</span>
+      <span className="text-border">|</span>
+      <span className="flex items-center gap-1.5"><RefreshCw className="w-3.5 h-3.5" />{appVersion}</span>
+      <span className="text-border">|</span>
+      <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-success" />Ready</span>
+      <span className="flex-1" />
+      <span className="text-text-muted hidden sm:inline">Game Agent Monitor</span>
     </div>
   )
 }
 
-function DashboardView() {
-  const [info, setInfo] = useState({ appVer: 'v0.1.0', resVer: '-', screen: '?x?', status: 'Idle', uptime: '0s' })
+function SettingsView({ forceMethod, setForceMethod, autoMethod, setAutoMethod, transportMethod, setTransportMethod, autoTransport, setAutoTransport, selWin, winState, expectedCaptureState, setExpectedCaptureState, onSelect, onDisconnect, keepFiles, setKeepFiles, appVersion }: { forceMethod: string; setForceMethod: (m: string) => void; autoMethod?: boolean; setAutoMethod?: (v: boolean) => void; transportMethod: string; setTransportMethod: (m: string) => void; autoTransport?: boolean; setAutoTransport?: (v: boolean) => void; selWin?: WindowInfo; winState: string; expectedCaptureState?: string; setExpectedCaptureState?: (s: string) => void; onSelect: (w: WindowInfo) => void; onDisconnect: () => void; keepFiles: number; setKeepFiles: (n: number) => void; appVersion: string }) {
+  const colors = ['#3B82F6','#8B5CF6','#EC4899','#F59E0B','#10B981','#EF4444']
+  const [accent, setAccent] = useState('#3B82F6')
+  const [screenRes, setScreenRes] = useState('?×?')
+  const [logDir, setLogDir] = useState('...')
+  const [connExpanded, setConnExpanded] = useState(true)
+
   useEffect(() => {
-    (async () => {
-      try {
-        const si = await hostCall('screen_info')
-        setInfo(i => ({ ...i, screen: `${si.w}×${si.h}`, status: 'Ready' }))
-      } catch (_) {}
-    })()
+    hostCall('screen_info').then((si: any) => setScreenRes(`${si.w}×${si.h}`)).catch(() => {})
   }, [])
+  useEffect(() => {
+    hostCall('get_log_dir').then((res: any) => { if (res?.dir) setLogDir(res.dir) }).catch(() => {})
+  }, [])
+
   return (
     <div className="flex-1 overflow-y-auto p-6 space-y-3">
-      <SettingsCard icon={<Monitor className="w-4 h-4 text-text-secondary" />} title="System">
-        <div className="space-y-2 text-sm">
-          <div className="flex justify-between"><span className="text-text-secondary">App Version</span><span className="text-text-primary">{info.appVer}</span></div>
-          <div className="flex justify-between"><span className="text-text-secondary">Resource Version</span><span className="text-text-primary">{info.resVer}</span></div>
-          <div className="flex justify-between"><span className="text-text-secondary">Screen Resolution</span><span className="text-text-primary font-mono">{info.screen}</span></div>
-          <div className="flex justify-between"><span className="text-text-secondary">Service Status</span><span className="text-success">{info.status}</span></div>
-        </div>
-      </SettingsCard>
-      <SettingsCard icon={<FileText className="w-4 h-4 text-text-secondary" />} title="Capture Pipeline">
-        <div className="space-y-2 text-sm">
-          <div className="flex justify-between"><span className="text-text-secondary">Window Capture</span><span className="text-accent">WGC FramePool</span></div>
-          <div className="flex justify-between"><span className="text-text-secondary">Desktop Capture</span><span className="text-text-primary">DXGI Desktop Dup</span></div>
-          <div className="flex justify-between"><span className="text-text-secondary">Fallback</span><span className="text-text-muted">GDI BitBlt</span></div>
-          <div className="flex justify-between"><span className="text-text-secondary">Encoding</span><span className="text-text-primary">Raw RGBA (Canvas)</span></div>
-        </div>
-      </SettingsCard>
-      <SettingsCard icon={<RefreshCw className="w-4 h-4 text-text-secondary" />} title="Update">
-        <div className="space-y-3">
+      <StatusBar screen={screenRes} appVersion={appVersion} />
+
+      <ConnectionPanel onSelect={onSelect} onDisconnect={onDisconnect} forceMethod={forceMethod} setForceMethod={setForceMethod} selWin={selWin} winState={winState} expectedCaptureState={expectedCaptureState} setExpectedCaptureState={setExpectedCaptureState} autoMethod={autoMethod} setAutoMethod={setAutoMethod} showMethod expanded={connExpanded} onToggle={() => setConnExpanded(v => !v)} />
+
+      <SettingsCard icon={<Camera className="w-4 h-4 text-text-secondary" />} title="Capture">
+        <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <div><div className="text-sm text-text-primary">Current: {info.appVer}</div><div className="text-xs text-text-muted">Check for new versions</div></div>
-            <ActionBtn icon={<RefreshCw className="w-3.5 h-3.5" />} label="Check" title="检查更新" variant="outline" onClick={() => addLog('[Action] check update')} />
+            <span className="text-xs text-text-muted">How frames are sent to the frontend for preview.</span>
+            {setAutoTransport && (
+              <label className="flex items-center gap-1.5 cursor-pointer select-none shrink-0">
+                <span className="text-[10px] text-text-muted">Auto</span>
+                <button onClick={e => { e.stopPropagation(); setAutoTransport(!autoTransport); addLog(`[Setting] auto transport = ${!autoTransport}`) }}
+                  className={`relative w-8 h-5 rounded-full transition-colors ${autoTransport ? 'bg-amber-500' : 'bg-bg-tertiary'}`}>
+                  <span className={`absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white transition-transform ${autoTransport ? 'left-4' : 'left-0.5'}`} />
+                </button>
+              </label>
+            )}
           </div>
-          <div className="border-t border-border pt-2">
-            <div className="flex items-center gap-3">
-              <label className="text-sm text-text-secondary w-20 shrink-0">Source</label>
-              <select defaultValue="github" onChange={e => addLog(`[Setting] update source = ${e.target.value}`)} className="flex-1 h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent">
-                <option value="github">GitHub Releases</option>
-                <option value="gitee">Gitee Mirror</option>
-                <option value="local">Local File</option>
-              </select>
+          <div className="flex flex-col gap-3">
+            {[
+              { v:'shared', name:'Canvas', eng:'SharedBuffer', rec:'首选', desc:'Zero-copy BGRA → Canvas — no encode, no HTTP, lowest latency' },
+              { v:'mjpeg',  name:'MJPEG',  eng:'HTTP Stream',  rec:'备用', desc:'JPEG stream via HTTP, browser GPU decode — stable fallback' },
+              { v:'base64', name:'Base64', eng:'JSON',         rec:'旧版', desc:'Raw RGBA via JSON/base64 — legacy, slow' },
+              { v:'h264',   name:'H.264',  eng:'GPU MFT',      rec:'实验', desc:'GPU MFT encode — experimental' },
+            ].map(t => {
+              const isActive = transportMethod === t.v
+              const ringClass = !autoTransport && isActive ? 'border-accent bg-accent/10 cursor-pointer'
+                : autoTransport && isActive ? 'border-amber-500 bg-amber-500/10 cursor-not-allowed'
+                : autoTransport ? 'border-border bg-bg-primary opacity-50 cursor-not-allowed'
+                : 'border-border bg-bg-primary hover:bg-bg-hover cursor-pointer'
+              return <Tooltip key={t.v} text={t.desc}><label className={`${SELECTABLE_BTN} ${ringClass}`}><input type="radio" name="transport" value={t.v} checked={isActive} disabled={autoTransport} onChange={e => { if (!autoTransport) { setTransportMethod(e.target.value); addLog(`[Transport] ${e.target.value}`) } }} className="sr-only" /><span className="text-xs font-medium text-text-primary">{t.name} <span className="text-text-muted">({t.eng})</span></span><span className="ml-auto text-xs font-medium text-text-primary">{t.rec}</span></label></Tooltip>
+            })}
+          </div>
+        </div>
+      </SettingsCard>
+
+      <SettingsCard icon={<Cpu className="w-4 h-4 text-text-secondary" />} title="Model">
+        <div className="text-xs text-text-muted mb-2">Base model + fine-tuning adapter for game-specific AI.</div>
+        <div className="flex items-center gap-3 mb-2"><label className="text-sm text-text-secondary w-24 shrink-0">Model</label><Tooltip text="基础视觉模型" className="flex-1 min-w-0"><input defaultValue="GenericAgent v1" onBlur={e => addLog(`[Setting] base model = ${e.target.value}`)} className="w-full h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent" /></Tooltip></div>
+        <div className="flex items-center gap-3"><label className="text-sm text-text-secondary w-24 shrink-0">Adapter</label><Tooltip text="游戏微调权重" className="flex-1 min-w-0"><input defaultValue="tictactoe-finetune" onBlur={e => addLog(`[Setting] adapter = ${e.target.value}`)} className="w-full h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent" /></Tooltip></div>
+      </SettingsCard>
+
+      <SettingsCard icon={<Sun className="w-4 h-4 text-text-secondary" />} title="General">
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-text-secondary w-24 shrink-0">Theme</label>
+            <div className="flex gap-1">
+              {[['Light','light'],['Dark','dark'],['System','system']].map(([l,v])=>
+                <button key={v} onClick={()=>{document.documentElement.classList.toggle('dark',v==='dark'); addLog(`[Theme] ${l}`)}}
+                  className="px-3 py-1 rounded-full text-xs font-medium bg-bg-tertiary text-text-secondary hover:bg-bg-hover transition-colors">{l}</button>
+              )}
             </div>
           </div>
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-text-secondary w-24 shrink-0">Accent</label>
+            <div className="flex gap-1.5">
+              {colors.map(c=>(
+                <button key={c} onClick={()=>{setAccent(c); addLog(`[Theme] accent = ${c}`)}}
+                  className="w-6 h-6 rounded-full border-2 transition-all" style={{background:c,borderColor:accent===c?'white':'transparent'}} />
+              ))}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-text-secondary w-24 shrink-0">Log dir</label>
+            <Tooltip text="日志文件存放路径" className="flex-1 min-w-0"><input value={logDir} readOnly className="w-full h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm text-text-muted outline-none cursor-default font-mono text-xs truncate" /></Tooltip>
+            <Tooltip text="修改日志目录"><button onClick={async () => { try { const res = await hostCall('pick_log_dir'); if (res?.dir) { setLogDir(res.dir); addLog(`[Setting] log dir = ${res.dir}`) } } catch(_) {} }} className="shrink-0 p-1.5 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-tertiary transition-colors"><Pencil className="w-4 h-4" /></button></Tooltip>
+            <Tooltip text="在资源管理器中打开日志目录"><button onClick={() => hostCall('open_log_dir').catch(() => {})} className="shrink-0 p-1.5 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-tertiary transition-colors"><FolderOpen className="w-4 h-4" /></button></Tooltip>
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-text-secondary w-24 shrink-0">Keep files</label>
+            <Tooltip text="Log 菜单中显示的历史日志文件数"><select value={keepFiles} onChange={e => setKeepFiles(Number(e.target.value))} className="h-8 rounded-lg border border-border bg-bg-primary px-3 text-sm outline-none focus:border-accent">{[3,5,7,10].map(n=><option key={n} value={n}>{n} files</option>)}</select></Tooltip>
+          </div>
         </div>
       </SettingsCard>
-      <SettingsCard icon={<MonitorUp className="w-4 h-4 text-text-secondary" />} title="Resources">
-        <div className="space-y-2 text-sm">
-          <div className="flex justify-between"><span className="text-text-secondary">Log Directory</span><span className="text-text-primary font-mono text-xs">log/</span></div>
-          <div className="flex justify-between"><span className="text-text-secondary">Capture Backend</span><span className="text-accent">WGC + DXGI</span></div>
-          <div className="flex justify-between"><span className="text-text-secondary">Transport</span><span className="text-text-primary">TCP :9999</span></div>
-          <div className="flex justify-between"><span className="text-text-secondary">UI Framework</span><span className="text-text-muted">Tauri 2 + React + Tailwind</span></div>
+
+      <SettingsCard icon={<RefreshCw className="w-4 h-4 text-text-secondary" />} title="About">
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div><div className="text-sm text-text-primary">Game Agent Monitor</div><div className="text-xs text-text-muted">Version {appVersion}</div></div>
+            <ActionBtn icon={<RefreshCw className="w-3.5 h-3.5" />} label="Check Update" title="检查新版本" variant="outline" onClick={() => addLog('[Action] check update')} />
+          </div>
+          <div className="border-t border-border pt-2 flex items-center justify-between">
+            <div className="text-xs text-text-muted min-w-0">
+              <button onClick={()=>{try{window.open('https://github.com/Andyqwe44/tictactoe','_blank')}catch{}; addLog('[Project] open GitHub')}} className="text-accent hover:underline cursor-pointer truncate">github.com/Andyqwe44/tictactoe</button>
+              <span className="mx-2 text-border hidden sm:inline">|</span>
+              <span className="hidden sm:inline">C++ WebView2 · React · Tailwind · DXGI · WGC</span>
+            </div>
+            <Tooltip text="给项目点Star支持开发"><button onClick={()=>{try{window.open('https://github.com/Andyqwe44/tictactoe','_blank')}catch{}}}
+              className="inline-flex items-center gap-1.5 rounded-md px-2.5 h-7 text-xs font-medium bg-accent text-white hover:bg-accent-hover transition-colors shrink-0 ml-2"><span>★</span>Star</button></Tooltip>
+          </div>
         </div>
       </SettingsCard>
+
       <div className="h-4" />
     </div>
   )
 }
 
 export default function App() {
-  const [tab, setTab] = useState('Dashboard')
+  const [tab, setTab] = useState<'Monitor'|'Log'|'Settings'>('Settings')
   const [running, setRunning] = useState(false)
+  const [appVersion, setAppVersion] = useState('v0.3.0') // fallback; fetched from C++ on mount
   const [rightWidth, setRightWidth] = useState(DEFAULT_RIGHT_WIDTH)
   const [rightCollapsed, setRightCollapsed] = useState(false)
   const [connectionExpanded, setConnectionExpanded] = useState(true)
@@ -1231,6 +1260,17 @@ export default function App() {
   }, [connectionExpanded, screenshotExpanded, logExpanded, measureLayout])
 
   useEffect(() => { measureLayout() }, [])
+
+  // Fetch canonical version from C++ backend (single source of truth)
+  useEffect(() => {
+    hostCall('get_version').then((v: string) => { if (v) setAppVersion(v.startsWith('v') ? v : `v${v}`) }).catch(() => {})
+  }, [])
+
+  // Sync LogManager with C++ ring buffer at startup (catch up entries before WebView2 was ready).
+  // After init, C++ pushes new entries in real-time via capture_log_set_notify → type:'log' WebMessage.
+  useEffect(() => {
+    logMgr.initSync()
+  }, [])
 
   // Initial layout check — resize event doesn't fire on startup. If all panels
   // expanded overflow the right panel, collapse L → S → C until they fit.
@@ -1399,6 +1439,7 @@ export default function App() {
   const [autoMethod, setAutoMethod] = useState(true)
   const [expectedCaptureState, setExpectedCaptureState] = useState('desktop')
   const [transportMethod, setTransportMethod] = useState('shared')
+  const [autoTransport, setAutoTransport] = useState(true)
   const [keepFiles, setKeepFiles] = useState(5)
   const [winState, setWinState] = useState('desktop')
   const lastWinStateRef = useRef('desktop')
@@ -1448,6 +1489,13 @@ export default function App() {
     }
   }, [winState, autoMethod])
 
+  // Auto-select transport based on availability (SharedBuffer > MJPEG > Base64)
+  useEffect(() => {
+    if (autoTransport) {
+      setTransportMethod('shared')
+    }
+  }, [autoTransport])
+
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
     autoCollapsedByWidth.current = false // manual drag overrides auto-collapse
     e.preventDefault(); isResizing.current = true
@@ -1467,7 +1515,7 @@ export default function App() {
         onStart={() => setRunning(true)} onStop={() => setRunning(false)} />
       <div className="flex-1 flex overflow-hidden">
         <div className="flex-1 flex flex-col overflow-hidden border-r border-border" style={{ minWidth: MIN_LEFT_WIDTH }}>
-          {tab === 'Dashboard' && <DashboardView />}
+          {tab === 'Settings' && <SettingsView forceMethod={forceMethod} setForceMethod={setForceMethod} autoMethod={autoMethod} setAutoMethod={setAutoMethod} transportMethod={transportMethod} setTransportMethod={setTransportMethod} autoTransport={autoTransport} setAutoTransport={setAutoTransport} selWin={selWindow} winState={winState} expectedCaptureState={expectedCaptureState} setExpectedCaptureState={setExpectedCaptureState} onSelect={setSelWindow} onDisconnect={() => { setSelWindow({ title: ' Entire Desktop', category: 'desktop', hwnd: 0 }); setExpectedCaptureState('desktop'); addLog('[Connection] disconnected, back to desktop') }} keepFiles={keepFiles} setKeepFiles={setKeepFiles} appVersion={appVersion} />}
           {tab === 'Monitor' && (
             <div className="flex-1 flex items-center justify-center p-6">
               <div className="rounded-xl bg-bg-secondary p-8 text-center space-y-3 max-w-md w-full">
@@ -1478,7 +1526,6 @@ export default function App() {
             </div>
           )}
           {tab === 'Log' && <LogPanel keepFiles={keepFiles} />}
-          {tab === 'Settings' && <SettingsPage forceMethod={forceMethod} setForceMethod={setForceMethod} autoMethod={autoMethod} setAutoMethod={setAutoMethod} transportMethod={transportMethod} setTransportMethod={setTransportMethod} selWin={selWindow} winState={winState} expectedCaptureState={expectedCaptureState} setExpectedCaptureState={setExpectedCaptureState} onSelect={setSelWindow} onDisconnect={() => { setSelWindow({ title: ' Entire Desktop', category: 'desktop', hwnd: 0 }); setExpectedCaptureState('desktop'); addLog('[Connection] disconnected, back to desktop') }} keepFiles={keepFiles} setKeepFiles={setKeepFiles} />}
           <BottomBar running={running} fps={0} lat={0} />
         </div>
         <Tooltip text={rightCollapsed ? "向右拖拽展开面板" : "拖拽调整面板宽度，向右拖到底可折叠"}>
