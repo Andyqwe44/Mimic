@@ -10,7 +10,7 @@ set LFLAGS=d3d11.lib dxgi.lib windowsapp.lib user32.lib gdi32.lib ole32.lib olea
 
 echo === Building monitor_app.exe ===
 cl.exe %CFLAGS% /Fo"build\\" /Fe:build\monitor_app.exe ^
-  src\main.cpp src\commands.cpp src\mjpeg_server.cpp ^
+  src\main.cpp src\commands.cpp src\mjpeg_server.cpp src\virtual_desktop.cpp ^
   dep\WebView2LoaderStatic.lib ^
   "%ROOT%\logger\build\logger.lib" ^
   "%ROOT%\capture\build\common.lib" ^

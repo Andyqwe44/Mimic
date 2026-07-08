@@ -117,7 +117,8 @@ tictactoe/
 │   │   ├── commands.h/cpp        Command dispatch (list_windows, capture, log, stream)
 │   │   ├── mjpeg_server.h/cpp    MJPEG HTTP server (Winsock2 + WIC)
 │   │   ├── json_helper.h         Minimal JSON parser for WebMessage
-│   │   └── version.h             Single canonical APP_VERSION for entire project
+│   │   ├── version.h             Single canonical APP_VERSION for entire project
+│   │   ├── virtual_desktop.h/cpp Virtual desktop enumeration + switch (undocumented COM)
 │   ├── dep/                      WebView2 SDK (header + static lib)
 │   │   ├── WebView2.h
 │   │   ├── WebView2EnvironmentOptions.h
@@ -154,6 +155,7 @@ cd monitor_web && npm run dev        # Vite on :5173
 cd monitor_app && build\monitor_app.exe --dev   # WebView2 → localhost:5173
 
 `--dev` flag also enables: console window (AllocConsole), verbose debug output.
+Default launch: **without `--dev`** — no console window, production mode.
 
 # 4. Prod mode
 cd monitor_web && npm run build      # Vite → dist/
@@ -177,7 +179,7 @@ Key: `hostCall` internally extracts `.result` from the `{id, result}` envelope, 
 
 | Command | Args | Returns |
 |---------|------|---------|
-| `list_windows` | — | `[{title, category, hwnd}, ...]` (跨虚拟桌面，标注 Desktop N) |
+| `list_windows` | — | `[{title, category, hwnd, desktop}, ...]` (绝对编号 D1/D2=任务视图左右顺序, 注册表获取) |
 | `list_processes` | — | `[{title, category:"process", hwnd:pid}, ...]` |
 | `capture_window` | `{hwnd, method}` | PNG base64 + dimensions (失败返回 `{}`) |
 | `capture_stream_start` | `{hwnd, method, transport}` | `{ok:true}` |
@@ -192,6 +194,8 @@ Key: `hostCall` internally extracts `.result` from the `{id, result}` envelope, 
 | `pick_log_dir` | — | `{dir}` — Windows folder picker, returns selected path |
 | `read_live_log` | — | `{lines}` — ring buffer content (init sync only) |
 | `benchmark_methods` | `{hwnd, method}` | `{results:[{method, time_ms, size, ok},...]}` |
+| `list_desktops` | — | `[{name, index, current}, ...]` (undocumented COM) |
+| `switch_desktop` | `{index}` | `{ok:true}` (switches entire desktop — user visible) |
 | `debug_dump_frames` | `{enable}` | `{ok:true}` |
 
 ### Logging architecture (event-driven, zero polling)

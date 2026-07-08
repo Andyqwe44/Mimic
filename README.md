@@ -109,7 +109,8 @@ type_tag 1 (BGRA): [w:4][h:4][ch:4][reserved:4][pixels: w*h*ch]
 - **Monitor** — Window/desktop capture, streaming preview, FPS counter
 - **Log** — Live in-memory ring buffer + disk log tiles
 - **Settings** — Connection, transport, theme, model, log config
-- **Window picker** — EnumWindows with search and window/desktop/process tabs
+- **Virtual desktop** — Cross-desktop window enumeration, absolute numbering (Task View order via registry), desktop switching
+- **Window picker** — EnumWindows with search, desktop tabs, D1/D2 badges, window/desktop/process tabs
 - **Yellow overlay** — Visual highlight on selected capture target
 - **Single-frame** — WGC/GDI multi-method capture with PNG output
 

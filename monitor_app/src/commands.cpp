@@ -15,6 +15,7 @@
 #include "../../capture/include/capture_methods.h"
 #include "../../capture/include/capture_wgc_ffi.h"
 #include <shobjidl.h>  // IVirtualDesktopManager
+#include "virtual_desktop.h"  // vd_list_desktops, vd_switch_desktop
 #include <shellapi.h>  // ShellExecuteA
 #include <windows.h>
 #include <tlhelp32.h>
@@ -124,14 +125,15 @@ static void on_log_notify(const char* ts, const char* tag, const char* msg) {
 }
 
 // ── list_windows ──────────────────────────────────────────
-struct WindowInfo { std::string title, category; uint64_t hwnd; };
+struct WindowInfo { std::string title, category; uint64_t hwnd; int desktop; };
 static std::vector<WindowInfo> g_winlist;
 static std::mutex g_winlist_mutex;
 
 struct EnumContext {
     std::vector<WindowInfo>* list;
     IVirtualDesktopManager* vdm;
-    std::vector<GUID>* desktop_ids;  // accumulate unique desktop GUIDs
+    std::vector<GUID>* absolute_order;  // registry Task View order (D1=leftmost, D2=second...)
+    std::vector<GUID>* seen_guids;      // accumulate all seen desktop GUIDs
 };
 
 static BOOL CALLBACK enum_callback(HWND hwnd, LPARAM lparam) {
@@ -182,51 +184,96 @@ static BOOL CALLBACK enum_callback(HWND hwnd, LPARAM lparam) {
     std::string title(ulen, '\0');
     WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), (int)ws.size(), &title[0], ulen, nullptr, nullptr);
 
-    // Label windows on non-current desktops
-    if (!on_current && ctx->desktop_ids) {
-        // Find or assign desktop index
-        int desktop_idx = -1;
-        for (size_t i = 0; i < ctx->desktop_ids->size(); i++) {
-            if (IsEqualGUID((*ctx->desktop_ids)[i], desktop_id)) {
-                desktop_idx = (int)i + 1; break;
+    // Absolute desktop numbering from registry Task View order (D1=leftmost)
+    // Fall back to relative order if registry unavailable
+    int desktop_num = 0;
+    if (ctx->absolute_order && !IsEqualGUID(desktop_id, GUID_NULL)) {
+        // Look up GUID in absolute order list (registry Task View order)
+        int found_at = -1;
+        for (size_t i = 0; i < ctx->absolute_order->size(); i++) {
+            if (IsEqualGUID((*ctx->absolute_order)[i], desktop_id)) {
+                found_at = (int)i; break;
             }
         }
-        if (desktop_idx < 0) {
-            ctx->desktop_ids->push_back(desktop_id);
-            desktop_idx = (int)ctx->desktop_ids->size();
+        if (found_at < 0) {
+            // GUID not in registry list yet — track in seen_guids for "Entire Desktop" count
+            ctx->absolute_order->push_back(desktop_id);
+            found_at = (int)ctx->absolute_order->size() - 1;
         }
-        if (desktop_idx > 1) { // desktop 1 = current, no label needed
-            title += " (Desktop " + std::to_string(desktop_idx) + ")";
+        desktop_num = found_at + 1; // D1, D2, D3...
+    } else if (ctx->seen_guids) {
+        // Fallback: relative numbering if registry unavailable
+        int found_at = -1;
+        for (size_t i = 0; i < ctx->seen_guids->size(); i++) {
+            if (IsEqualGUID((*ctx->seen_guids)[i], desktop_id)) {
+                found_at = (int)i; break;
+            }
         }
+        if (found_at < 0) {
+            ctx->seen_guids->push_back(desktop_id);
+            found_at = (int)ctx->seen_guids->size() - 1;
+        }
+        desktop_num = found_at + 1;
     }
 
-    list->push_back({title, "window", (uint64_t)(uintptr_t)hwnd});
+    // Label: only show badge for non-current desktop windows in title
+    if (!on_current && desktop_num > 0) {
+        title += " (D" + std::to_string(desktop_num) + ")";
+    }
+
+    list->push_back({title, "window", (uint64_t)(uintptr_t)hwnd, desktop_num});
     return TRUE;
 }
 
 static std::string cmd_list_windows() {
     std::vector<WindowInfo> list;
-    list.push_back({" Entire Desktop", "desktop", 0});
 
     // Create VirtualDesktopManager for cross-desktop window enumeration
     IVirtualDesktopManager* vdm = nullptr;
     CoCreateInstance(CLSID_VirtualDesktopManager, nullptr, CLSCTX_INPROC_SERVER,
                      IID_PPV_ARGS(&vdm));
 
-    std::vector<GUID> desktop_ids;
-    EnumContext ctx = {&list, vdm, &desktop_ids};
+    // Read absolute desktop order from registry (Task View left-to-right = D1, D2, D3...)
+    std::vector<GUID> absolute_order = vd_get_registry_desktop_order();
+    std::vector<GUID> seen_guids; // fallback if registry empty
+
+    EnumContext ctx = {&list, vdm,
+        absolute_order.empty() ? nullptr : &absolute_order,
+        absolute_order.empty() ? &seen_guids : nullptr};
     EnumWindows(enum_callback, (LPARAM)&ctx);
 
     if (vdm) vdm->Release();
 
-    LOG("cmd", "list_windows: %zu entries", list.size());
+    // Determine total desktop count and numbering
+    int total_desktops = 0;
+    if (!absolute_order.empty()) {
+        total_desktops = (int)absolute_order.size();
+    } else {
+        total_desktops = (int)seen_guids.size();
+        if (total_desktops == 0) total_desktops = 1;
+        // Copy seen_guids to absolute_order for consistent "Entire Desktop" numbering
+        absolute_order = seen_guids;
+    }
+
+    // Per-desktop "Entire Desktop" entries (D1, D2, D3... = Task View order)
+    for (int d = total_desktops; d >= 1; d--) {
+        std::string title = " Entire Desktop";
+        if (total_desktops > 1) {
+            title += " (D" + std::to_string(d) + ")";
+        }
+        list.insert(list.begin(), {title, "desktop", 0, d});
+    }
+
+    LOG("cmd", "list_windows: %zu entries, %d desktops (abs=%d)",
+        list.size(), total_desktops, (int)!absolute_order.empty());
 
     std::string json = "[";
     for (size_t i = 0; i < list.size(); i++) {
         if (i > 0) json += ",";
         char buf[512];
-        snprintf(buf, sizeof(buf), R"({"title":"%s","category":"%s","hwnd":%llu})",
-                 json_escape(list[i].title).c_str(), list[i].category.c_str(), (unsigned long long)list[i].hwnd);
+        snprintf(buf, sizeof(buf), R"({"title":"%s","category":"%s","hwnd":%llu,"desktop":%d})",
+                 json_escape(list[i].title).c_str(), list[i].category.c_str(),
+                 (unsigned long long)list[i].hwnd, list[i].desktop);
         json += buf;
     }
     json += "]";
@@ -748,6 +795,12 @@ std::string dispatch_command(const std::string& json) {
             result = "{\"p\":\"" + b64 + "\",\"w\":" + std::to_string(g_stream_frame_w) +
                      ",\"h\":" + std::to_string(g_stream_frame_h) + ",\"m\":\"WGC\"}";
         }
+    }
+    else if (cmd == "list_desktops") {
+        result = vd_list_desktops();
+    }
+    else if (cmd == "switch_desktop") {
+        result = vd_switch_desktop(json_get_int(args, "index"));
     }
 
     if (id <= 0) return result; // fire-and-forget (no id field)

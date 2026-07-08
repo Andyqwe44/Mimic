@@ -204,7 +204,8 @@ function BottomBar({ running, fps, lat }: { running: boolean; fps: number; lat: 
 }
 
 // ═══ WindowInfo type ───
-interface WindowInfo { title: string; category: string; hwnd: number }
+interface WindowInfo { title: string; category: string; hwnd: number; desktop?: number }
+interface DesktopInfo { name: string; index: number; current: boolean }
 
 // ═══ Window Picker ───
 // ═══ Capture Mode Picker ───
@@ -231,13 +232,16 @@ function TargetPickerModal({ open, onClose, onSelectWindow, onSelectMode }: {
   const [processes, setProcesses] = useState<WindowInfo[]>([])
   const [filter, setFilter] = useState('all')
   const [loading, setLoading] = useState(false)
+  const [desktops, setDesktops] = useState<DesktopInfo[]>([])
+  const [deskFilter, setDeskFilter] = useState(-1) // -1 = all desktops
   // ── page 2: pending window (awaiting mode) ──
   const [pendingWin, _setPendingWin] = useState<WindowInfo | null>(null)
 
   // Reset on open — delay transition enable so stale page state doesn't animate
   useEffect(() => {
     if (open) {
-      setPage('window'); setFilter('all'); setSearch(''); loadWindows(); setProcesses([])
+      setPage('window'); setFilter('all'); setSearch(''); setDeskFilter(-1)
+      loadWindows(); loadDesktops(); setProcesses([])
       const id = requestAnimationFrame(() => setAnimReady(true))
       return () => cancelAnimationFrame(id)
     } else {
@@ -269,6 +273,53 @@ function TargetPickerModal({ open, onClose, onSelectWindow, onSelectMode }: {
     setLoading(false)
   }
 
+  const loadDesktops = async () => {
+    try {
+      const list = await hostCall('list_desktops')
+      if (list.length > 0) {
+        // API returns 1-based index + name already like "D1", "D2"...
+        const normalized = list.map((d: any) => ({ name: d.name || `D${d.index}`, index: d.index, current: d.current }))
+        setDesktops(normalized)
+        addLog(`[Desktop] ${list.length} desktops`)
+        return
+      }
+    } catch {}
+    // Fallback: derive from windows' desktop fields if API failed
+    deriveDesktopsFrom(windows)
+  }
+
+  // Derive desktop tabs from windows list (fallback when API fails)
+  const deriveDesktopsFrom = (wins: WindowInfo[]) => {
+    const nums = new Set<number>()
+    wins.forEach(w => { const d = w.desktop || 1; if (d > 0) nums.add(d) })
+    if (nums.size <= 1) { setDesktops([]); return }
+    const list: DesktopInfo[] = []
+    nums.forEach(n => list.push({ name: `D${n}`, index: n, current: false }))
+    list.sort((a, b) => a.index - b.index)
+    setDesktops(list)
+    addLog(`[Desktop] derived ${list.length} desktops from windows`)
+  }
+
+  const handleSwitchDesktop = async (dIndex: number) => {
+    try {
+      // API uses 0-based index, dIndex is 1-based
+      const r = await hostCall('switch_desktop', { index: dIndex - 1 })
+      if (r && r.ok) {
+        addLog(`[Desktop] switched to D${dIndex}`)
+        loadWindows()
+      } else {
+        addLog(`[Desktop] switch failed: ${r?.error || 'unknown'}`)
+      }
+    } catch { addLog('[Desktop] switch error') }
+  }
+
+  // Re-derive desktop tabs when windows load (handles race: loadDesktops may run before windows ready)
+  useEffect(() => {
+    if (open && windows.length > 1 && desktops.length === 0) {
+      deriveDesktopsFrom(windows)
+    }
+  }, [windows, open])
+
   useEffect(() => {
     if (filter === 'process' && processes.length === 0 && open) { loadProcesses() }
   }, [filter])
@@ -281,6 +332,9 @@ function TargetPickerModal({ open, onClose, onSelectWindow, onSelectMode }: {
     if (filter === 'window') return w.category === 'window'
     if (filter === 'process') return w.category === 'process'
     return true
+  }).filter(w => {
+    if (deskFilter < 0) return true
+    return (w.desktop || 1) === deskFilter
   }).filter(w => w.title.toLowerCase().includes(search.toLowerCase()))
 
   const handlePickWindow = (w: WindowInfo) => {
@@ -350,6 +404,31 @@ function TargetPickerModal({ open, onClose, onSelectWindow, onSelectMode }: {
                   className="flex-1 bg-transparent text-sm text-text-primary outline-none placeholder:text-text-muted" autoFocus />
               </div>
             </div>
+            {/* Desktop tabs — shown when multiple desktops exist */}
+            {desktops.length > 1 && (
+              <div className="px-4 pb-1">
+                <div className="flex items-center gap-1 flex-wrap">
+                  <button onClick={() => { setDeskFilter(-1); addLog(`[Desktop] filter all`) }}
+                    className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors
+                      ${deskFilter < 0 ? 'bg-accent text-white' : 'bg-bg-tertiary text-text-secondary hover:bg-bg-hover'}`}>
+                    All
+                  </button>
+                  {desktops.map(d => (
+                    <button key={d.index}
+                      onClick={() => {
+                        if (d.current) { setDeskFilter(d.index); addLog(`[Desktop] filter: ${d.name}`) }
+                        else handleSwitchDesktop(d.index)
+                      }}
+                      className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors flex items-center gap-1
+                        ${deskFilter === d.index ? 'bg-accent text-white' : d.current
+                          ? 'bg-accent-light text-accent' : 'bg-bg-tertiary text-text-secondary hover:bg-bg-hover'}`}>
+                      {d.name}
+                      {d.current && <span className="text-[9px] opacity-70">●</span>}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="flex-1 overflow-y-auto px-2 pb-2">
               {loading && filtered.length === 0 ? (
                 <div className="flex items-center justify-center py-8 text-sm text-text-muted">Loading...</div>
@@ -362,7 +441,7 @@ function TargetPickerModal({ open, onClose, onSelectWindow, onSelectMode }: {
                     <button
                       disabled={self}
                       onClick={() => handlePickWindow(w)}
-                    className={`w-full flex items-center gap-2 px-2 py-2 rounded-lg text-left transition-colors group min-w-0
+                    className={`w-full flex items-center gap-2 px-2 py-2 rounded-lg text-left transition-colors group min-w-0 relative
                       ${self ? 'opacity-40 cursor-not-allowed' : 'hover:bg-bg-hover cursor-pointer'}`}>
                     {w.category === 'desktop' ? <MonitorSmartphone className="w-3.5 h-3.5 text-text-muted group-hover:text-accent shrink-0" />
                       : <Monitor className="w-3.5 h-3.5 text-text-muted group-hover:text-accent shrink-0" />}
@@ -370,6 +449,11 @@ function TargetPickerModal({ open, onClose, onSelectWindow, onSelectMode }: {
                       <span className="text-xs text-text-primary truncate block">{w.title}</span>
                       <span className="text-xs text-text-muted capitalize">{w.category}</span>
                     </div>
+                    {(w.desktop != null || w.category !== 'desktop') && (
+                      <span className="absolute bottom-1 right-1 text-[10px] font-medium px-1.5 py-px rounded-full bg-accent-light text-accent whitespace-nowrap">
+                        D{w.desktop || '?'}
+                      </span>
+                    )}
                   </button>
                   </Tooltip>
                 )})}
@@ -377,7 +461,10 @@ function TargetPickerModal({ open, onClose, onSelectWindow, onSelectMode }: {
               )}
             </div>
             <div className="px-4 py-2 border-t border-border text-xs text-text-muted text-center">
-              {filtered.length} items — {windows.filter(w => w.category === 'desktop').length} desktops, {windows.filter(w => w.category === 'window').length} windows{processes.length > 0 ? `, ${processes.length} processes` : ''}
+              {(() => {
+                const deskCount = desktops.length > 0 ? desktops.length : new Set(windows.filter(w => (w.desktop || 0) > 0).map(w => w.desktop || 1)).size
+                return `${filtered.length} items — ${deskCount} desktop${deskCount !== 1 ? 's' : ''}, ${windows.filter(w => w.category === 'window').length} windows${processes.length > 0 ? `, ${processes.length} processes` : ''}`
+              })()}
             </div>
           </div>
 
@@ -1278,7 +1365,7 @@ export default function App() {
   const rightPanelRef = useRef<HTMLDivElement>(null)
 
   // ── Theme state (shared by ThemeBtn + Settings General) ──
-  const [theme, setTheme] = useState<'light'|'dark'|'system'>('dark')
+  const [theme, setTheme] = useState<'light'|'dark'|'system'>('light')
   const [systemDark, setSystemDark] = useState(false)
   const resolvedDark = theme === 'system' ? systemDark : theme === 'dark'
 
