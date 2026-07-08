@@ -1209,8 +1209,18 @@ function SettingsView({ forceMethod, setForceMethod, autoMethod, setAutoMethod, 
             <label className="text-sm text-text-secondary w-24 shrink-0">Accent</label>
             <div className="flex gap-1.5">
               {colors.map(c=>(
-                <button key={c} onClick={()=>{setAccent(c); addLog(`[Theme] accent = ${c}`)}}
-                  className="w-6 h-6 rounded-full border-2 transition-all" style={{background:c,borderColor:accent===c?'white':'transparent'}} />
+                <button key={c} onClick={()=>{
+                  setAccent(c);
+                  document.documentElement.style.setProperty('--color-accent', c);
+                  addLog(`[Theme] accent = ${c}`)
+                }}
+                  className="w-6 h-6 rounded-full transition-all duration-150"
+                  style={{
+                    background: c,
+                    boxShadow: accent===c
+                      ? `0 0 0 2px var(--color-bg-secondary), 0 0 0 4px ${c}`
+                      : 'none'
+                  }} />
               ))}
             </div>
           </div>
