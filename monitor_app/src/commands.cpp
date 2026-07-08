@@ -609,7 +609,7 @@ static std::string cmd_highlight_window(uint64_t hwnd_u64) {
 
     for (int i = 0; i < 4; i++) {
         g_overlay_bars[i] = CreateWindowExW(
-            WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TRANSPARENT,
+            WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW,
             L"STATIC", nullptr,
             WS_POPUP | WS_VISIBLE,
             pos[i].x, pos[i].y, pos[i].w, pos[i].h,

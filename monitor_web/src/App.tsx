@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { Play, Square, Camera, Monitor, Settings, Moon, Sun, ChevronDown, FileText, Trash2, X, MonitorUp, Search, MonitorSmartphone, RefreshCw, FolderOpen } from 'lucide-react'
+import { Play, Square, Camera, Monitor, Settings, Moon, Sun, ChevronDown, ChevronLeft, FileText, Trash2, X, MonitorUp, Search, MonitorSmartphone, RefreshCw, FolderOpen } from 'lucide-react'
 // ── WebView2 WebMessage bridge (replaces Tauri invoke) ──
 type PendingCall = {
   resolve: (value: any) => void;
@@ -202,14 +202,43 @@ function BottomBar({ running, fps, lat }: { running: boolean; fps: number; lat: 
 interface WindowInfo { title: string; category: string; hwnd: number }
 
 // ═══ Window Picker ───
-function WindowPickerModal({ open, onClose, onSelect }: { open: boolean; onClose: () => void; onSelect: (w: WindowInfo) => void }) {
+// ═══ Capture Mode Picker ───
+const CAPTURE_MODES = [
+  { v: 'foreground', label: '前台 (Foreground)', desc: '窗口可见且在最前 → 推荐 WGC GPU 加速', method: 'wgc' },
+  { v: 'background', label: '后台 (Background)', desc: '窗口被遮挡但未最小化 → 推荐 WGC (唯一支持后台)', method: 'wgc' },
+  { v: 'minimized',  label: '最小化 (Minimized)',  desc: '窗口已最小化 → 只能用 DesktopGDI 截桌面', method: 'dxgi' },
+]
+
+const PICKER_W = 'w-[520px]'
+const PICKER_MAXH = 'max-h-[min(560px,85vh)]'
+
+function TargetPickerModal({ open, onClose, onSelectWindow, onSelectMode }: {
+  open: boolean
+  onClose: () => void
+  onSelectWindow: (w: WindowInfo) => void
+  onSelectMode: (method: string, expectedState: string) => void
+}) {
+  const [page, setPage] = useState<'window' | 'mode'>('window')
+  const [animReady, setAnimReady] = useState(false)
+  // ── page 1: window picker state ──
   const [search, setSearch] = useState('')
   const [windows, setWindows] = useState<WindowInfo[]>([])
   const [processes, setProcesses] = useState<WindowInfo[]>([])
   const [filter, setFilter] = useState('all')
   const [loading, setLoading] = useState(false)
+  // ── page 2: pending window (awaiting mode) ──
+  const [pendingWin, setPendingWin] = useState<WindowInfo | null>(null)
 
-  useEffect(() => { if (open) { setFilter('all'); loadWindows(); setProcesses([]) } }, [open])
+  // Reset on open — delay transition enable so stale page state doesn't animate
+  useEffect(() => {
+    if (open) {
+      setPage('window'); setFilter('all'); setSearch(''); loadWindows(); setProcesses([])
+      const id = requestAnimationFrame(() => setAnimReady(true))
+      return () => cancelAnimationFrame(id)
+    } else {
+      setAnimReady(false)
+    }
+  }, [open])
 
   const loadWindows = async () => {
     setLoading(true)
@@ -235,7 +264,6 @@ function WindowPickerModal({ open, onClose, onSelect }: { open: boolean; onClose
     setLoading(false)
   }
 
-  // Lazy-load processes when Process filter clicked
   useEffect(() => {
     if (filter === 'process' && processes.length === 0 && open) { loadProcesses() }
   }, [filter])
@@ -250,111 +278,128 @@ function WindowPickerModal({ open, onClose, onSelect }: { open: boolean; onClose
     return true
   }).filter(w => w.title.toLowerCase().includes(search.toLowerCase()))
 
+  const handlePickWindow = (w: WindowInfo) => {
+    onSelectWindow(w)
+    addLog(`[Window] ${w.title}`)
+    if (w.hwnd === 0 || w.category === 'desktop') {
+      onSelectMode('dxgi', 'desktop')
+      addLog('[Capture] desktop → dxgi')
+      onClose()
+    } else {
+      setPendingWin(w)
+      setPage('mode')
+    }
+  }
+
+  const handlePickMode = (method: string, expectedState: string) => {
+    onSelectMode(method, expectedState)
+    addLog(`[Capture] mode=${expectedState} → ${method}`)
+    onClose()
+  }
+
+  const handleBack = () => { setPage('window') }
+
   if (!open) return null
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/30" onClick={() => { onClose(); addLog('[Window] picker cancelled') }} />
-      <div className="relative w-[520px] max-h-[560px] bg-bg-secondary border border-border rounded-xl shadow-lg flex flex-col">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-          <div className="flex items-center gap-2">
-            <MonitorUp className="w-4 h-4 text-accent" />
-            <span className="text-sm font-semibold text-text-primary">Select Target</span>
-          </div>
-          <Tooltip text="关闭"><button onClick={() => { onClose(); addLog('[Window] picker cancelled') }} className="p-1 rounded-md hover:bg-bg-hover transition-colors"><X className="w-4 h-4 text-text-secondary" /></button></Tooltip>
-        </div>
-        {/* Category tabs + Refresh */}
-        <div className="flex items-center gap-1 px-4 pt-3 pb-1">
-          {categories.map(c => (
-            <Tooltip text={`筛选: ${c === 'all' ? '全部' : c === 'desktop' ? '桌面' : c === 'window' ? '窗口' : '进程'}`}>
-              <button key={c} onClick={() => { setFilter(c); addLog(`[Filter] ${c}`) }}
-                className={`px-3 py-1 rounded-full text-xs font-medium transition-colors capitalize
-                  ${filter === c ? 'bg-accent text-white' : 'bg-bg-tertiary text-text-secondary hover:bg-bg-hover'}`}>
-                {c === 'all' ? 'All' : c === 'desktop' ? ' Desktop' : c === 'window' ? ' Windows' : ' Process'}
-              </button>
-            </Tooltip>
-          ))}
-          <div className="flex-1" />
-          <Tooltip text="刷新窗口列表">
-            <button onClick={() => { loadWindows(); setProcesses([]); addLog('[Window] refreshing list') }}
-              className={`p-1.5 rounded-md hover:bg-bg-hover transition-colors text-text-secondary ${loading ? 'animate-spin' : ''}`}>
-              <RefreshCw className="w-3.5 h-3.5" />
-            </button>
-          </Tooltip>
-        </div>
-        {/* Search */}
-        <div className="px-4 py-2">
-          <div className="flex items-center gap-2 h-8 rounded-lg border border-border bg-bg-primary px-3">
-            <Search className="w-3.5 h-3.5 text-text-muted shrink-0" />
-            <Tooltip text="输入关键字筛选窗口列表">
-              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search..."
-                className="flex-1 bg-transparent text-sm text-text-primary outline-none placeholder:text-text-muted" autoFocus />
-            </Tooltip>
-          </div>
-        </div>
-        {/* List */}
-        <div className="flex-1 overflow-y-auto px-2 pb-2">
-          {loading && filtered.length === 0 ? (
-            <div className="flex items-center justify-center py-8 text-sm text-text-muted">Loading...</div>
-          ) : (
-            <div className="grid grid-cols-2 gap-1">
-            {filtered.map((w) => {
-              const self = w.title.includes('Game Agent Monitor')
-              return (
-              <Tooltip key={`${w.hwnd}-${w.category}`} text={self ? '自身窗口，禁止捕获' : `选择: ${w.title}`}>
-                <button
-                  disabled={self}
-                  onClick={() => { onSelect(w); onClose() }}
-                className={`w-full flex items-center gap-2 px-2 py-2 rounded-lg text-left transition-colors group min-w-0
-                  ${self ? 'opacity-40 cursor-not-allowed' : 'hover:bg-bg-hover cursor-pointer'}`}>
-                {w.category === 'desktop' ? <MonitorSmartphone className="w-3.5 h-3.5 text-text-muted group-hover:text-accent shrink-0" />
-                  : <Monitor className="w-3.5 h-3.5 text-text-muted group-hover:text-accent shrink-0" />}
-                <div className="flex-1 min-w-0">
-                  <span className="text-xs text-text-primary truncate block">{w.title}</span>
-                  <span className="text-xs text-text-muted capitalize">{w.category}</span>
-                </div>
-              </button>
-              </Tooltip>
-            )})}
+      <div className={`relative ${PICKER_W} ${PICKER_MAXH} bg-bg-secondary border border-border rounded-xl shadow-lg overflow-hidden`}>
+        <div className={`flex ${animReady ? 'transition-transform duration-300 ease-out' : ''}`}
+          style={{ transform: page === 'window' ? 'translateX(0)' : 'translateX(-100%)' }}>
+          {/* ═══ Page 1: Window Picker ═══ */}
+          <div className={`${PICKER_W} flex-shrink-0 flex flex-col ${PICKER_MAXH}`}>
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+              <div className="flex items-center gap-2">
+                <MonitorUp className="w-4 h-4 text-accent" />
+                <span className="text-sm font-semibold text-text-primary">Select Target</span>
+              </div>
+              <Tooltip text="关闭"><button onClick={() => { onClose(); addLog('[Window] picker cancelled') }} className="p-1 rounded-md hover:bg-bg-hover transition-colors"><X className="w-4 h-4 text-text-secondary" /></button></Tooltip>
             </div>
-          )}
-        </div>
-        <div className="px-4 py-2 border-t border-border text-xs text-text-muted text-center">
-          {filtered.length} items — {windows.filter(w => w.category === 'desktop').length} desktops, {windows.filter(w => w.category === 'window').length} windows{processes.length > 0 ? `, ${processes.length} processes` : ''}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ═══ Capture Mode Picker ───
-const CAPTURE_MODES = [
-  { v: 'foreground', label: '前台 (Foreground)', desc: '窗口可见且在最前 → 推荐 WGC GPU 加速', method: 'wgc' },
-  { v: 'background', label: '后台 (Background)', desc: '窗口被遮挡但未最小化 → 推荐 WGC (唯一支持后台)', method: 'wgc' },
-  { v: 'minimized',  label: '最小化 (Minimized)',  desc: '窗口已最小化 → 只能用 DesktopGDI 截桌面', method: 'dxgi' },
-]
-
-function CaptureModeModal({ open, onSelect, onClose }: { open: boolean; onSelect: (mode: string) => void; onClose: () => void }) {
-  if (!open) return null
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <div className="relative w-[440px] bg-bg-secondary border border-border rounded-xl shadow-lg flex flex-col">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-          <div className="flex items-center gap-2">
-            <MonitorUp className="w-4 h-4 text-accent" />
-            <span className="text-sm font-semibold text-text-primary">Capture Mode</span>
+            <div className="flex items-center gap-1 px-4 pt-3 pb-1">
+              {categories.map(c => (
+                <Tooltip key={c} text={`筛选: ${c === 'all' ? '全部' : c === 'desktop' ? '桌面' : c === 'window' ? '窗口' : '进程'}`}>
+                  <button onClick={() => { setFilter(c); addLog(`[Filter] ${c}`) }}
+                    className={`px-3 py-1 rounded-full text-xs font-medium transition-colors capitalize
+                      ${filter === c ? 'bg-accent text-white' : 'bg-bg-tertiary text-text-secondary hover:bg-bg-hover'}`}>
+                    {c === 'all' ? 'All' : c === 'desktop' ? ' Desktop' : c === 'window' ? ' Windows' : ' Process'}
+                  </button>
+                </Tooltip>
+              ))}
+              <div className="flex-1" />
+              <Tooltip text="刷新窗口列表">
+                <button onClick={() => { loadWindows(); setProcesses([]); addLog('[Window] refreshing list') }}
+                  className={`p-1.5 rounded-md hover:bg-bg-hover transition-colors text-text-secondary ${loading ? 'animate-spin' : ''}`}>
+                  <RefreshCw className="w-3.5 h-3.5" />
+                </button>
+              </Tooltip>
+            </div>
+            <div className="px-4 py-2">
+              <div className="flex items-center gap-2 h-8 rounded-lg border border-border bg-bg-primary px-3">
+                <Search className="w-3.5 h-3.5 text-text-muted shrink-0" />
+                <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search..."
+                  className="flex-1 bg-transparent text-sm text-text-primary outline-none placeholder:text-text-muted" autoFocus />
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto px-2 pb-2">
+              {loading && filtered.length === 0 ? (
+                <div className="flex items-center justify-center py-8 text-sm text-text-muted">Loading...</div>
+              ) : (
+                <div className="grid grid-cols-2 gap-1">
+                {filtered.map((w) => {
+                  const self = w.title.includes('Game Agent Monitor')
+                  return (
+                  <Tooltip key={`${w.hwnd}-${w.category}`} text={self ? '自身窗口，禁止捕获' : `选择: ${w.title}`}>
+                    <button
+                      disabled={self}
+                      onClick={() => handlePickWindow(w)}
+                    className={`w-full flex items-center gap-2 px-2 py-2 rounded-lg text-left transition-colors group min-w-0
+                      ${self ? 'opacity-40 cursor-not-allowed' : 'hover:bg-bg-hover cursor-pointer'}`}>
+                    {w.category === 'desktop' ? <MonitorSmartphone className="w-3.5 h-3.5 text-text-muted group-hover:text-accent shrink-0" />
+                      : <Monitor className="w-3.5 h-3.5 text-text-muted group-hover:text-accent shrink-0" />}
+                    <div className="flex-1 min-w-0">
+                      <span className="text-xs text-text-primary truncate block">{w.title}</span>
+                      <span className="text-xs text-text-muted capitalize">{w.category}</span>
+                    </div>
+                  </button>
+                  </Tooltip>
+                )})}
+                </div>
+              )}
+            </div>
+            <div className="px-4 py-2 border-t border-border text-xs text-text-muted text-center">
+              {filtered.length} items — {windows.filter(w => w.category === 'desktop').length} desktops, {windows.filter(w => w.category === 'window').length} windows{processes.length > 0 ? `, ${processes.length} processes` : ''}
+            </div>
           </div>
-          <Tooltip text="关闭"><button onClick={onClose} className="p-1 rounded-md hover:bg-bg-hover transition-colors"><X className="w-4 h-4 text-text-secondary" /></button></Tooltip>
-        </div>
-        <div className="p-3 space-y-2">
-          <div className="text-xs text-text-muted mb-2">请选择目标窗口的当前状态，系统将自动推荐最优捕获方案：</div>
-          {CAPTURE_MODES.map(m => (
-            <button key={m.v} onClick={() => { onSelect(m.method); onClose(); addLog(`[Capture] mode=${m.v} → ${m.method}`) }}
-              className="w-full flex flex-col items-start gap-0.5 px-3 py-2 rounded-lg text-left transition-colors hover:bg-bg-hover border border-border">
-              <span className="text-sm font-medium text-text-primary">{m.label}</span>
-              <span className="text-xs text-text-muted">{m.desc}</span>
-            </button>
-          ))}
+
+          {/* ═══ Page 2: Capture Mode ═══ */}
+          <div className={`${PICKER_W} flex-shrink-0 flex flex-col`}>
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+              <div className="flex items-center gap-2">
+                <Tooltip text="返回窗口选择">
+                  <button onClick={handleBack} className="p-1 rounded-md hover:bg-bg-hover transition-colors">
+                    <ChevronLeft className="w-4 h-4 text-text-secondary" />
+                  </button>
+                </Tooltip>
+                <MonitorUp className="w-4 h-4 text-accent" />
+                <span className="text-sm font-semibold text-text-primary">Capture Mode</span>
+              </div>
+              <Tooltip text="关闭"><button onClick={() => { onClose(); addLog('[Capture] mode picker cancelled') }} className="p-1 rounded-md hover:bg-bg-hover transition-colors"><X className="w-4 h-4 text-text-secondary" /></button></Tooltip>
+            </div>
+            <div className="p-4 space-y-2">
+              <div className="text-xs text-text-muted mb-3">
+                目标: <span className="text-text-primary font-medium">{pendingWin?.title || ''}</span>
+              </div>
+              <div className="text-xs text-text-muted mb-2">请选择目标窗口的当前状态，系统将自动推荐最优捕获方案：</div>
+              {CAPTURE_MODES.map(m => (
+                <button key={m.v} onClick={() => handlePickMode(m.method, m.v)}
+                  className="w-full flex flex-col items-start gap-0.5 px-3 py-2.5 rounded-lg text-left transition-colors hover:bg-bg-hover border border-border">
+                  <span className="text-sm font-medium text-text-primary">{m.label}</span>
+                  <span className="text-xs text-text-muted">{m.desc}</span>
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -364,33 +409,27 @@ function CaptureModeModal({ open, onSelect, onClose }: { open: boolean; onSelect
 // ═══ Connection Panel ───
 
 // Methods that cannot capture minimized windows
-const METHOD_SHORT: Record<string,string> = { wgc:'WGC', gdi:'GDI', dxgi:'Desktop', printwindow:'PW', screenbitblt:'ScreenBlt', GDI:'GDI', 'GDI(GetWindowDC)':'GDI', PrintWindow:'PW', 'PrintWindow(minimized)':'PW', ScreenBitBlt:'ScreenBlt', DesktopBlt:'Desktop', WGC:'WGC' }
+const METHOD_SHORT: Record<string,string> = { wgc:'WGC', gdi:'GDI', dxgi:'DXGI', printwindow:'PW', screenbitblt:'SBlt', GDI:'GDI', 'GDI(GetWindowDC)':'GDI', PrintWindow:'PW', 'PrintWindow(minimized)':'PW', ScreenBitBlt:'SBlt', DesktopBlt:'DXGI', WGC:'WGC' }
 const METHODS_NO_MINIMIZED = ['wgc','gdi','printwindow','screenbitblt']
 const cantCaptureMinimized = (method: string, ws: string) => ws === 'minimized' && METHODS_NO_MINIMIZED.includes(method)
 const STATE_LABEL: Record<string,string> = { desktop:'Desktop', foreground:'前台', background:'后台', minimized:'最小化', hidden:'隐藏', closed:'已关闭', unknown:'未知' }
 const STATE_COLOR: Record<string,string> = { desktop:'text-text-muted', foreground:'text-success', background:'text-accent', minimized:'text-error', hidden:'text-error', closed:'text-error', unknown:'text-text-muted' }
 
 // ═══ Connection Panel (MXU-style collapsible card) ═══
-function ConnectionPanel({ onSelect, onDisconnect, forceMethod, setForceMethod, selWin, winState, showMethod, expanded, onToggle }: { onSelect: (w: WindowInfo) => void; onDisconnect?: () => void; forceMethod: string; setForceMethod?: (m: string) => void; selWin?: WindowInfo; winState: string; showMethod?: boolean; expanded: boolean; onToggle: () => void }) {
+function ConnectionPanel({ onSelect, onDisconnect, forceMethod, setForceMethod, selWin, winState, expectedCaptureState, setExpectedCaptureState, autoMethod, setAutoMethod, showMethod, expanded, onToggle }: { onSelect: (w: WindowInfo) => void; onDisconnect?: () => void; forceMethod: string; setForceMethod?: (m: string) => void; selWin?: WindowInfo; winState: string; expectedCaptureState?: string; setExpectedCaptureState?: (s: string) => void; autoMethod?: boolean; setAutoMethod?: (v: boolean) => void; showMethod?: boolean; expanded: boolean; onToggle: () => void }) {
   const [pickerOpen, setPickerOpen] = useState(false)
-  const [modePickerOpen, setModePickerOpen] = useState(false)
   const [selTitle, setSelTitle] = useState(' Entire Desktop')
   const [ip, setIp] = useState('127.0.0.1')
   const [port, setPort] = useState('9999')
   const isDesktop = selTitle === ' Entire Desktop'
 
-  const handleSelect = (w: WindowInfo) => {
-    setSelTitle(w.title); onSelect(w); addLog(`[Window] ${w.title}`)
-    // After window selection: if desktop, auto-set dxgi; otherwise ask for capture mode
-    if (w.hwnd === 0 || w.category === 'desktop') {
-      if (setForceMethod) { setForceMethod('dxgi'); addLog('[Capture] desktop → dxgi') }
-    } else {
-      setModePickerOpen(true)
-    }
+  const handleSelectWindow = (w: WindowInfo) => {
+    setSelTitle(w.title); onSelect(w)
   }
 
-  const handleModeSelect = (method: string) => {
+  const handleSelectMode = (method: string, expectedState: string) => {
     if (setForceMethod) { setForceMethod(method) }
+    if (setExpectedCaptureState) { setExpectedCaptureState(expectedState) }
   }
 
   // Sync selTitle when parent changes selWin externally
@@ -401,13 +440,11 @@ function ConnectionPanel({ onSelect, onDisconnect, forceMethod, setForceMethod, 
   }, [selWin?.title])
 
   const cantCapture = !isDesktop && cantCaptureMinimized(forceMethod, winState)
+  const recommendedMethod = winState === 'minimized' ? 'dxgi' : 'wgc'
 
   const methods = [
-    { v: 'wgc',           l: 'WGC (GPU FramePool)',       desc: '最佳性能，支持后台/遮挡窗口，不适合最小化窗口或桌面' },
-    { v: 'gdi',           l: 'GDI (GetWindowDC)',         desc: '窗口截图，兼容性好，不适合后台/最小化窗口' },
-    { v: 'printwindow',   l: 'PrintWindow',               desc: '窗口内容截图（含子窗口），不适合最小化窗口' },
-    { v: 'screenbitblt',  l: 'Screen BitBlt',             desc: '屏幕坐标截图，不适合最小化/后台窗口' },
-    { v: 'dxgi',          l: 'DesktopGDI (全桌面)',        desc: '全桌面GDI位图，最简单可靠，仅桌面级别' },
+    { v: 'wgc',  l: 'WGC (GPU FramePool)', desc: 'GPU 加速，支持后台/遮挡窗口，前台后台首选' },
+    { v: 'dxgi', l: 'DXGI (DesktopBlt)',   desc: '全桌面 GDI 位图，最小化窗口或桌面时唯一可行方案' },
   ]
 
   return (
@@ -417,22 +454,32 @@ function ConnectionPanel({ onSelect, onDisconnect, forceMethod, setForceMethod, 
         <div className="flex items-center gap-2 min-w-0">
           <MonitorUp className="w-4 h-4 text-text-secondary shrink-0" />
           <span className="text-sm font-medium text-text-primary shrink-0">Connection</span>
+        </div>
+        <div className="flex items-baseline gap-2 ml-2">
+          <span className="text-[10px] text-text-muted shrink-0">状态</span>
           <span className={`text-xs ${STATE_COLOR[winState] || 'text-text-muted'} shrink-0`}>
             {STATE_LABEL[winState] || winState}
           </span>
-          <span className="text-xs text-accent truncate">{METHOD_SHORT[forceMethod] || forceMethod}</span>
+          <span className="text-[10px] text-text-muted shrink-0">推荐</span>
+          <span className="text-xs text-accent truncate">{METHOD_SHORT[recommendedMethod] || recommendedMethod}</span>
           {cantCapture && <span className="text-xs text-error shrink-0">⚠</span>}
+          <ChevronDown className={`w-4 h-4 text-text-muted transition-transform duration-150 ${expanded?'rotate-180':''}`} />
         </div>
-        <ChevronDown className={`w-4 h-4 text-text-muted transition-transform duration-150 ${expanded?'rotate-180':''}`} />
       </div>
       <div className="grid transition-[grid-template-rows] duration-150 ease-out"
         style={{ gridTemplateRows: expanded ? '1fr' : '0fr' }}>
         <div className="overflow-hidden min-h-0">
           <div className="border-t border-border" />
-          <div className="p-3 space-y-2">
+          <div className="max-h-[360px] overflow-y-auto p-3 space-y-2">
             {cantCapture && (
               <div className="text-xs text-error bg-red-500/10 rounded-lg px-2 py-1.5">
                 窗口已最小化，{forceMethod.toUpperCase()} 无法截取。请切换为 WGC 或将窗口恢复前台。
+              </div>
+            )}
+            {expectedCaptureState && winState !== 'desktop' && expectedCaptureState !== winState && (
+              <div className="text-xs text-amber-400 bg-amber-500/10 rounded-lg px-2 py-1.5 flex items-center gap-1.5">
+                <span className="shrink-0">⚠</span>
+                <span>预期状态: <b>{STATE_LABEL[expectedCaptureState] || expectedCaptureState}</b>，实际状态: <b>{STATE_LABEL[winState] || winState}</b>。截图可能失败或画面异常。</span>
               </div>
             )}
             <div className="flex justify-between">
@@ -462,37 +509,32 @@ function ConnectionPanel({ onSelect, onDisconnect, forceMethod, setForceMethod, 
                   className="w-20 h-8 rounded-lg border border-border bg-bg-primary px-2 text-xs text-text-primary outline-none focus:border-accent transition-colors placeholder:text-text-muted" />
               </Tooltip>
             </div>
-            {showMethod && setForceMethod && (
+            {showMethod && setForceMethod && setAutoMethod && (
               <div className="border-t border-border pt-2 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-text-muted">Capture Method</span>
-                  <button onClick={async e => { e.stopPropagation();
-                    const hwnd = selWin?.hwnd ?? 0;
-                    addLog('[Bench] testing methods...');
-                    try {
-                      const json = await hostCall('benchmark_methods', { hwnd });
-                      const results = JSON.parse(json);
-                      addLog(`[Bench] done: ${results.map((r:any) => `${r.method}:${r.single_ms}ms${r.ok?'✓':'✗'}`).join(', ')}`);
-                      // Auto-select fastest OK method
-                      const canonicalToV: Record<string,string> = { 'WGC':'wgc', 'GDI(GetWindowDC)':'gdi', 'PrintWindow':'printwindow', 'ScreenBitBlt':'screenbitblt', 'DesktopBlt':'dxgi' };
-                      const ok = results.filter((r:any) => r.ok);
-                      const best = ok.length > 0 ? ok.reduce((a:any,b:any) => a.single_ms < b.single_ms ? a : b) : null;
-                      if (best && setForceMethod) {
-                        const v = canonicalToV[best.method] || best.method;
-                        setForceMethod(v);
-                        addLog(`[Bench] auto-selected ${v} (${best.method})`);
-                      }
-                    } catch (err) { addLog(`[Bench] failed: ${err}`) }
-                  }} className="text-xs px-2 py-0.5 rounded bg-accent/10 text-accent hover:bg-accent/20 transition-colors">自检</button>
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                    <span className="text-[10px] text-text-muted">Auto</span>
+                    <button onClick={e => { e.stopPropagation(); setAutoMethod(!autoMethod); addLog(`[Setting] auto method = ${!autoMethod}`) }}
+                      className={`relative w-8 h-5 rounded-full transition-colors ${autoMethod ? 'bg-amber-500' : 'bg-bg-tertiary'}`}>
+                      <span className={`absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white transition-transform ${autoMethod ? 'left-4' : 'left-0.5'}`} />
+                    </button>
+                  </label>
                 </div>
-                <div className="space-y-1">{methods.map(m => <Tooltip key={m.v} text={m.desc}><label className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer transition-colors ${forceMethod === m.v ? 'bg-accent/10 ring-1 ring-accent' : 'hover:bg-bg-hover'}`}><input type="radio" name="method" value={m.v} checked={forceMethod === m.v} onChange={e => { setForceMethod(e.target.value); addLog(`[Setting] capture method = ${e.target.value}`) }} className="sr-only" /><span className="text-xs font-medium text-text-primary">{m.l}</span></label></Tooltip>)}</div>
+                <div className="space-y-1">{methods.map(m => {
+                  const isActive = forceMethod === m.v
+                  const ringClass = !autoMethod && isActive ? 'bg-accent/10 ring-1 ring-accent cursor-pointer'
+                    : autoMethod && isActive ? 'bg-amber-500/10 ring-1 ring-amber-500 cursor-not-allowed'
+                    : autoMethod ? 'opacity-50 cursor-not-allowed'
+                    : 'hover:bg-bg-hover cursor-pointer'
+                  return <Tooltip key={m.v} text={m.desc}><label className={`flex items-center gap-2 px-2 py-1 rounded transition-colors ${ringClass}`}><input type="radio" name="method" value={m.v} checked={isActive} disabled={autoMethod} onChange={e => { if (!autoMethod) { setForceMethod(e.target.value); addLog(`[Setting] capture method = ${e.target.value}`) } }} className="sr-only" /><span className="text-xs font-medium text-text-primary">{m.l}</span></label></Tooltip>
+                })}</div>
               </div>
             )}
           </div>
         </div>
       </div>
-      <WindowPickerModal open={pickerOpen} onClose={() => setPickerOpen(false)} onSelect={handleSelect} />
-      <CaptureModeModal open={modePickerOpen} onSelect={handleModeSelect} onClose={() => setModePickerOpen(false)} />
+      <TargetPickerModal open={pickerOpen} onClose={() => setPickerOpen(false)} onSelectWindow={handleSelectWindow} onSelectMode={handleSelectMode} />
     </div>
   )
 }
@@ -983,13 +1025,13 @@ function SettingsCard({ icon, title, defaultExpanded, children }: {
 }
 
 // ═══ Settings Page ═══
-function SettingsPage({ forceMethod, setForceMethod, transportMethod, setTransportMethod, selWin, winState, onSelect, onDisconnect, keepFiles, setKeepFiles }: { forceMethod: string; setForceMethod: (m: string) => void; transportMethod: string; setTransportMethod: (m: string) => void; selWin?: WindowInfo; winState: string; onSelect: (w: WindowInfo) => void; onDisconnect: () => void; keepFiles: number; setKeepFiles: (n: number) => void }) {
+function SettingsPage({ forceMethod, setForceMethod, autoMethod, setAutoMethod, transportMethod, setTransportMethod, selWin, winState, expectedCaptureState, setExpectedCaptureState, onSelect, onDisconnect, keepFiles, setKeepFiles }: { forceMethod: string; setForceMethod: (m: string) => void; autoMethod?: boolean; setAutoMethod?: (v: boolean) => void; transportMethod: string; setTransportMethod: (m: string) => void; selWin?: WindowInfo; winState: string; expectedCaptureState?: string; setExpectedCaptureState?: (s: string) => void; onSelect: (w: WindowInfo) => void; onDisconnect: () => void; keepFiles: number; setKeepFiles: (n: number) => void }) {
   const colors = ['#3B82F6','#8B5CF6','#EC4899','#F59E0B','#10B981','#EF4444']
   const [accent, setAccent] = useState('#3B82F6')
   const [connExpanded, setConnExpanded] = useState(true)
   return (
     <div className="flex-1 overflow-y-auto p-6 space-y-3">
-      <ConnectionPanel onSelect={onSelect} onDisconnect={onDisconnect} forceMethod={forceMethod} setForceMethod={setForceMethod} selWin={selWin} winState={winState} showMethod expanded={connExpanded} onToggle={() => setConnExpanded(v => !v)} />
+      <ConnectionPanel onSelect={onSelect} onDisconnect={onDisconnect} forceMethod={forceMethod} setForceMethod={setForceMethod} selWin={selWin} winState={winState} expectedCaptureState={expectedCaptureState} setExpectedCaptureState={setExpectedCaptureState} autoMethod={autoMethod} setAutoMethod={setAutoMethod} showMethod expanded={connExpanded} onToggle={() => setConnExpanded(v => !v)} />
 
       <SettingsCard icon={<Monitor className="w-4 h-4 text-text-secondary" />} title="Transport">
         <div className="text-xs text-text-muted mb-2">How frames are sent to the frontend for preview.</div>
@@ -1273,6 +1315,8 @@ export default function App() {
   const [selWindow, setSelWindow] = useState<WindowInfo>({ title: ' Entire Desktop', category: 'desktop', hwnd: 0 })
   const [screenRatio, setScreenRatio] = useState(16/9)
   const [forceMethod, setForceMethod] = useState('dxgi')
+  const [autoMethod, setAutoMethod] = useState(true)
+  const [expectedCaptureState, setExpectedCaptureState] = useState('desktop')
   const [transportMethod, setTransportMethod] = useState('shared')
   const [keepFiles, setKeepFiles] = useState(5)
   const [winState, setWinState] = useState('desktop')
@@ -1316,6 +1360,13 @@ export default function App() {
     return () => clearInterval(iv)
   }, [selWindow.hwnd])
 
+  // Auto-select capture method based on actual window state
+  useEffect(() => {
+    if (autoMethod) {
+      setForceMethod(winState === 'minimized' ? 'dxgi' : 'wgc')
+    }
+  }, [winState, autoMethod])
+
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault(); isResizing.current = true
     document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none'
@@ -1345,7 +1396,7 @@ export default function App() {
             </div>
           )}
           {tab === 'Log' && <LogPanel keepFiles={keepFiles} />}
-          {tab === 'Settings' && <SettingsPage forceMethod={forceMethod} setForceMethod={setForceMethod} transportMethod={transportMethod} setTransportMethod={setTransportMethod} selWin={selWindow} winState={winState} onSelect={setSelWindow} onDisconnect={() => { setSelWindow({ title: ' Entire Desktop', category: 'desktop', hwnd: 0 }); addLog('[Connection] disconnected, back to desktop') }} keepFiles={keepFiles} setKeepFiles={setKeepFiles} />}
+          {tab === 'Settings' && <SettingsPage forceMethod={forceMethod} setForceMethod={setForceMethod} autoMethod={autoMethod} setAutoMethod={setAutoMethod} transportMethod={transportMethod} setTransportMethod={setTransportMethod} selWin={selWindow} winState={winState} expectedCaptureState={expectedCaptureState} setExpectedCaptureState={setExpectedCaptureState} onSelect={setSelWindow} onDisconnect={() => { setSelWindow({ title: ' Entire Desktop', category: 'desktop', hwnd: 0 }); setExpectedCaptureState('desktop'); addLog('[Connection] disconnected, back to desktop') }} keepFiles={keepFiles} setKeepFiles={setKeepFiles} />}
           <BottomBar running={running} fps={0} lat={0} />
         </div>
         <Tooltip text={rightCollapsed ? "向右拖拽展开面板" : "拖拽调整面板宽度，向右拖到底可折叠"}>
@@ -1358,8 +1409,9 @@ export default function App() {
           <div ref={rightPanelRef} className="flex flex-col p-3 gap-3 overflow-hidden min-h-0" style={{ width: rightWidth, minWidth: 324, maxWidth: 400 }}>
             <div className="shrink-0"><ConnectionPanel onSelect={setSelWindow} onDisconnect={() => {
               setSelWindow({ title: ' Entire Desktop', category: 'desktop', hwnd: 0 })
+              setExpectedCaptureState('desktop')
               addLog('[Connection] disconnected, back to desktop')
-            }} forceMethod={forceMethod} selWin={selWindow} winState={winState} expanded={connectionExpanded} onToggle={() => setConnectionExpanded(v => !v)} /></div>
+            }} forceMethod={forceMethod} setForceMethod={setForceMethod} selWin={selWindow} winState={winState} expectedCaptureState={expectedCaptureState} setExpectedCaptureState={setExpectedCaptureState} autoMethod={autoMethod} setAutoMethod={setAutoMethod} expanded={connectionExpanded} onToggle={() => setConnectionExpanded(v => !v)} /></div>
             <div className="shrink-0 overflow-hidden"><ScreenshotPanel selWin={selWindow} screenRatio={screenRatio} forceMethod={forceMethod} transportMethod={transportMethod} winState={winState} expanded={screenshotExpanded} onToggle={() => setScreenshotExpanded(v => !v)} /></div>
             <div className="shrink-0"><LogPanel compact expanded={logExpanded} onToggle={() => setLogExpanded(v => !v)} /></div>
             <div className="flex-1" />
