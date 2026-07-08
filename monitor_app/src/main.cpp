@@ -3,7 +3,8 @@
  *
  * Replaces Rust/Tauri. One process: Win32 window + WebView2 + capture + MJPEG server.
  *
- * Dev:  monitor_app.exe --dev        → navigates to http://localhost:5173 (Vite HMR)
+ * Dev:  monitor_app.exe --dev        → navigates to http://localhost:1420 (Vite HMR)
+ * Dev+console: monitor_app.exe --dev --console → Vite HMR + debug console
  * Prod: monitor_app.exe              → navigates to http://127.0.0.1:8888 (built-in server)
  */
 #include <windows.h>
@@ -90,7 +91,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR lpCm
 {
     bool auto_stream = (std::string(lpCmdLine).find("--auto-stream") != std::string::npos);
     g_dev_mode = (std::string(lpCmdLine).find("--dev") != std::string::npos);
-    if (g_dev_mode) {
+    if (std::string(lpCmdLine).find("--console") != std::string::npos) {
         AllocConsole();
         freopen("CONOUT$", "w", stdout);
         freopen("CONOUT$", "w", stderr);

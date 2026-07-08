@@ -205,8 +205,6 @@ function BottomBar({ running, fps, lat }: { running: boolean; fps: number; lat: 
 
 // ═══ WindowInfo type ───
 interface WindowInfo { title: string; category: string; hwnd: number; desktop?: number }
-interface DesktopInfo { name: string; index: number; current: boolean }
-
 // ═══ Window Picker ───
 // ═══ Capture Mode Picker ───
 const CAPTURE_MODES = [
@@ -216,7 +214,7 @@ const CAPTURE_MODES = [
 ]
 
 const PICKER_W = 'w-[520px]'
-const PICKER_MAXH = 'max-h-[min(560px,85vh)]'
+const PICKER_MAXH = 'max-h-[min(560px,85vh)] min-h-[min(560px,85vh)]'
 
 function TargetPickerModal({ open, onClose, onSelectWindow, onSelectMode }: {
   open: boolean
@@ -229,19 +227,17 @@ function TargetPickerModal({ open, onClose, onSelectWindow, onSelectMode }: {
   // ── page 1: window picker state ──
   const [search, setSearch] = useState('')
   const [windows, setWindows] = useState<WindowInfo[]>([])
-  const [processes, setProcesses] = useState<WindowInfo[]>([])
   const [filter, setFilter] = useState('all')
   const [loading, setLoading] = useState(false)
-  const [desktops, setDesktops] = useState<DesktopInfo[]>([])
-  const [deskFilter, setDeskFilter] = useState(-1) // -1 = all desktops
+  const [currentDesktop, setCurrentDesktop] = useState(1)
   // ── page 2: pending window (awaiting mode) ──
   const [pendingWin, _setPendingWin] = useState<WindowInfo | null>(null)
 
   // Reset on open — delay transition enable so stale page state doesn't animate
   useEffect(() => {
     if (open) {
-      setPage('window'); setFilter('all'); setSearch(''); setDeskFilter(-1)
-      loadWindows(); loadDesktops(); setProcesses([])
+      setPage('window'); setFilter('all'); setSearch('')
+      loadWindows(); loadCurrentDesktop()
       const id = requestAnimationFrame(() => setAnimReady(true))
       return () => cancelAnimationFrame(id)
     } else {
@@ -261,85 +257,32 @@ function TargetPickerModal({ open, onClose, onSelectWindow, onSelectMode }: {
     setLoading(false)
   }
 
-  const loadProcesses = async () => {
-    setLoading(true)
-    try {
-      const list = await hostCall('list_processes')
-      setProcesses(list)
-      addLog(`[Window] processes ${list.length} entries`)
-    } catch {
-      setProcesses([{ title: 'svchost.exe', category: 'process', hwnd: 0 }, { title: 'explorer.exe', category: 'process', hwnd: 0 }])
-    }
-    setLoading(false)
-  }
-
-  const loadDesktops = async () => {
+  const loadCurrentDesktop = async () => {
     try {
       const list = await hostCall('list_desktops')
-      if (list.length > 0) {
-        // API returns 1-based index + name already like "D1", "D2"...
-        const normalized = list.map((d: any) => ({ name: d.name || `D${d.index}`, index: d.index, current: d.current }))
-        setDesktops(normalized)
-        addLog(`[Desktop] ${list.length} desktops`)
-        return
-      }
-    } catch {}
-    // Fallback: derive from windows' desktop fields if API failed
-    deriveDesktopsFrom(windows)
+      const cur = list.find((d: any) => d.current)
+      if (cur) setCurrentDesktop(cur.index)
+    } catch { /* use default 1 */ }
   }
 
-  // Derive desktop tabs from windows list (fallback when API fails)
-  const deriveDesktopsFrom = (wins: WindowInfo[]) => {
-    const nums = new Set<number>()
-    wins.forEach(w => { const d = w.desktop || 1; if (d > 0) nums.add(d) })
-    if (nums.size <= 1) { setDesktops([]); return }
-    const list: DesktopInfo[] = []
-    nums.forEach(n => list.push({ name: `D${n}`, index: n, current: false }))
-    list.sort((a, b) => a.index - b.index)
-    setDesktops(list)
-    addLog(`[Desktop] derived ${list.length} desktops from windows`)
-  }
-
-  const handleSwitchDesktop = async (dIndex: number) => {
-    try {
-      // API uses 0-based index, dIndex is 1-based
-      const r = await hostCall('switch_desktop', { index: dIndex - 1 })
-      if (r && r.ok) {
-        addLog(`[Desktop] switched to D${dIndex}`)
-        loadWindows()
-      } else {
-        addLog(`[Desktop] switch failed: ${r?.error || 'unknown'}`)
-      }
-    } catch { addLog('[Desktop] switch error') }
-  }
-
-  // Re-derive desktop tabs when windows load (handles race: loadDesktops may run before windows ready)
-  useEffect(() => {
-    if (open && windows.length > 1 && desktops.length === 0) {
-      deriveDesktopsFrom(windows)
-    }
-  }, [windows, open])
-
-  useEffect(() => {
-    if (filter === 'process' && processes.length === 0 && open) { loadProcesses() }
-  }, [filter])
-
-  const categories = ['all', 'desktop', 'window', 'process'] as const
-  const winHwnds = new Set(windows.map(w => w.hwnd))
-  const allWindows = [...windows, ...processes.filter(p => !winHwnds.has(p.hwnd))]
-  const filtered = allWindows.filter(w => {
+  const categories = ['all', 'desktop', 'window'] as const
+  const filtered = windows.filter(w => {
     if (filter === 'desktop') return w.category === 'desktop'
     if (filter === 'window') return w.category === 'window'
-    if (filter === 'process') return w.category === 'process'
     return true
-  }).filter(w => {
-    if (deskFilter < 0) return true
-    return (w.desktop || 1) === deskFilter
   }).filter(w => w.title.toLowerCase().includes(search.toLowerCase()))
 
-  const handlePickWindow = (w: WindowInfo) => {
+  const handlePickWindow = async (w: WindowInfo) => {
     onSelectWindow(w)
     addLog(`[Window] ${w.title}`)
+    // If target is on a different desktop, switch first
+    const winDesktop = w.desktop || 1
+    if (w.desktop != null && winDesktop !== currentDesktop && w.category !== 'desktop') {
+      try {
+        await hostCall('switch_desktop', { index: winDesktop - 1 })
+        addLog(`[Desktop] switched to D${winDesktop}`)
+      } catch { /* continue anyway */ }
+    }
     if (w.hwnd === 0 || w.category === 'desktop') {
       onSelectMode('dxgi', 'desktop')
       addLog('[Capture] desktop → dxgi')
@@ -381,17 +324,17 @@ function TargetPickerModal({ open, onClose, onSelectWindow, onSelectMode }: {
             </div>
             <div className="flex items-center gap-1 px-4 pt-3 pb-1">
               {categories.map(c => (
-                <Tooltip key={c} text={`筛选: ${c === 'all' ? '全部' : c === 'desktop' ? '桌面' : c === 'window' ? '窗口' : '进程'}`}>
+                <Tooltip key={c} text={`筛选: ${c === 'all' ? '全部' : c === 'desktop' ? '桌面' : '窗口'}`}>
                   <button onClick={() => { setFilter(c); addLog(`[Filter] ${c}`) }}
                     className={`px-3 py-1 rounded-full text-xs font-medium transition-colors capitalize
                       ${filter === c ? 'bg-accent text-white' : 'bg-bg-tertiary text-text-secondary hover:bg-bg-hover'}`}>
-                    {c === 'all' ? 'All' : c === 'desktop' ? ' Desktop' : c === 'window' ? ' Windows' : ' Process'}
+                    {c === 'all' ? 'All' : c === 'desktop' ? ' Desktop' : ' Windows'}
                   </button>
                 </Tooltip>
               ))}
               <div className="flex-1" />
               <Tooltip text="刷新窗口列表">
-                <button onClick={() => { loadWindows(); setProcesses([]); addLog('[Window] refreshing list') }}
+                <button onClick={() => { loadWindows(); addLog('[Window] refreshing list') }}
                   className={`p-1.5 rounded-md hover:bg-bg-hover transition-colors text-text-secondary ${loading ? 'animate-spin' : ''}`}>
                   <RefreshCw className="w-3.5 h-3.5" />
                 </button>
@@ -404,31 +347,6 @@ function TargetPickerModal({ open, onClose, onSelectWindow, onSelectMode }: {
                   className="flex-1 bg-transparent text-sm text-text-primary outline-none placeholder:text-text-muted" autoFocus />
               </div>
             </div>
-            {/* Desktop tabs — shown when multiple desktops exist */}
-            {desktops.length > 1 && (
-              <div className="px-4 pb-1">
-                <div className="flex items-center gap-1 flex-wrap">
-                  <button onClick={() => { setDeskFilter(-1); addLog(`[Desktop] filter all`) }}
-                    className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors
-                      ${deskFilter < 0 ? 'bg-accent text-white' : 'bg-bg-tertiary text-text-secondary hover:bg-bg-hover'}`}>
-                    All
-                  </button>
-                  {desktops.map(d => (
-                    <button key={d.index}
-                      onClick={() => {
-                        if (d.current) { setDeskFilter(d.index); addLog(`[Desktop] filter: ${d.name}`) }
-                        else handleSwitchDesktop(d.index)
-                      }}
-                      className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors flex items-center gap-1
-                        ${deskFilter === d.index ? 'bg-accent text-white' : d.current
-                          ? 'bg-accent-light text-accent' : 'bg-bg-tertiary text-text-secondary hover:bg-bg-hover'}`}>
-                      {d.name}
-                      {d.current && <span className="text-[9px] opacity-70">●</span>}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
             <div className="flex-1 overflow-y-auto px-2 pb-2">
               {loading && filtered.length === 0 ? (
                 <div className="flex items-center justify-center py-8 text-sm text-text-muted">Loading...</div>
@@ -436,8 +354,10 @@ function TargetPickerModal({ open, onClose, onSelectWindow, onSelectMode }: {
                 <div className="grid grid-cols-2 gap-1">
                 {filtered.map((w) => {
                   const self = w.title.includes('Game Agent Monitor')
+                  const winDesktop = w.desktop || 1
+                  const isRemote = w.desktop != null && winDesktop !== currentDesktop && w.category !== 'desktop'
                   return (
-                  <Tooltip key={`${w.hwnd}-${w.category}`} text={self ? '自身窗口，禁止捕获' : `选择: ${w.title}`}>
+                  <Tooltip key={`${w.hwnd}-${w.category}`} text={self ? '自身窗口，禁止捕获' : isRemote ? `选择: ${w.title}（将切换到 D${winDesktop}）` : `选择: ${w.title}`}>
                     <button
                       disabled={self}
                       onClick={() => handlePickWindow(w)}
@@ -450,8 +370,9 @@ function TargetPickerModal({ open, onClose, onSelectWindow, onSelectMode }: {
                       <span className="text-xs text-text-muted capitalize">{w.category}</span>
                     </div>
                     {(w.desktop != null || w.category !== 'desktop') && (
-                      <span className="absolute bottom-1 right-1 text-[10px] font-medium px-1.5 py-px rounded-full bg-accent-light text-accent whitespace-nowrap">
-                        D{w.desktop || '?'}
+                      <span className="absolute bottom-1 right-1 flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-px rounded-full bg-accent-light text-accent whitespace-nowrap">
+                        {isRemote && <span title="需切换桌面">⚡</span>}
+                        D{winDesktop || '?'}
                       </span>
                     )}
                   </button>
@@ -462,8 +383,9 @@ function TargetPickerModal({ open, onClose, onSelectWindow, onSelectMode }: {
             </div>
             <div className="px-4 py-2 border-t border-border text-xs text-text-muted text-center">
               {(() => {
-                const deskCount = desktops.length > 0 ? desktops.length : new Set(windows.filter(w => (w.desktop || 0) > 0).map(w => w.desktop || 1)).size
-                return `${filtered.length} items — ${deskCount} desktop${deskCount !== 1 ? 's' : ''}, ${windows.filter(w => w.category === 'window').length} windows${processes.length > 0 ? `, ${processes.length} processes` : ''}`
+                const deskNums = new Set(windows.filter(w => (w.desktop || 0) > 0).map(w => w.desktop || 1))
+                const deskCount = deskNums.size || 1
+                return `${filtered.length} items — ${deskCount} desktop${deskCount !== 1 ? 's' : ''}, ${windows.filter(w => w.category === 'window').length} windows`
               })()}
             </div>
           </div>

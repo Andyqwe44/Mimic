@@ -150,12 +150,16 @@ cd capture  && build_capture_lib.cmd
 # 2. Build C++ WebView2 host
 cd monitor_app && build.cmd          # → monitor_app.exe
 
-# 3. Dev mode (Vite HMR)
-cd monitor_web && npm run dev        # Vite on :5173
-cd monitor_app && build\monitor_app.exe --dev   # WebView2 → localhost:5173
+# 3. Dev mode (Vite HMR — default)
+cd monitor_web && npm run dev        # Vite on :1420 (already running usually)
+cd monitor_app && build\monitor_app.exe --dev   # WebView2 → localhost:1420
 
-`--dev` flag also enables: console window (AllocConsole), verbose debug output.
-Default launch: **without `--dev`** — no console window, production mode.
+# 3b. Dev mode with debug console (when you need console output)
+cd monitor_app && build\monitor_app.exe --dev --console   # Vite HMR + console window
+
+`--dev` flag: navigates to Vite dev server (hot reload). No console window.
+`--console` flag: shows console window (AllocConsole) for debug output. Independent of `--dev`.
+Default launch: **`--dev` mode (Vite HMR)** — development is always with hot reload, no black box.
 
 # 4. Prod mode
 cd monitor_web && npm run build      # Vite → dist/
