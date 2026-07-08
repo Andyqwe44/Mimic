@@ -316,19 +316,44 @@ static CaptureResult call_capture(uint64_t hwnd, const std::string& method) {
     HWND hw = (HWND)(uintptr_t)hwnd;
     std::string used = method;
 
+    LOG("cmd", "call_capture: hwnd=%llu method=%s", (unsigned long long)hwnd, method.c_str());
+
     if (method == "WGC" || method == "wgc") {
-        // wgc_capture_single creates DispatcherQueue + uses wait_frame(cv)
-        // which does not pump Windows messages. On main STA thread this
-        // prevents FrameArrived delivery → timeout or crash on shutdown.
-        // Run on temporary MTA thread to isolate WinRT from main thread.
+        // WGC window capture — needs valid HWND. Desktop (hwnd=0) rejected.
+        // Frontend should use 'desktopblt' or 'wgc-monitor' for desktop.
+        if (!hw) {
+            LOG("cmd", "call_capture: wgc requires valid hwnd, got 0 — use 'desktopblt' or 'wgc-monitor'");
+            used = "wgc(bad_hwnd)";
+            return {{}, 0, 0, used};
+        }
+        LOG("cmd", "call_capture: spawning MTA thread for WGC single-frame hwnd=%llu", (unsigned long long)hwnd);
         std::atomic<bool> done{false};
         std::thread t([&]() {
             CoInitializeEx(nullptr, COINIT_MULTITHREADED);
             size = wgc_capture_single(hw, buf.data(), MAX_PX, &w, &h, nullptr);
+            LOG("cmd", "call_capture: wgc_capture_single returned size=%d w=%d h=%d", size, w, h);
             CoUninitialize();
             done = true;
         });
         t.join();
+    } else if (method == "wgc-monitor") {
+        // WGC monitor capture — frontend explicitly asked for monitor-based capture
+        HMONITOR hmon = MonitorFromWindow(nullptr, MONITOR_DEFAULTTOPRIMARY);
+        LOG("cmd", "call_capture: wgc-monitor hmon=%p", (void*)hmon);
+        std::atomic<bool> done{false};
+        std::thread t([&]() {
+            CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+            size = wgc_capture_single_monitor(hmon, buf.data(), MAX_PX, &w, &h, nullptr);
+            LOG("cmd", "call_capture: wgc_capture_single_monitor returned size=%d w=%d h=%d", size, w, h);
+            CoUninitialize();
+            done = true;
+        });
+        t.join();
+    } else if (method == "dxgi" || method == "desktopblt") {
+        // Desktop BitBlt (GDI) — fast, reliable desktop single-frame.
+        // Named 'dxgi' for backward compat; 'desktopblt' is the canonical name.
+        size = capture_desktop_bitblt(buf.data(), MAX_PX, &w, &h);
+        used = "DesktopBlt";
     } else if (method == "GDI(GetWindowDC)") {
         size = capture_gdi_getwindowdc(hw, buf.data(), MAX_PX, &w, &h);
     } else if (method == "PrintWindow") {
@@ -336,19 +361,12 @@ static CaptureResult call_capture(uint64_t hwnd, const std::string& method) {
     } else if (method == "ScreenBitBlt") {
         size = capture_screen_bitblt(hw, buf.data(), MAX_PX, &w, &h);
     } else if (method == "DesktopBlt") {
-        size = capture_desktop_bitblt(buf.data(), MAX_PX, &w, &h); // hwnd unused
-    } else if (method == "dxgi") {
-        // DXGI Desktop Duplication — map to DesktopBlt for single frame
-        // (DXGI streaming uses dedicated backend in capture_dxgi.cpp)
         size = capture_desktop_bitblt(buf.data(), MAX_PX, &w, &h);
     } else {
-        // fallback chain
-        const char* chain[] = {"DesktopBlt", "GDI(GetWindowDC)", "PrintWindow", "ScreenBitBlt"};
-        for (auto* m : chain) {
-            auto r = call_capture(hwnd, m);
-            if (r.w > 0 && r.h > 0) return r;
-        }
-        used = "ALL_FAILED";
+        // Unknown method — fail, don't guess
+        LOG("cmd", "call_capture: unknown method '%s'", method.c_str());
+        used = "unknown_method";
+        return {{}, 0, 0, used};
     }
 
     if (size > 0 && w > 0 && h > 0) {
@@ -399,6 +417,7 @@ static std::string frame_to_json(const CaptureResult& r, int x, int y, int sw, i
 }
 
 static std::string cmd_capture_window(uint64_t hwnd, const std::string& method) {
+    LOG("cmd", "cmd_capture_window: hwnd=%llu method=%s", (unsigned long long)hwnd, method.c_str());
     auto r = call_capture(hwnd, method.empty() ? "auto" : method);
     if (r.w <= 0 || r.h <= 0) {
         LOG("cmd", "capture_window: FAILED hwnd=%llu", (unsigned long long)hwnd);
@@ -509,13 +528,25 @@ static std::string cmd_capture_stream_start(uint64_t hwnd, const std::string& me
     cmd_capture_stream_stop();
 
     HWND h = (HWND)(uintptr_t)hwnd;
-    if (h == nullptr) {
-        // Desktop capture: use monitor-based WGC
-        g_stream_handle = wgc_stream_start_monitor(
-            MonitorFromWindow(nullptr, MONITOR_DEFAULTTOPRIMARY), 1280);
+
+    // Frontend decides method; C++ only executes.
+    if (method == "wgc" || method == "WGC") {
+        if (h == nullptr) {
+            g_stream_handle = wgc_stream_start_monitor(
+                MonitorFromWindow(nullptr, MONITOR_DEFAULTTOPRIMARY), 1280);
+        } else {
+            g_stream_handle = wgc_stream_start(h, 1280);
+        }
+    } else if (method == "dxgi" || method == "DXGI") {
+        // DXGI Desktop Duplication stream not yet implemented.
+        // Frontend should use 'wgc' for streaming until DXGI stream is ready.
+        LOG("cmd", "stream_start: DXGI stream not implemented, use 'wgc'");
+        return R"({"ok":false,"error":"DXGI stream not implemented; use 'wgc' for streaming"})";
     } else {
-        g_stream_handle = wgc_stream_start(h, 1280);
+        LOG("cmd", "stream_start: unknown method '%s'", method.c_str());
+        return R"({"ok":false,"error":"unknown stream method"})";
     }
+
     if (!g_stream_handle) {
         LOG("cmd", "stream_start: FAILED");
         return R"({"ok":false,"error":"wgc_stream_start failed"})";

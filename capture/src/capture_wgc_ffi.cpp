@@ -216,21 +216,36 @@ void wgc_stream_signal_stop(WgcStreamHandle* h) {
 
 int wgc_capture_single(HWND hwnd, uint8_t* buf, int buf_size,
                        int* out_w, int* out_h, int* out_ch) {
+    LOG("wgc", "wgc_capture_single: entry hwnd=%llu buf=%p buf_size=%d",
+        (unsigned long long)(uintptr_t)hwnd, (void*)buf, buf_size);
+
     // CRITICAL: create DispatcherQueue BEFORE init — FrameArrived event
     // won't fire without an active DispatcherQueue on this thread.
+    LOG("wgc", "wgc_capture_single: creating DispatcherQueue...");
     auto dq = wgc::create_dispatcher_queue();
+    LOG("wgc", "wgc_capture_single: DispatcherQueue created");
 
     wgc::WgcCapture cap;
-    if (!cap.init(hwnd)) { dq.ShutdownQueueAsync(); /* fire-and-forget */; return 0; }
+    LOG("wgc", "wgc_capture_single: calling cap.init(hwnd=%llu)...",
+        (unsigned long long)(uintptr_t)hwnd);
+    if (!cap.init(hwnd)) {
+        LOG("wgc", "wgc_capture_single: cap.init FAILED — %s", cap.last_error());
+        dq.ShutdownQueueAsync();
+        return 0;
+    }
+    LOG("wgc", "wgc_capture_single: cap.init OK");
 
     wgc::WgcFrame frame;
     // Wait up to ~500ms for first frame with condition variable
     for (int i = 0; i < 50; i++) {
         if (cap.wait_frame(frame, 10)) {
+            LOG("wgc", "wgc_capture_single: got frame on attempt %d — %dx%d %zu bytes",
+                i, frame.width, frame.height, frame.pixels.size());
             int needed = (int)frame.pixels.size();
             if (buf_size < needed) {
+                LOG("wgc", "wgc_capture_single: buf too small! need=%d have=%d", needed, buf_size);
                 cap.shutdown();
-                dq.ShutdownQueueAsync(); /* fire-and-forget */;
+                dq.ShutdownQueueAsync();
                 return 0;
             }
             memcpy(buf, frame.pixels.data(), needed);
@@ -238,13 +253,20 @@ int wgc_capture_single(HWND hwnd, uint8_t* buf, int buf_size,
             *out_h = frame.height;
             *out_ch = frame.channels;
             cap.shutdown();
-            dq.ShutdownQueueAsync(); /* fire-and-forget */;
+            dq.ShutdownQueueAsync();
+            LOG("wgc", "wgc_capture_single: SUCCESS %dx%d ch=%d size=%d",
+                *out_w, *out_h, *out_ch, needed);
             return needed;
         }
-        if (!cap.is_ok()) break;
+        if (!cap.is_ok()) {
+            LOG("wgc", "wgc_capture_single: cap not OK on attempt %d — %s",
+                i, cap.last_error());
+            break;
+        }
     }
+    LOG("wgc", "wgc_capture_single: timeout or error — no frame after %d attempts", 50);
     cap.shutdown();
-    dq.ShutdownQueueAsync(); /* fire-and-forget */;
+    dq.ShutdownQueueAsync();
     return 0;
 }
 
@@ -336,18 +358,33 @@ WgcStreamHandle* wgc_stream_start_monitor(HMONITOR hmon, int max_dim) {
 
 int wgc_capture_single_monitor(HMONITOR hmon, uint8_t* buf, int buf_size,
                                int* out_w, int* out_h, int* out_ch) {
+    LOG("wgc", "wgc_capture_single_monitor: entry hmon=%p buf=%p buf_size=%d",
+        (void*)hmon, (void*)buf, buf_size);
+
+    LOG("wgc", "wgc_capture_single_monitor: creating DispatcherQueue...");
     auto dq = wgc::create_dispatcher_queue();
+    LOG("wgc", "wgc_capture_single_monitor: DispatcherQueue created");
 
     wgc::WgcCapture cap;
-    if (!cap.init_monitor(hmon)) { dq.ShutdownQueueAsync(); /* fire-and-forget */; return 0; }
+    LOG("wgc", "wgc_capture_single_monitor: calling cap.init_monitor(hmon=%p)...", (void*)hmon);
+    if (!cap.init_monitor(hmon)) {
+        LOG("wgc", "wgc_capture_single_monitor: cap.init_monitor FAILED — %s", cap.last_error());
+        dq.ShutdownQueueAsync();
+        return 0;
+    }
+    LOG("wgc", "wgc_capture_single_monitor: cap.init_monitor OK, entering wait loop");
 
     wgc::WgcFrame frame;
     for (int i = 0; i < 50; i++) {
+        LOG("wgc", "wgc_capture_single_monitor: wait_frame attempt %d/50...", i);
         if (cap.wait_frame(frame, 10)) {
+            LOG("wgc", "wgc_capture_single_monitor: got frame on attempt %d — %dx%d %zu bytes",
+                i, frame.width, frame.height, frame.pixels.size());
             int needed = (int)frame.pixels.size();
             if (buf_size < needed) {
+                LOG("wgc", "wgc_capture_single_monitor: buf too small! need=%d have=%d", needed, buf_size);
                 cap.shutdown();
-                dq.ShutdownQueueAsync(); /* fire-and-forget */;
+                dq.ShutdownQueueAsync();
                 return 0;
             }
             memcpy(buf, frame.pixels.data(), needed);
@@ -355,13 +392,20 @@ int wgc_capture_single_monitor(HMONITOR hmon, uint8_t* buf, int buf_size,
             *out_h = frame.height;
             *out_ch = frame.channels;
             cap.shutdown();
-            dq.ShutdownQueueAsync(); /* fire-and-forget */;
+            dq.ShutdownQueueAsync();
+            LOG("wgc", "wgc_capture_single_monitor: SUCCESS %dx%d ch=%d size=%d",
+                *out_w, *out_h, *out_ch, needed);
             return needed;
         }
-        if (!cap.is_ok()) break;
+        if (!cap.is_ok()) {
+            LOG("wgc", "wgc_capture_single_monitor: cap not OK on attempt %d — %s",
+                i, cap.last_error());
+            break;
+        }
     }
+    LOG("wgc", "wgc_capture_single_monitor: timeout after 50 attempts, shutting down");
     cap.shutdown();
-    dq.ShutdownQueueAsync(); /* fire-and-forget */;
+    dq.ShutdownQueueAsync();
     return 0;
 }
 

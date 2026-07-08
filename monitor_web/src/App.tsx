@@ -566,8 +566,10 @@ function ScreenshotPanel({ selWin, screenRatio, forceMethod, winState, expanded,
   const [hasContent, setHasContent] = useState(false)  // true when snapshot or preview rendered
   const [fps, setFps] = useState(0)
   const [capMethod, setCapMethod] = useState('')
+  const [snapshotLatency, setSnapshotLatency] = useState<number | null>(null)
   const previewingRef = useRef(false)
   const snapshotRef = useRef(false)        // one-shot: capture next SharedBuffer frame then stop
+  const snapshotStartRef = useRef(0)        // timestamp when 📷 button pressed
   const framesRef = useRef(0)
   const lastFpsRef = useRef(Date.now())
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -625,7 +627,12 @@ function ScreenshotPanel({ selWin, screenRatio, forceMethod, winState, expanded,
         const now = Date.now(); const elapsed = now - lastFpsRef.current
         if (elapsed >= 1000) { setFps(Math.round(framesRef.current * 1000 / elapsed)); framesRef.current = 0; lastFpsRef.current = now }
         // Snapshot: one shot, then stop consuming
-        if (snapshotRef.current) { snapshotRef.current = false; addLog('[SB] snapshot consumed') }
+        if (snapshotRef.current) {
+          snapshotRef.current = false
+          const latency = Date.now() - snapshotStartRef.current
+          setSnapshotLatency(latency)
+          addLog(`[SB] snapshot consumed, latency=${latency}ms`)
+        }
       } catch (ex: any) {
         addLog(`[SB] EXCEPTION: ${ex?.message || ex}`)
       }
@@ -639,19 +646,23 @@ function ScreenshotPanel({ selWin, screenRatio, forceMethod, winState, expanded,
   // ── Snapshot (Camera button) ──
   const takeSnapshot = async () => {
     const hwnd = selWin?.hwnd ?? 0
-    // WGC single-frame needs DispatcherQueue + WinRT on calling thread,
-    // which conflicts with main STA thread (crash). Always use DesktopBlt
-    // (GDI-based) for single-frame — safe, fast, captures entire desktop.
-    const method = 'dxgi'
+    // Frontend decides method based on target:
+    //   desktop (hwnd=0) → dxgi (DesktopBlt) — fast, reliable single-frame
+    //   window           → wgc — GPU capture for specific window
+    const method = hwnd === 0 ? 'dxgi' : 'wgc'
+    addLog(`[Capture] 📷 snapshot start: hwnd=${hwnd} method=${method} winState=${winState}`)
     if (cantCaptureMinimized(method, winState)) {
       addLog(`[Capture] blocked: window minimized, ${method} cannot capture`); return
     }
     addLog(`[Capture] ${METHOD_SHORT[method] || method} ${hwnd ? 'hwnd='+hwnd : 'desktop'}...`)
     const t0 = Date.now()
+    snapshotStartRef.current = t0
     try {
       snapshotRef.current = true
+      addLog(`[Capture] calling hostCall capture_window...`)
       const info = await hostCall('capture_window', { hwnd, method }) as { ok?: boolean; method?: string; w?: number; h?: number }
       const elapsed = Date.now() - t0
+      addLog(`[Capture] hostCall returned: ok=${info?.ok} w=${info?.w} h=${info?.h} method=${info?.method} (${elapsed}ms)`)
       if (info && info.ok) {
         if (info.method) setCapMethod(info.method)
         addLog(`[Capture] OK ${info.w}x${info.h} (${elapsed}ms) [${info.method || '?'}]`)
@@ -659,7 +670,10 @@ function ScreenshotPanel({ selWin, screenRatio, forceMethod, winState, expanded,
         snapshotRef.current = false
         addLog(`[Capture] failed (${elapsed}ms)`)
       }
-    } catch { snapshotRef.current = false; addLog(`[Capture] failed after ${Date.now() - t0}ms`) }
+    } catch (ex: any) {
+      snapshotRef.current = false
+      addLog(`[Capture] EXCEPTION: ${ex?.message || ex} after ${Date.now() - t0}ms`)
+    }
   }
 
   // ── Preview toggle ──
@@ -674,7 +688,7 @@ function ScreenshotPanel({ selWin, screenRatio, forceMethod, winState, expanded,
         addLog(`[Preview] blocked: window minimized, ${forceMethod} cannot capture`); return
       }
       addLog(`[Preview] ${selWin?.title ?? 'desktop'} [${forceMethod}]`)
-      previewingRef.current = true; setPreviewing(true); setFps(0); setCapMethod('')
+      previewingRef.current = true; setPreviewing(true); setFps(0); setCapMethod(forceMethod); setSnapshotLatency(null)
       try { await hostCall('capture_stream_start', { hwnd, tcpPort: 9999, method: forceMethod, transport: 'shared' }) }
       catch (e) { previewingRef.current = false; setPreviewing(false); addLog(`[Preview] start failed: ${e}`); return }
       if (!expanded) onToggle()
@@ -694,8 +708,11 @@ function ScreenshotPanel({ selWin, screenRatio, forceMethod, winState, expanded,
         <div className="flex items-center gap-2 min-w-0">
           <Camera className="w-4 h-4 text-text-secondary shrink-0" />
           <span className="text-sm font-medium text-text-primary shrink-0">Screenshot</span>
-          {previewing && <span className="text-xs text-accent shrink-0">{fps} FPS</span>}
-          {capMethod && !previewing && <span className="text-xs text-text-muted shrink-0">{capMethod}</span>}
+          {capMethod && <span className="text-[11px] font-medium text-accent bg-accent/10 px-1.5 py-0.5 rounded shrink-0">{METHOD_SHORT[capMethod] || capMethod.toUpperCase()}</span>}
+          {previewing && <span className="text-xs text-text-muted shrink-0">{fps} FPS</span>}
+          {snapshotLatency !== null && !previewing && (
+            <span className="text-xs text-text-muted shrink-0">{snapshotLatency}ms</span>
+          )}
         </div>
         <div className="flex items-center gap-0.5 shrink-0">
           <Tooltip text="单帧截图">

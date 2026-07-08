@@ -257,6 +257,36 @@ Key: `hostCall` internally extracts `.result` from the `{id, result}` envelope, 
 | `pick_dir` | — | `{dir}` (Windows folder picker) |
 | `open_dir` | `{dir}` | `{ok:true}` (ShellExecute open) |
 
+### Method routing (铁律 5 enforced)
+
+**Frontend decides method, C++ only executes.** No silent fallback, no parameter rewriting.
+
+**Single-frame** (`call_capture`):
+| Method | Backend | Notes |
+|--------|---------|-------|
+| `wgc` | `wgc_capture_single(hwnd)` | Requires valid HWND; hwnd=0 returns error |
+| `wgc-monitor` | `wgc_capture_single_monitor(hmon)` | Desktop via primary monitor |
+| `dxgi` / `desktopblt` | `capture_desktop_bitblt()` | GDI DesktopBlt, returns method="DesktopBlt" |
+| `GDI(GetWindowDC)` | `capture_gdi_getwindowdc(hwnd)` | |
+| `PrintWindow` | `capture_printwindow(hwnd)` | |
+| `ScreenBitBlt` | `capture_screen_bitblt(hwnd)` | |
+| `DesktopBlt` | `capture_desktop_bitblt()` | Canonical name |
+| unknown | — | Returns error, no fallback chain |
+
+**Streaming** (`capture_stream_start`):
+| Method | Backend | Notes |
+|--------|---------|-------|
+| `wgc` | `wgc_stream_start(hwnd)` / `wgc_stream_start_monitor(hmon)` | hwnd=0 → monitor mode |
+| `dxgi` | — | Returns error: "DXGI stream not implemented" |
+| unknown | — | Returns error |
+
+**Frontend decision logic** (`App.tsx:takeSnapshot`):
+```tsx
+const method = hwnd === 0 ? 'dxgi' : 'wgc'
+// desktop → DesktopBlt (fast, reliable single-frame)
+// window  → WGC (GPU capture)
+```
+
 ### Logging architecture (event-driven, zero polling)
 
 All logs (C++ LOG + TS addLog) flow through the same pipeline — ring buffer + log file.
@@ -419,6 +449,21 @@ Never use `any` for WebView2 event handlers — the `.d.ts` enables compile-time
 of method names (e.g. `e.additionalData` not `e.getAdditionalData()`).
 
 ## Recent Fixes (2026-07-08)
+
+### Method routing — 铁律 5 full enforcement (major)
+C++ no longer makes method decisions. All silent mappings removed:
+- `capture_stream_start`: respects `method` param (was hardcoded WGC)
+- `call_capture`: `'dxgi'` + `'desktopblt'` both map to DesktopBlt, returns `method="DesktopBlt"` (was silent lie)
+- `'wgc'` with hwnd=0 returns error (was silently switching to monitor — now use `'wgc-monitor'` explicitly)
+- Unknown methods return error (was fallback chain)
+- Frontend `takeSnapshot`: `hwnd === 0 ? 'dxgi' : 'wgc'` — frontend owns the decision
+- Comprehensive LOG() coverage in `wgc_capture_single` and `wgc_capture_single_monitor`
+
+### Screenshot header UI: method badge + latency/FPS
+Header always shows capture method as accent badge (`[WGC]` / `[DXGI]`).
+Single-frame 📷 shows end-to-end latency (button press → Canvas render) in ms.
+Streaming ▶ shows FPS counter (unchanged).
+`capMethod` no longer cleared on stream start.
 
 ### Screenshot panel SharedBuffer pipeline (major)
 JS handler had 3 silent bugs all swallowed by `catch(_){}`:

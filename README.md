@@ -87,13 +87,15 @@ tictactoe/
 
 | Method | .lib | Description |
 |--------|------|-------------|
-| WGC | wgc.lib | GPU FramePool, D3D11+WinRT, 60+ FPS |
-| DesktopBlt | desktop.lib | Full desktop capture |
+| WGC | wgc.lib | GPU FramePool, D3D11+WinRT, 60+ FPS (window or monitor) |
+| WGC Monitor | wgc.lib | GPU desktop capture via monitor handle |
+| DesktopBlt | desktop.lib | GDI full desktop capture, fast single-frame (<10ms) |
 | GetWindowDC | gdi.lib | Window DC capture |
 | PrintWindow | pw.lib | WM_PRINT-based, magenta detection |
 | ScreenBitBlt | screen.lib | Virtual screen BitBlt |
 
-Fallback chain: DesktopBlt → GetWindowDC → PrintWindow → ScreenBitBlt
+**Frontend decides, C++ executes.** Method passed via `{hwnd, method}` — no silent fallback.
+Desktop single-frame → `dxgi` (DesktopBlt). Window single-frame → `wgc`. Streaming → `wgc` only.
 
 ## Transport Methods
 
