@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { Play, Square, Camera, Monitor, Settings, Moon, Sun, ChevronDown, ChevronLeft, FileText, X, MonitorUp, Search, MonitorSmartphone, RefreshCw, FolderOpen, Cpu, Pencil, Copy, Check } from 'lucide-react'
+import { Play, Square, Camera, Monitor, Settings, Moon, Sun, ChevronDown, ChevronLeft, FileText, X, MonitorUp, Search, MonitorSmartphone, RefreshCw, FolderOpen, Cpu, Pencil, Copy, Check, ArrowDown } from 'lucide-react'
 // ── WebView2 WebMessage bridge (replaces Tauri invoke) ──
 type PendingCall = {
   resolve: (value: any) => void;
@@ -863,7 +863,9 @@ function LogPanel({ compact, expanded: exp, onToggle, keepFiles }: { compact?: b
   const toggle = onToggle || (() => setLocalExpanded(v => !v))
   const scrollRef = useRef<HTMLDivElement>(null)
   const sessionScrollRef = useRef<HTMLDivElement>(null)
-  const userScrolledUp = useRef(false)
+  const [scrolledUp, setScrolledUp] = useState(false)
+  const [cardsScrolledUp, setCardsScrolledUp] = useState<Set<number>>(new Set())
+  const cardScrollRefs = useRef<Map<number, HTMLDivElement>>(new Map())
   const [historyFiles, setHistoryFiles] = useState<HistoryFile[]>([])
   const [openFiles, setOpenFiles] = useState<Set<number>>(new Set())
   const [currentExpanded, setCurrentExpanded] = useState(true)
@@ -894,7 +896,7 @@ function LogPanel({ compact, expanded: exp, onToggle, keepFiles }: { compact?: b
     if (!ref) return
     const onScroll = () => {
       const atBottom = ref.scrollTop + ref.clientHeight >= ref.scrollHeight - 40
-      userScrolledUp.current = !atBottom
+      setScrolledUp(!atBottom)
     }
     ref.addEventListener('scroll', onScroll, { passive: true })
     return () => ref.removeEventListener('scroll', onScroll)
@@ -903,9 +905,9 @@ function LogPanel({ compact, expanded: exp, onToggle, keepFiles }: { compact?: b
   const entryCount = entries.length
   useEffect(() => {
     const ref = compact ? scrollRef.current : sessionScrollRef.current
-    if (!ref || userScrolledUp.current) return
+    if (!ref || scrolledUp) return
     requestAnimationFrame(() => { ref.scrollTop = ref.scrollHeight })
-  }, [entryCount, compact])
+  }, [entryCount, compact, scrolledUp])
 
   // Full-card mode (Log tab): current session + history cards
   if (!compact) {
@@ -923,6 +925,13 @@ function LogPanel({ compact, expanded: exp, onToggle, keepFiles }: { compact?: b
               <span className="text-xs text-text-muted">({displayLines.length})</span>
             </div>
             <div className="flex items-center gap-0.5">
+              <Tooltip text={scrolledUp ? "滚动到底部" : "已在底部"}>
+                <button onClick={e => { e.stopPropagation(); sessionScrollRef.current?.scrollTo({top: sessionScrollRef.current.scrollHeight, behavior: 'smooth'}) }}
+                  disabled={!scrolledUp}
+                  className={`p-1 rounded-md transition-colors ${scrolledUp ? 'text-accent bg-accent/15 hover:bg-accent/25' : 'text-text-muted/30 cursor-not-allowed'}`}>
+                  <ArrowDown className="w-3.5 h-3.5" />
+                </button>
+              </Tooltip>
               <Tooltip text="复制全部日志"><button onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(displayLines.join('\n')); setSessionCopied(true); setTimeout(() => setSessionCopied(false), 1500) }}
                 className="p-1 rounded-md text-text-secondary hover:text-accent hover:bg-bg-tertiary transition-colors">{sessionCopied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}</button></Tooltip>
               <ChevronDown className={`w-4 h-4 text-text-muted transition-transform duration-150 shrink-0 ${currentExpanded?'rotate-180':''}`} />
@@ -932,13 +941,18 @@ function LogPanel({ compact, expanded: exp, onToggle, keepFiles }: { compact?: b
             style={{ gridTemplateRows: currentExpanded ? '1fr' : '0fr' }}>
             <div className="overflow-hidden min-h-0">
               <div className="border-t border-border" />
-              <div ref={sessionScrollRef} className="max-h-[400px] overflow-y-auto p-4 font-mono text-xs space-y-0.5">
+              <div ref={sessionScrollRef} className="h-[400px] overflow-y-auto p-4 font-mono text-xs">
+                <div className="min-h-full flex flex-col justify-end space-y-0.5">
                 {displayLines.length === 0
                   ? <div className="text-text-muted text-center py-4">No logs yet</div>
-                  : displayLines.map((l, i) => (
-                      <div key={`cur-${i}`} className="text-text-muted whitespace-pre-wrap break-all" style={{paddingLeft:'16ch',textIndent:'-16ch'}}>{l}</div>
-                    ))
+                  : displayLines.map((l, i) => {
+                      const last = i === displayLines.length - 1
+                      const zebra = !last ? (i % 2 === 0 ? 'bg-white/[0.03]' : 'bg-black/[0.03]') : ''
+                      return (
+                      <div key={`cur-${i}`} className={`whitespace-pre-wrap break-all ${last ? 'font-semibold text-text-primary' : 'text-text-muted ' + zebra}`} style={{paddingLeft:'16ch',textIndent:'-16ch'}}>{l}</div>
+                    )})
                 }
+                </div>
               </div>
             </div>
           </div>
@@ -976,6 +990,13 @@ function LogPanel({ compact, expanded: exp, onToggle, keepFiles }: { compact?: b
                 <div className="flex items-center gap-0.5">
                   <Tooltip text="刷新文件内容"><button onClick={e => { e.stopPropagation(); setRefreshingIdx(fi); hostCall('read_log_file', { filename: f.name }).then(res => { const content = res?.content || ''; const newLines = content ? content.split('\n') : [] as string[]; setHistoryFiles(prev => prev.map((hf, i) => i === fi ? { ...hf, lines: newLines } : hf)); }).catch(() => {}).finally(() => setRefreshingIdx(null)) }}
                     className={`p-1 rounded-md text-text-secondary hover:text-accent hover:bg-bg-tertiary transition-colors ${refreshingIdx === fi ? 'animate-spin' : ''}`}><RefreshCw className="w-3.5 h-3.5" /></button></Tooltip>
+                  <Tooltip text={cardsScrolledUp.has(fi) ? "滚动到底部" : "已在底部"}>
+                    <button onClick={e => { e.stopPropagation(); const el = cardScrollRefs.current.get(fi); if (el) el.scrollTo({top: el.scrollHeight, behavior: 'smooth'}) }}
+                      disabled={!cardsScrolledUp.has(fi)}
+                      className={`p-1 rounded-md transition-colors ${cardsScrolledUp.has(fi) ? 'text-accent bg-accent/15 hover:bg-accent/25' : 'text-text-muted/30 cursor-not-allowed'}`}>
+                      <ArrowDown className="w-3.5 h-3.5" />
+                    </button>
+                  </Tooltip>
                   <Tooltip text="复制文件内容"><button onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(f.lines.join('\n')); setCopiedFileIdx(fi); setTimeout(() => setCopiedFileIdx(null), 1500) }}
                     className="p-1 rounded-md text-text-secondary hover:text-accent hover:bg-bg-tertiary transition-colors">{copiedFileIdx === fi ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}</button></Tooltip>
                   <ChevronDown className={`w-4 h-4 text-text-muted transition-transform duration-150 shrink-0 ${open?'rotate-180':''}`} />
@@ -985,13 +1006,20 @@ function LogPanel({ compact, expanded: exp, onToggle, keepFiles }: { compact?: b
                 style={{ gridTemplateRows: open ? '1fr' : '0fr' }}>
                 <div className="overflow-hidden min-h-0">
                   <div className="border-t border-border" />
-                  <div className="max-h-[400px] overflow-y-auto p-4 font-mono text-xs space-y-0.5">
+                  <div ref={el => { if (el) cardScrollRefs.current.set(fi, el); else cardScrollRefs.current.delete(fi) }}
+                    onScroll={e => { const t = e.currentTarget; const atBottom = t.scrollTop + t.clientHeight >= t.scrollHeight - 40; setCardsScrolledUp(prev => { const s = new Set(prev); if (!atBottom) s.add(fi); else s.delete(fi); return s }) }}
+                    className="h-[400px] overflow-y-auto p-4 font-mono text-xs">
+                    <div className="min-h-full flex flex-col justify-end space-y-0.5">
                     {f.lines.length === 0
                       ? <div className="text-text-muted text-center py-4">Loading...</div>
-                      : f.lines.map((l, i) => (
-                          <div key={i} className="text-text-muted whitespace-pre-wrap break-all" style={{paddingLeft:'16ch',textIndent:'-16ch'}}>{l}</div>
-                        ))
+                      : f.lines.map((l, i) => {
+                          const last = i === f.lines.length - 1
+                          const zebra = !last ? (i % 2 === 0 ? 'bg-white/[0.03]' : 'bg-black/[0.03]') : ''
+                          return (
+                          <div key={i} className={`whitespace-pre-wrap break-all ${last ? 'font-semibold text-text-primary' : 'text-text-muted ' + zebra}`} style={{paddingLeft:'16ch',textIndent:'-16ch'}}>{l}</div>
+                        )})
                     }
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1018,6 +1046,13 @@ function LogPanel({ compact, expanded: exp, onToggle, keepFiles }: { compact?: b
           <span className="text-xs text-text-muted">({displayLines.length})</span>
         </div>
         <div className="flex items-center gap-0.5">
+          <Tooltip text={scrolledUp ? "滚动到底部" : "已在底部"}>
+            <button onClick={e => { e.stopPropagation(); scrollRef.current?.scrollTo({top: scrollRef.current.scrollHeight, behavior: 'smooth'}) }}
+              disabled={!scrolledUp}
+              className={`p-1 rounded-md transition-colors ${scrolledUp ? 'text-accent bg-accent/15 hover:bg-accent/25' : 'text-text-muted/30 cursor-not-allowed'}`}>
+              <ArrowDown className="w-3.5 h-3.5" />
+            </button>
+          </Tooltip>
           <Tooltip text="复制日志">
             <button onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(displayLines.join('\n')); setSessionCopied(true); setTimeout(() => setSessionCopied(false), 1500) }}
               className="p-1 rounded-md text-text-secondary hover:text-accent hover:bg-bg-tertiary transition-colors">
@@ -1036,9 +1071,12 @@ function LogPanel({ compact, expanded: exp, onToggle, keepFiles }: { compact?: b
               <div className="flex items-center justify-center h-full text-sm text-text-muted">No logs</div>
             ) : (
               <div className="space-y-1 font-mono text-xs text-text-muted pt-1">
-                {displayLines.slice(-100).map((l, i) => (
-                  <div key={`c-${i}`}>{l}</div>
-                ))}
+                {displayLines.slice(-100).map((l, i, arr) => {
+                  const last = i === arr.length - 1
+                  const zebra = !last ? (i % 2 === 0 ? 'bg-white/[0.03]' : 'bg-black/[0.03]') : ''
+                  return (
+                  <div key={`c-${i}`} className={last ? 'font-semibold text-text-primary' : 'text-text-muted ' + zebra}>{l}</div>
+                )})}
               </div>
             )}
           </div>
