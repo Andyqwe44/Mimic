@@ -119,14 +119,14 @@ export function SettingsView({
   inputMethod: string; setInputMethod: (m: string) => void
 }) {
   const themePairs = [
-    ['#3B82F6', '#0EA5E9'], // Ocean
-    ['#6366F1', '#8B5CF6'], // Twilight
-    ['#10B981', '#06B6D4'], // Lagoon
-    ['#F59E0B', '#F97316'], // Sunset
-    ['#EC4899', '#8B5CF6'], // Orchid
-    ['#14B8A6', '#10B981'], // Mint
-    ['#3B82F6', '#8B5CF6'], // Nebula
-    ['#EF4444', '#EAB308'], // Dev ⚡
+    ['#3B82F6', '#F97316'], // Ocean — blue + orange
+    ['#6366F1', '#EAB308'], // Twilight — indigo + yellow
+    ['#10B981', '#F43F5E'], // Lagoon — emerald + rose
+    ['#F59E0B', '#06B6D4'], // Sunset — amber + cyan
+    ['#EC4899', '#6366F1'], // Orchid — pink + indigo
+    ['#14B8A6', '#F97316'], // Mint — teal + orange
+    ['#3B82F6', '#8B5CF6'], // Nebula — blue + violet
+    ['#EF4444', '#22C55E'], // Dev ⚡ — red danger + hacker green
   ]
   const themeNames = ['Ocean', 'Twilight', 'Lagoon', 'Sunset', 'Orchid', 'Mint', 'Nebula', 'Dev']
   const [accent, setAccent] = useState(() => {
@@ -135,7 +135,7 @@ export function SettingsView({
   })
   const [devAccent, setDevAccent] = useState(() => {
     const v = document.documentElement.style.getPropertyValue('--color-accent-dev').trim()
-    return v || '#0EA5E9'
+    return v || '#F97316'
   })
   const [normalAccent, setNormalAccent] = useState(accent)
   const [normalDevAccent, setNormalDevAccent] = useState(devAccent)
