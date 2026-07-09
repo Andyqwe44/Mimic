@@ -595,6 +595,18 @@ of method names (e.g. `e.additionalData` not `e.getAdditionalData()`).
 
 ## Recent Fixes (2026-07-09)
 
+### Two-color theme system + Dev Mode override + lightning-bolt swatches (major)
+- 8 theme pairs (7 normal + 1 Dev), each with c1 (primary) and c2 (secondary) colors
+- c1 → primary buttons (Start/Select/Snapshot), c2 → disconnect/warning via `bg-accent-dev`/`text-accent-dev`
+- Lightning-bolt diagonal-cut swatch (20×20 + top/bottom indicator lines), SVG viewBox=px for pixel-aligned strokes
+- Dev Mode ON → auto-switch to Dev pair (Red #EF4444 / Yellow #EAB308), force override all theme colors
+- Dev Mode OFF → restore user's normal theme selection (stored in normalAccent/normalDevAccent)
+- Dev swatch shown inline with `ml-3` gap, disabled when Dev Mode OFF
+- All toggles/radios use Tailwind classes (`bg-accent`, `border-accent`) instead of inline styles — auto-follow CSS variable overrides
+- Disconnect button changed from hardcoded amber to `accent-dev` colors
+- `--color-accent-dev` registered in Tailwind `@theme` + CSS `:root`
+- Color picker Tooltip labels: Ocean/Twilight/Lagoon/Sunset/Orchid/Mint/Nebula/Dev
+
 ### ActionBtn golden-ratio sizing + className audit + UI height unification (major)
 - Button sizing: golden-ratio modular scale (×√φ≈1.272), 5 tiers: xs(64)/sm(80)/md(104)/lg(132)/xl(168), all h-7(28px)
 - `size` prop optional — auto-detects from `label.length`; explicit override still supported

@@ -118,11 +118,28 @@ export function SettingsView({
   frameDumpDir: string; setFrameDumpDir: (d: string) => void
   inputMethod: string; setInputMethod: (m: string) => void
 }) {
-  const colors = ['#3B82F6', '#8B5CF6', '#EC4899', '#F59E0B', '#10B981', '#EF4444']
+  const themePairs = [
+    ['#3B82F6', '#0EA5E9'], // Ocean
+    ['#6366F1', '#8B5CF6'], // Twilight
+    ['#10B981', '#06B6D4'], // Lagoon
+    ['#F59E0B', '#F97316'], // Sunset
+    ['#EC4899', '#8B5CF6'], // Orchid
+    ['#14B8A6', '#10B981'], // Mint
+    ['#3B82F6', '#8B5CF6'], // Nebula
+    ['#EF4444', '#EAB308'], // Dev ⚡
+  ]
+  const themeNames = ['Ocean', 'Twilight', 'Lagoon', 'Sunset', 'Orchid', 'Mint', 'Nebula', 'Dev']
   const [accent, setAccent] = useState(() => {
     const v = document.documentElement.style.getPropertyValue('--color-accent').trim()
     return v || '#3B82F6'
   })
+  const [devAccent, setDevAccent] = useState(() => {
+    const v = document.documentElement.style.getPropertyValue('--color-accent-dev').trim()
+    return v || '#0EA5E9'
+  })
+  const [normalAccent, setNormalAccent] = useState(accent)
+  const [normalDevAccent, setNormalDevAccent] = useState(devAccent)
+  const DEV_PAIR = themePairs[7] // ['#EF4444', '#EAB308']
   const [screenRes, setScreenRes] = useState('?×?')
   const [logDir, setLogDir] = useState('...')
   const [connExpanded, setConnExpanded] = useState(true)
@@ -139,6 +156,23 @@ export function SettingsView({
       })
       .catch(() => {})
   }, [])
+
+  // Dev mode: auto-switch to Dev pair, restore normal on exit
+  useEffect(() => {
+    if (devMode) {
+      setNormalAccent(accent)
+      setNormalDevAccent(devAccent)
+      setAccent(DEV_PAIR[0])
+      setDevAccent(DEV_PAIR[1])
+      document.documentElement.style.setProperty('--color-accent', DEV_PAIR[0])
+      document.documentElement.style.setProperty('--color-accent-dev', DEV_PAIR[1])
+    } else {
+      setAccent(normalAccent)
+      setDevAccent(normalDevAccent)
+      document.documentElement.style.setProperty('--color-accent', normalAccent)
+      document.documentElement.style.setProperty('--color-accent-dev', normalDevAccent)
+    }
+  }, [devMode])
 
   return (
     <div className="flex-1 overflow-y-auto p-6 space-y-3">
@@ -181,7 +215,7 @@ export function SettingsView({
                       }
                       addLog(`[Setting] auto snap = ${next}`)
                     }}
-                    className={`relative w-10 h-5 rounded-full transition-colors ${autoSnap ? 'bg-amber-500' : 'bg-bg-tertiary'}`}
+                    className={`relative w-10 h-5 rounded-full transition-colors ${autoSnap ? 'bg-accent' : 'bg-bg-tertiary'}`}
                   >
                     <span
                       className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${autoSnap ? 'translate-x-5' : ''}`}
@@ -195,13 +229,15 @@ export function SettingsView({
                   const ringClass = !autoSnap && isActive
                     ? 'border-accent bg-accent/10 cursor-pointer'
                     : autoSnap && isActive
-                      ? 'border-amber-500 bg-amber-500/10 cursor-not-allowed'
+                      ? 'cursor-not-allowed'
                       : autoSnap
                         ? 'border-border bg-bg-primary opacity-50 cursor-not-allowed'
                         : 'border-border bg-bg-primary hover:bg-bg-hover cursor-pointer'
                   return (
                     <Tooltip key={m.v} text={m.desc}>
-                      <label className={`${SELECTABLE_BTN} ${ringClass}`}>
+                      <label
+                        className={`${SELECTABLE_BTN} ${ringClass} ${autoSnap && isActive ? 'border-accent bg-accent/10' : ''}`}
+                      >
                         <input
                           type="radio" name="snapMethod" value={m.v}
                           checked={isActive} disabled={autoSnap}
@@ -248,7 +284,7 @@ export function SettingsView({
                       if (next) setStreamMethod('wgc')
                       addLog(`[Setting] auto stream = ${next}`)
                     }}
-                    className={`relative w-10 h-5 rounded-full transition-colors ${autoStream ? 'bg-amber-500' : 'bg-bg-tertiary'}`}
+                    className={`relative w-10 h-5 rounded-full transition-colors ${autoStream ? 'bg-accent' : 'bg-bg-tertiary'}`}
                   >
                     <span
                       className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${autoStream ? 'translate-x-5' : ''}`}
@@ -264,7 +300,7 @@ export function SettingsView({
                     !autoStream && isActive && !unsupported
                       ? 'border-accent bg-accent/10 cursor-pointer'
                       : autoStream && isActive
-                        ? 'border-amber-500 bg-amber-500/10 cursor-not-allowed'
+                        ? 'cursor-not-allowed'
                         : autoStream || unsupported
                           ? 'border-border bg-bg-primary opacity-50 cursor-not-allowed'
                           : 'border-border bg-bg-primary hover:bg-bg-hover cursor-pointer'
@@ -277,7 +313,9 @@ export function SettingsView({
                           : m.desc
                       }
                     >
-                      <label className={`${SELECTABLE_BTN} ${ringClass}`}>
+                      <label
+                        className={`${SELECTABLE_BTN} ${ringClass} ${autoStream && isActive ? 'border-accent bg-accent/10' : ''}`}
+                      >
                         <input
                           type="radio" name="streamMethod" value={m.v}
                           checked={isActive}
@@ -486,24 +524,69 @@ export function SettingsView({
           <div className="flex items-center gap-2">
             <label className="text-sm text-text-secondary w-24 shrink-0">Accent</label>
             <div className="flex gap-1.5">
-              {colors.map((c) => (
-                <button
-                  key={c}
-                  onClick={() => {
-                    setAccent(c)
-                    document.documentElement.style.setProperty('--color-accent', c)
-                    addLog(`[Theme] accent = ${c}`)
-                  }}
-                  className="w-6 h-6 rounded-full transition-all duration-150"
-                  style={{
-                    background: c,
-                    boxShadow:
-                      accent === c
-                        ? `0 0 0 2px var(--color-bg-secondary), 0 0 0 4px ${c}`
-                        : 'none',
-                  }}
-                />
-              ))}
+              {themePairs.map(([c1, c2], i) => {
+                const isDev = i === themePairs.length - 1
+                const disabled = isDev ? !devMode : devMode
+                const selected = accent === c1 && devAccent === c2
+                const name = themeNames[i]
+                return (
+                  <Tooltip key={`${c1}-${c2}`} text={name} className={isDev ? 'ml-3' : ''}>
+                  <span className="relative inline-flex items-center justify-center" style={{ width: 28, height: 28 }}>
+                    {/* Selected indicator: top line (c1) + bottom line (c2) */}
+                    {selected && (
+                      <>
+                        <span
+                          className="absolute rounded-full"
+                          style={{ width: 20, height: 2, top: 0, left: '50%', transform: 'translateX(-50%)', background: c1 }}
+                        />
+                        <span
+                          className="absolute rounded-full"
+                          style={{ width: 20, height: 2, bottom: 0, left: '50%', transform: 'translateX(-50%)', background: c2 }}
+                        />
+                      </>
+                    )}
+                    {/* Button (20×20) */}
+                    <button
+                      onClick={() => {
+                        if (disabled) return
+                        setAccent(c1)
+                        setDevAccent(c2)
+                        setNormalAccent(c1)
+                        setNormalDevAccent(c2)
+                        document.documentElement.style.setProperty('--color-accent', c1)
+                        document.documentElement.style.setProperty('--color-accent-dev', c2)
+                        addLog(`[Theme] accent = ${c1} / ${c2}`)
+                      }}
+                      className={`relative w-5 h-5 rounded-md overflow-hidden transition-all duration-150 ${disabled ? 'opacity-30 cursor-not-allowed' : ''}`}
+                    >
+                      <span className="absolute inset-0" style={{ background: c1 }} />
+                      <span
+                        className="absolute inset-0"
+                        style={{
+                          background: c2,
+                          clipPath:
+                            'polygon(87.5% 0%, 100% 0%, 100% 100%, 12.5% 100%, 31.25% 50%, 68.75% 50%)',
+                        }}
+                      />
+                      {/* Internal cut line (SVG, 20×20) */}
+                      <svg
+                        className="absolute inset-0 w-full h-full pointer-events-none"
+                        viewBox="0 0 20 20"
+                        preserveAspectRatio="none"
+                      >
+                        <polyline
+                          points="17.5,0 13.75,10 6.25,10 2.5,20"
+                          fill="none"
+                          stroke="var(--color-bg-secondary)"
+                          strokeWidth="2"
+                          strokeLinejoin="miter"
+                        />
+                      </svg>
+                    </button>
+                  </span>
+                  </Tooltip>
+                )
+              })}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -563,7 +646,7 @@ export function SettingsView({
                 setDevMode(!devMode)
                 addLog(`[Dev] ${!devMode ? 'ON' : 'OFF'}`)
               }}
-              className={`relative w-10 h-5 rounded-full transition-colors ${devMode ? 'bg-amber-500' : 'bg-bg-tertiary'}`}
+              className={`relative w-10 h-5 rounded-full transition-colors ${devMode ? 'bg-accent-dev' : 'bg-bg-tertiary'}`}
             >
               <span
                 className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${devMode ? 'translate-x-5' : ''}`}
@@ -575,7 +658,7 @@ export function SettingsView({
 
       {devMode && (
         <SettingsCard
-          icon={<Cpu className="w-4 h-4 text-amber-400" />}
+          icon={<Cpu className="w-4 h-4 text-accent-dev" />}
           title="Developer Mode"
           defaultExpanded={true}
         >

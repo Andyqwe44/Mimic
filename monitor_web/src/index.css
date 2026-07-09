@@ -16,6 +16,7 @@
   --color-accent: #3B82F6;
   --color-accent-hover: #2563EB;
   --color-accent-light: #dbeafe;
+  --color-accent-dev: #0EA5E9;
   --color-success: #22c55e;
   --color-info: #3B82F6;
   --color-warning: #eab308;
@@ -53,6 +54,7 @@
   --color-accent: var(--color-accent);
   --color-accent-hover: var(--color-accent-hover);
   --color-accent-light: var(--color-accent-light);
+  --color-accent-dev: var(--color-accent-dev);
   --color-success: var(--color-success);
   --color-info: var(--color-info);
   --color-warning: var(--color-warning);

@@ -147,7 +147,7 @@ export function ConnectionPanel({
                         onDisconnect()
                         setSelTitle(' Entire Desktop')
                       }}
-                      className="h-7 w-7 flex items-center justify-center rounded-md bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 transition-colors shrink-0"
+                      className="h-7 w-7 flex items-center justify-center rounded-md bg-accent-dev/10 hover:bg-accent-dev/20 text-accent-dev border border-accent-dev/20 transition-colors shrink-0"
                     >
                       <Unlink className="w-3.5 h-3.5" />
                     </button>
