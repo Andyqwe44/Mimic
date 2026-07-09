@@ -151,10 +151,12 @@ export function SettingsView({
   const [recording, setRecording] = useState(false)
   const [displayCombo, setDisplayCombo] = useState('')
   const pressedSeqRef = useRef<string[]>([])             // ordered e.code values in press order
+  const lastComboRef = useRef('')                         // cached combo string (survives onUp splice)
   const savedComboRef = useRef(mappingHotkey)             // pre-recording value for cancel
 
   const startRecording = useCallback(() => {
     savedComboRef.current = mappingHotkey
+    lastComboRef.current = ''
     pressedSeqRef.current = []
     setDisplayCombo('')
     setRecording(true)
@@ -163,7 +165,7 @@ export function SettingsView({
   // Stable — uses refs, no state deps (safe in useEffect)
   const commitRecording = useCallback(() => {
     setRecording(false)
-    const combo = pressedSeqRef.current.map(codeToName).join('+')
+    const combo = lastComboRef.current
     if (combo) {
       setMappingHotkey(combo)
       savedComboRef.current = combo
@@ -191,7 +193,9 @@ export function SettingsView({
       if (!pressedSeqRef.current.includes(e.code)) {
         pressedSeqRef.current.push(e.code)
       }
-      setDisplayCombo(pressedSeqRef.current.map(codeToName).join('+'))
+      const combo = pressedSeqRef.current.map(codeToName).join('+')
+      lastComboRef.current = combo
+      setDisplayCombo(combo)
     }
     const onUp = (e: KeyboardEvent) => {
       const idx = pressedSeqRef.current.indexOf(e.code)
