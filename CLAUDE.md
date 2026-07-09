@@ -654,6 +654,17 @@ writes to EOF regardless of fseek).
 - `monitor_web/src/lib/bridge.ts` — `addRemote` accepts pre-collapsed data, `add` collapses TS-side, `initSync` parses collapsed lines
 - `monitor_web/src/components/LogPanel.tsx` — `formatLine` renders `×N` + time range
 
+**Known issue — async break-point jitter:** When a `[ui]` event is logged via TS
+`addLog()` → `hostCall('log_ui_event')` while a C++ run (e.g. `[main]` stream frames)
+is active, the `hostCall` arrives at C++ asynchronously. Several more `[main]` frames
+may be logged before C++ processes the `[ui]` and breaks the run. This causes the
+previous run's last entry to include frames that logically belong after the `[ui]`,
+and the next run starts late. Result: two adjacent `[main] ×N` / `[main] ×M` entries
+that appear consecutive in the log but are not merged. Root cause is the inherently
+async WebView2 message bridge — per-tag collapse (separate `g_last_*` per tag) would
+eliminate this but also removes the semantic that `[ui]` events break `[main]` runs,
+which is considered correct behavior. Low priority, cosmetic only.
+
 ## Recent Fixes (2026-07-09)
 
 ### Two-color theme system + Dev Mode override + lightning-bolt swatches (major)

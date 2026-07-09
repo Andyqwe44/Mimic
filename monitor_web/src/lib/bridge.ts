@@ -83,11 +83,25 @@ class LogManager {
 
   // ── C++-side add (remote log push via 'message' event) ──
   // Dedup by (ts, msg) — prevents double-insert when TS also wrote the entry.
-  // count > 1 → C++ already collapsed consecutive duplicates. TS stores as-is.
+  // count > 1 → C++ already collapsed consecutive duplicates.
+  // Only checks prev (last entry) for matching msg — different-tag interruptions
+  // legitimately break the run (A×N, B×1, A×M should stay separate).
   addRemote(ts: string, tag: string, msg: string, count?: number, firstTs?: string) {
     const fullMsg = `[${tag}] ${msg}`
     const dup = this.entries.find((e) => e.ts === ts && e.msg === fullMsg)
     if (dup) return
+    if (count && count > 1) {
+      // Try to update the previous entry in-place
+      const prev = this.entries[this.entries.length - 1]
+      if (prev && prev.msg === fullMsg) {
+        prev.ts = ts
+        prev.count = count
+        prev.firstTs = firstTs
+        this.listeners.forEach((f) => f())
+        return
+      }
+      // Prev is a different entry or not found — push as new
+    }
     this.entries.push({
       ts,
       msg: fullMsg,

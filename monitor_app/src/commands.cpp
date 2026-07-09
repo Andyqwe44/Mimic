@@ -118,18 +118,8 @@ static std::string json_escape(const std::string& s) {
 }
 
 // ── Logger → TS push callback ──────────────────────────────
-// count > 1 → collapsed consecutive duplicates (TS shows ×N + time range)
-// count = 1 → normal single entry
-static void on_log_notify(const char* ts, const char* tag, const char* msg,
-                           int count, const char* firstTs) {
-    std::string json = "{\"type\":\"log\",\"ts\":\"" + json_escape(ts)
-                     + "\",\"tag\":\"" + json_escape(tag)
-                     + "\",\"msg\":\"" + json_escape(msg) + "\"";
-    if (count > 1) {
-        json += ",\"count\":" + std::to_string(count)
-             +  ",\"firstTs\":\"" + json_escape(firstTs) + "\"";
-    }
-    json += "}";
+// Logger builds JSON internally (owns wire format); we just post it.
+static void on_log_notify(const char* json) {
     PostJsonToWebView(json);
 }
 
@@ -774,10 +764,9 @@ static void dump_frame_to_disk(const uint8_t* bgra, int w, int h, const char* pr
 
 void dump_frame_if_enabled(const uint8_t* bgra, int w, int h, bool is_stream) {
     bool enabled = is_stream ? g_dump_stream_frames : g_dump_capture_frames;
-    LOG("cmd", "dump_frame_if_enabled: is_stream=%d enabled=%d dir='%s' capture_en=%d stream_en=%d",
-        (int)is_stream, (int)enabled, g_dump_dir.c_str(),
-        (int)g_dump_capture_frames, (int)g_dump_stream_frames);
-    if (!enabled) return;
+    if (!enabled) return;  // skip LOG when disabled — avoids per-frame spam that breaks collapse
+    LOG("cmd", "dump_frame_if_enabled: is_stream=%d dir='%s'",
+        (int)is_stream, g_dump_dir.c_str());
     dump_frame_to_disk(bgra, w, h, is_stream ? "stream" : "snap");
 }
 

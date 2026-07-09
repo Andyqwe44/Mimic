@@ -53,17 +53,15 @@ void capture_log_free(char* s);
 /// Flush the log file to disk.
 void capture_log_flush(void);
 
-/// ── Notify callback (push C++ LOG entries to TS) ──
+/// ── JSON notify callback (push C++ LOG entries to TS) ──
 /// Called every time capture_log_write_msg() writes an entry.
-/// ts=timestamp, tag=log tag, msg=formatted message body (without [tag] prefix).
-/// count=how many consecutive identical entries collapsed (>0; 1=not collapsed)
-/// firstTs=timestamp of first occurrence in the collapsed run ("" when count<=1)
+/// json = pre-formatted JSON string: {"type":"log","ts":"...","tag":"...","msg":"...",...}
+/// Logger owns the wire format; caller just posts the string to WebView2.
 /// NOT called for capture_log_write_ui() — TS already knows about its own entries.
-typedef void (*capture_log_notify_cb)(const char* ts, const char* tag, const char* msg,
-                                       int count, const char* firstTs);
+typedef void (*capture_log_notify_json_cb)(const char* json);
 
 /// Register a callback for real-time log push (C++ → TS).
-void capture_log_set_notify(capture_log_notify_cb cb);
+void capture_log_set_notify(capture_log_notify_json_cb cb);
 
 /// Write a UI-side log entry with [ui] tag.
 /// Same as LOG("ui", msg) but does NOT trigger notify callback

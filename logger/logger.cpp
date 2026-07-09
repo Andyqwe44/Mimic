@@ -70,20 +70,23 @@ static void _file_write_entry(const char* ts, const char* tag, const char* msg) 
 }
 
 // ── Internal: collapse file — overwrite current run with ×N ──
-// Seeks back to g_last_file_pos, writes collapsed line, truncates leftover bytes.
-// Called after a new entry was just appended (crash-safe: if we crash before
-// this completes, the file has two individual entries — honest, just not collapsed).
+// Uses low-level I/O (not stdio) to avoid buffering/seek issues with fseek+fprintf.
+// 1. fflush pending stdio data  2. _lseek to run start  3. _write collapsed line
+// 4. _chsize_s truncate  5. fseek to resync stdio position.
 // Must hold g_mutex.
 static void _file_collapse(const char* firstTs, const char* lastTs,
                             const char* tag, const char* msg, int count) {
     if (!g_file || count <= 1) return;
-    fseek(g_file, g_last_file_pos, SEEK_SET);
-    fprintf(g_file, "[%s → %s] [%s] %s ×%d\n",
-            firstTs, lastTs, tag, msg, count);
-    long new_end = ftell(g_file);
+    fflush(g_file);  // flush any pending stdio writes
     int fd = _fileno(g_file);
-    _chsize_s(fd, new_end);  // truncate any leftover bytes from previous (longer) content
-    fflush(g_file);
+    char buf[4096];
+    int len = snprintf(buf, sizeof(buf), "[%s → %s] [%s] %s ×%d\n",
+                       firstTs, lastTs, tag, msg, count);
+    if (len <= 0) return;
+    _lseek(fd, g_last_file_pos, SEEK_SET);
+    _write(fd, buf, len);
+    _chsize_s(fd, (__int64)(g_last_file_pos + len));
+    fseek(g_file, 0, SEEK_END);  // resync stdio
 }
 
 // ── Internal: write to ring buffer (must hold g_mutex) ──
@@ -266,7 +269,35 @@ void capture_log_shutdown(void) {
 }
 
 // ── Notify callback (C++ → TS push) ──────────────────────
-static capture_log_notify_cb g_notify_cb = nullptr;
+static capture_log_notify_json_cb g_notify_cb = nullptr;
+
+// ── Minimal JSON string escape (escapes " and \) ──────────
+static std::string _json_escape(const std::string& s) {
+    std::string out;
+    out.reserve(s.size() + 8);
+    for (char c : s) {
+        if (c == '"') out += "\\\"";
+        else if (c == '\\') out += "\\\\";
+        else out += c;
+    }
+    return out;
+}
+
+// ── Build notify JSON message (must NOT hold g_mutex) ─────
+static std::string _build_notify_json(const char* ts, const char* tag, const char* msg,
+                                       int count, const char* firstTs) {
+    std::string json;
+    json.reserve(512);
+    json = "{\"type\":\"log\",\"ts\":\"" + _json_escape(ts)
+         + "\",\"tag\":\"" + _json_escape(tag)
+         + "\",\"msg\":\"" + _json_escape(msg) + "\"";
+    if (count > 1) {
+        json += ",\"count\":" + std::to_string(count)
+             +  ",\"firstTs\":\"" + _json_escape(firstTs) + "\"";
+    }
+    json += "}";
+    return json;
+}
 
 // ── THE ONE write function ───────────────────────────────
 // Write-then-collapse strategy for crash safety:
@@ -278,18 +309,17 @@ static capture_log_notify_cb g_notify_cb = nullptr;
 void capture_log_write_msg(const char* tag, const char* msg) {
     auto ts = _timestamp();
 
-    capture_log_notify_cb cb_copy = nullptr;
-    int notify_count = 1;
-    std::string notify_first_ts;
+    capture_log_notify_json_cb cb_copy = nullptr;
+    std::string notify_json;
     {
         std::lock_guard<std::mutex> lk(g_mutex);
 
         bool same = (g_last_count > 0 && g_last_tag == tag && g_last_msg_body == msg);
 
-        // ── Step 1: write raw entry to file (crash-safe) ──
         // Record file position BEFORE writing only when starting a new run.
         // For collapse: g_last_file_pos stays at run's first entry position.
-        if (!same) {
+        // Guard: g_file may be nullptr before capture_log_init (early LOG calls).
+        if (!same && g_file) {
             g_last_file_pos = ftell(g_file);
         }
         _file_write_entry(ts.c_str(), tag, msg);
@@ -313,18 +343,19 @@ void capture_log_write_msg(const char* tag, const char* msg) {
             _write_ring(ts, formatted);
         }
 
-        notify_count = g_last_count;
-        if (g_last_count > 1) notify_first_ts = g_last_first_ts;
+        // Build notify JSON inside lock (uses g_last_count, g_last_first_ts)
+        notify_json = _build_notify_json(ts.c_str(), tag, msg,
+                                          g_last_count,
+                                          g_last_count > 1 ? g_last_first_ts.c_str() : "");
         cb_copy = g_notify_cb;
     }
     // Notify TS outside lock to avoid re-entrancy deadlock.
     if (cb_copy) {
-        cb_copy(ts.c_str(), tag, msg, notify_count,
-                notify_count > 1 ? notify_first_ts.c_str() : "");
+        cb_copy(notify_json.c_str());
     }
 }
 
-void capture_log_set_notify(capture_log_notify_cb cb) {
+void capture_log_set_notify(capture_log_notify_json_cb cb) {
     g_notify_cb = cb;
 }
 
@@ -340,7 +371,7 @@ void capture_log_write_ui(const char* msg) {
 
         // Step 1: write raw entry to file (crash-safe)
         // Record file position BEFORE writing only for new run.
-        if (!same) {
+        if (!same && g_file) {
             g_last_file_pos = ftell(g_file);
         }
         _file_write_entry(ts.c_str(), "ui", msg);
