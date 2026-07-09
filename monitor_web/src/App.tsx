@@ -1,6 +1,5 @@
 // ═══ App — Game Agent Monitor ═══
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Play, Square } from 'lucide-react'
 import { TopBar } from './components/TopBar'
 import { BottomBar } from './components/BottomBar'
 import { Tooltip } from './components/Toolkit'
@@ -10,7 +9,7 @@ import { LogPanel } from './components/LogPanel'
 import { SettingsView } from './components/SettingsView'
 import { MonitorView } from './components/MonitorView'
 import { hostCall, logMgr, addLog, applyTheme } from './lib/bridge'
-import { cantCaptureMinimized, METHOD_SHORT } from './lib/constants'
+import { cantCaptureMinimized } from './lib/constants'
 import type { WindowInfo } from './lib/types'
 
 // ── Layout constants ──
@@ -454,7 +453,7 @@ export default function App() {
   const [capMethod, setCapMethod] = useState('')
   const [snapshotLatency, setSnapshotLatency] = useState<number | null>(null)
   const [streamFps, setStreamFps] = useState(0)
-  const [targetDims, setTargetDims] = useState('?×?')
+  const [targetDims, setTargetDims] = useState<{w:number,h:number} | null>(null)
   const [agentConnected] = useState(false) // placeholder — future TCP agent detection
 
   useEffect(() => {
@@ -708,6 +707,7 @@ export default function App() {
               onTakeSnapshot={takeSnapshot}
               onTogglePreview={togglePreview}
               inputMethod={inputMethod}
+              targetDims={targetDims}
             >
               <ScreenshotPanel
                 selWin={selWindow} screenRatio={screenRatio}
@@ -723,7 +723,7 @@ export default function App() {
                 hasContentRef={ssHasContentRef}
                 bare
                 onFps={setStreamFps}
-                onDims={(w, h) => setTargetDims(`${w}×${h}`)}
+                onDims={(w, h) => setTargetDims({w, h})}
               />
             </MonitorView>
           )}
@@ -796,7 +796,7 @@ export default function App() {
                 pinned={screenshotPinned} onTogglePin={toggleSsPin}
                 hasContentRef={ssHasContentRef}
                 onFps={setStreamFps}
-                onDims={(w, h) => setTargetDims(`${w}×${h}`)}
+                onDims={(w, h) => setTargetDims({w, h})}
               />
             </div>
             <div className="shrink-0">

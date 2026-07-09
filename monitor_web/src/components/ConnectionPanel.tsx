@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import { ChevronDown, MonitorUp, Unlink, Pin } from 'lucide-react'
 import { Tooltip, ActionBtn } from './Toolkit'
 import { TargetPickerModal } from './TargetPickerModal'
-import { hostCall, addLog } from '../lib/bridge'
+import { addLog } from '../lib/bridge'
 import {
   COLLAPSIBLE_HEADER,
   METHOD_SHORT,
@@ -15,13 +15,13 @@ import type { WindowInfo } from '../lib/types'
 export function ConnectionPanel({
   onSelect,
   onDisconnect,
-  snapMethod,
+  snapMethod: _snapMethod,
   setSnapMethod,
   streamMethod,
   setStreamMethod,
   selWin,
   winState,
-  expectedCaptureState,
+  expectedCaptureState: _expectedCaptureState,
   setExpectedCaptureState,
   expanded,
   onToggle,

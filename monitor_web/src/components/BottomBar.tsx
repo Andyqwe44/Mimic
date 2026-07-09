@@ -17,7 +17,7 @@ export function BottomBar({
   streamMethod: string
   previewing: boolean
   fps: number
-  targetDims: string
+  targetDims: {w: number; h: number} | null
   appVersion: string
   agentConnected: boolean
 }) {
@@ -48,10 +48,10 @@ export function BottomBar({
           </>
         )}
       </span>
-      {targetDims && targetDims !== '?×?' && (
+      {targetDims && targetDims.w > 0 && (
         <>
           <span className="text-border/40 select-none">│</span>
-          <span className="text-text-muted">{targetDims}</span>
+          <span className="text-text-muted">{targetDims.w}×{targetDims.h}</span>
         </>
       )}
       <span className="text-border/40 select-none">│</span>

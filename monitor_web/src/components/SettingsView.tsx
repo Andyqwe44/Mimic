@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import {
   Camera, Play, Cpu, Sun, RefreshCw, ChevronDown,
-  Monitor, Pencil, FolderOpen, Settings,
+  Monitor, Pencil, FolderOpen,
 } from 'lucide-react'
 import { Tooltip, ActionBtn } from './Toolkit'
 import { ConnectionPanel } from './ConnectionPanel'
@@ -361,11 +361,11 @@ export function SettingsView({
               })}
             </div>
           </div>
-          {/* ── Input Method (mouse/click forwarding) ── */}
+          {/* ── Input Method (mouse + keyboard forwarding) ── */}
           <div className="border-t border-border pt-3 space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-xs text-text-muted">Input Method (🖱)</span>
-              <span className="text-[10px] text-text-muted">Monitor 标签页中点击预览画面映射输入到目标窗口</span>
+              <span className="text-xs text-text-muted">Input Method (🖱 + ⌨)</span>
+              <span className="text-[10px] text-text-muted">Monitor 预览区支持：单击/双击/拖拽/滚轮/键盘/组合键</span>
             </div>
             <div className="flex flex-col gap-2">
               {INPUT_METHODS.map((m) => {
@@ -408,6 +408,18 @@ export function SettingsView({
                   </Tooltip>
                 )
               })}
+            </div>
+          </div>
+          {/* ── Keyboard forwarding ── */}
+          <div className="border-t border-border pt-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-text-muted">Keyboard (⌨)</span>
+              <span className="text-[10px] text-text-muted">点击预览画面获取焦点后，键盘输入转发到目标窗口</span>
+            </div>
+            <div className="text-[11px] text-text-muted space-y-1">
+              <div>• 普通按键 — <code className="text-accent bg-accent/10 px-1 rounded">keydown</code> / <code className="text-accent bg-accent/10 px-1 rounded">keyup</code></div>
+              <div>• 组合键 — 自动识别为 <code className="text-accent bg-accent/10 px-1 rounded">combo</code>（Ctrl+C 等）</div>
+              <div>• <code className="text-accent bg-accent/10 px-1 rounded">Esc</code> 或外部点击 → 释放焦点，自动松开所有已按下按键</div>
             </div>
           </div>
         </div>

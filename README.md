@@ -118,6 +118,64 @@ type_tag 1 (BGRA): [w:4][h:4][ch:4][reserved:4][pixels: w*h*ch]
 - **Virtual desktop** — Cross-desktop window enumeration, absolute numbering (Task View order via registry), desktop switching
 - **Window picker** — EnumWindows with search, type filter (All/Desktop/Window), D1/D2 badges, ⚡ for remote-desktop windows
 - **Single-frame** — WGC/GDI multi-method capture with PNG output
+- **Input forwarding** — Click/drag/wheel/keyboard input injected into target window via 3 simulation layers (see below)
+
+## Input Forwarding (send_input)
+
+Monitor preview canvas captures user mouse/keyboard events → coordinates normalized
+and forwarded via `hostCall('send_input', {hwnd, type, ...})` →
+C++ `cmd_send_input` executes the input against the target window.
+
+### Input Types
+
+| Type | Description | Key Parameters |
+|------|-------------|---------------|
+| `click` | Single click | `x_norm, y_norm, button` (left/right/middle) |
+| `dblclick` | Double click | `x_norm, y_norm, button` |
+| `move` | Mouse move | `x_norm, y_norm` |
+| `drag` | Click-drag-release | `button, path: [{x,y},...]` (sampled at 50ms) |
+| `wheel` | Scroll wheel | `x_norm, y_norm, delta` (±120/notch, sign-corrected) |
+| `keydown` | Key press | `key, code, vk` (virtual key code) |
+| `keyup` | Key release | `key, code, vk` |
+| `keypress` | Key down+up | `key, code, vk` |
+| `combo` | Modifier+key | `ctrlKey, shiftKey, altKey, metaKey, key, vk` |
+| `text` | Unicode string | `text` (UTF-8, sent char-by-char via `KEYEVENTF_UNICODE`) |
+
+Keyboard uses individual `keydown`/`keyup` events — the system naturally recognizes
+combinations (Ctrl+C) because modifier keys are held down from prior keydown events.
+No manual combo synthesis needed for user input.
+
+### Simulation Methods (4 layers)
+
+| Method | Layer | Mechanism | UIPI Bypass | Status |
+|--------|-------|-----------|-------------|--------|
+| `sendinput` | 应用层 | `SendInput` API — synthesized system input, same path as hardware | ❌ | ✅ 推荐 |
+| `winapi` | OS层 | `AttachThreadInput` + `SetForegroundWindow` + `SendMessage` synchronous | 部分 | ✅ 进阶 |
+| `postmessage` | 窗口消息层 | `PostMessage` — direct window queue, asynchronous | 部分 | ✅ 备选 |
+| `driver` | 驱动层 | Interception / virtual HID kernel driver | ✅ | 🔒 未实现 |
+
+### Coordinate Pipeline
+
+```
+Browser click (px) → getImageCoords (letterbox-aware normalize 0-1)
+  → hostCall('send_input', {x_norm, y_norm, ...})
+    → cmd_send_input
+      ├─ sendinput:     norm_to_screen → 0-65535 absolute → SendInput
+      ├─ winapi:        norm_to_client → client px → SendMessage
+      └─ postmessage:   norm_to_client → client px → PostMessage
+```
+
+### Keyboard Event Flow
+
+```
+User presses Ctrl+C in preview canvas (focused):
+  keydown Ctrl  → vk=17 → SendInput KEYDOWN VK_CONTROL
+  keydown c     → vk=67 → SendInput KEYDOWN 'C'        (system sees Ctrl+C)
+  keyup   c     → vk=67 → SendInput KEYUP   'C'
+  keyup   Ctrl  → vk=17 → SendInput KEYUP   VK_CONTROL
+
+On blur/Escape: all pressed keys auto-released via keyup events.
+```
 
 ## WGC Internals
 

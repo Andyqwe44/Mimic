@@ -50,6 +50,10 @@ inline double json_get_double(const std::string& json, const std::string& key) {
     return strtod(json.c_str() + p, nullptr);
 }
 
+inline bool json_get_bool(const std::string& json, const std::string& key) {
+    return json_get_int(json, key) != 0;
+}
+
 inline std::string json_get_obj(const std::string& json, const std::string& key) {
     std::string s = "\"" + key + "\":{";
     size_t p = json.find(s);

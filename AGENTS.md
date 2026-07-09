@@ -1,4 +1,4 @@
-# CLAUDE.md — TicTacToe → General Visual Game AI
+# AGENTS.md — TicTacToe → General Visual Game AI
 
 ## ⛔ 思想钢印 — 三条铁律，每次写代码前过一遍
 
@@ -36,12 +36,12 @@ LOG("tag", "format_string", args...);
 | `ui` | 前端事件 |
 | `agent` | AI Agent |
 
-### 铁律 3: 存档 = 更新 README + 更新 CLAUDE.md + commit
+### 铁律 3: 存档 = 更新 README + 更新 AGENTS.md + commit
 
 当用户说"存档"时，执行以下三件事：
 
 1. **更新 README.md** — 如果对外接口/用法变了
-2. **更新 CLAUDE.md** — 如果架构/结构/构建流程变了
+2. **更新 AGENTS.md** — 如果架构/结构/构建流程变了
 3. **git commit** — 写出清晰的 commit message，描述做了什么和为什么
 
 这三个动作是一体的，缺一不可。
@@ -72,13 +72,9 @@ LOG("tag", "format_string", args...);
 <div title="xxx">         // ← 原生 title，禁止
 ```
 
-### 铁律 5: 禁止欺骗 — 后端不骗前端，前端不骗用户
+### 铁律 5: 禁止静默回退
 
 **C++ 层不得对前端透明地修改行为。** 前端发送的命令必须被原样执行——成功返回数据，失败返回错误。禁止在 C++ 内部做静默 fallback、参数改写、或结果替换。
-
-此规则有三个层面：
-
-#### 5a. C++ 不得静默修改参数或 Fallback
 
 违反示例：
 ```cpp
@@ -95,60 +91,7 @@ if (method == "WGC" && hwnd == 0) {
 const method = hwnd === 0 ? 'dxgi' : forceMethod
 ```
 
-#### 5b. C++ 必须检查 API 返回值，失败必须返回 Error
-
-以下 Win32 API 调用必须检查返回值，失败时返回 error，**严禁**静默返回 `{"ok":true}`：
-
-| API | 检查 | 失败含义 |
-|-----|------|---------|
-| `SendInput` | `sent != count` | UIPI 阻止、权限不足 |
-| `PostMessage` | `!= FALSE` | 目标窗口已销毁 |
-| `GetClientRect` | `!= FALSE` | 窗口句柄失效 |
-| `AttachThreadInput` | `!= FALSE` | 目标线程无消息队列 |
-| `MapVirtualKey` | scan code 非零 | 未知键码 |
-
-```cpp
-// ❌ 欺骗 — API 失败却返回 ok
-SendInput(2, inputs, sizeof(INPUT));  // 返回值未检查
-return "{\"ok\":true}";               // 前端以为成功了
-
-// ✅ 铁律 5b — 诚实回报
-UINT sent = SendInput(2, inputs, sizeof(INPUT));
-if (sent != 2) {
-    return "{\"ok\":false,\"error\":\"SendInput failed (UIPI blocked)\"}";
-}
-```
-
-#### 5c. 前端不得欺骗用户 — 反馈必须匹配实际行为
-
-| 规则 | 违反示例 | 正确做法 |
-|------|---------|---------|
-| 视觉反馈必须在操作**实际发送后**才显示 | Defer 300ms 的 click 先画了 ripple → 若 unmount 则静默丢失 | Defer 时先不画 ripple，实际发送时才画；或存储 timeoutId 在 unmount 时 flush |
-| 键盘输入必须用**同一策略**，不能混用 | Ctrl 单独发 `keydown` + C 发 `combo` → 目标收到破损序列 | 全部用个体 `keydown`/`keyup`，系统自然识别组合键 |
-| Cleanup 操作必须 Log | blur 时静默发 click 释放拖拽按键，用户不知 | 加 `addLog("[Input] drag cancelled — auto-released button")` |
-| 坐标映射失败必须返回 Error | `GetClientRect` 失败后静默发到 (0,0) | 返回 `"error":"failed to get client rect"` |
-
-**简洁记忆：**
-- **C++ → TS：** 返回值 = `{"ok":false, "error":"..."}` 比静默返回 `{"ok":true}` 好一万倍
-- **TS → 用户：** 画了什么 = 实际发了什么。没发的别画，发了的别藏。
-
 此规则适用于所有跨层接口：C++↔TS、C++↔Python TCP。每层对自己的决策负责，下层不替上层做决定。
-
-### 铁律 6: 前端交互优化 = 状态转换表 → 确认 → 改码
-
-当用户说"前端交互方案"、"交互优化"、"总结前端状态"、"前端状态机"、"给个方案"等类似词语时，执行以下流程：
-
-1. **先分析** — 阅读当前前端交互逻辑，理解现有状态机
-2. **给状态转换表** — 用表格列出所有状态转换（当前状态 + 事件 → 新状态 + 原因）
-3. **等待确认** — 用户说"确认"或"开始"后才动手改代码
-4. **改代码** — 精确修改，不改表外逻辑
-
-表格格式：
-```
-| # | 当前状态 | 事件 | 新状态 | 原因 |
-```
-
-禁止直接改代码。先给方案，等确认。
 
 ## Project Vision
 
@@ -165,8 +108,8 @@ v0.3.0 — pure C++ WebView2 host, zero Rust.
 │       MXU-style UI               │  WebView2 COM 原生                 │
 │       Dashboard/Monitor/Log       │  WebMessage bridge (ex-Tauri IPC) │
 │                                   │  SharedBuffer 直推 (零 FFI)       │
-│  Dev:  WebView2 → localhost:1420 │  SharedBuffer 零拷贝            │
-│  Prod: WebView2 → gam.local      │  BGRA→RGBA 直推                 │
+│  Dev:  WebView2 → localhost:5173 │  SharedBuffer 零拷贝            │
+│  Prod: WebView2 → localhost:8888 │  BGRA→RGBA 直推                 │
 └──────────────────┬───────────────────────────────────────────────────┘
                    │
      ┌─────────────┼──────────────┐
@@ -221,21 +164,13 @@ tictactoe/
 │   │   ├── commands.h/cpp        Command dispatch (list_windows, capture, log, stream)
 │   │   ├── mjpeg_server.h/cpp    MJPEG HTTP server (Winsock2 + WIC)
 │   │   ├── json_helper.h         Minimal JSON parser for WebMessage
-│   │   ├── version.h             Single canonical APP_VERSION (+ APP_VERSION_RC for VERSIONINFO)
+│   │   ├── version.h             Single canonical APP_VERSION for entire project
 │   │   ├── virtual_desktop.h/cpp Virtual desktop enumeration + switch (undocumented COM)
-│   │   └── embedded_assets.h     GENERATED: dist/** as byte arrays (gitignored, prod only)
-│   ├── tools/
-│   │   ├── gen_assets.mjs        Node: monitor_web/dist/** → src/embedded_assets.h
-│   │   └── gen_icon.py           One-time: favicon.svg → app.ico (svglib, PIL fallback)
-│   ├── app.rc                    Icon (IDI_APPICON) + VERSIONINFO (prod exe resources)
-│   ├── app.ico                   Committed exe/taskbar icon (PIL placeholder — see assets/icon/)
-│   ├── assets/icon/              Icon design workflow (reserved; design deferred)
-│   │   └── ICON_PROMPT.md        ChatGPT/DALL·E prompt + drop icon_source.png here → regen
 │   ├── dep/                      WebView2 SDK (header + static lib)
 │   │   ├── WebView2.h
 │   │   ├── WebView2EnvironmentOptions.h
 │   │   └── WebView2LoaderStatic.lib
-│   ├── build.cmd                 MSVC → build\monitor_app.exe (prod, self-contained: dist embedded + rc)
+│   ├── build.cmd                 MSVC → build\monitor_app.exe (prod)
 │   └── build_dev.cmd             MSVC → build_dev\monitor_app.exe (dev)
 ├── monitor_web/                  # React frontend (KEEP — shared by C++ host)
 │   ├── src/
@@ -270,7 +205,7 @@ cd monitor_app && build_dev.cmd      # → build_dev\monitor_app.exe
 # 2b. Prod build (optimized, no debug)
 cd monitor_web && npm run build      # Vite → dist/
 cd monitor_app && build.cmd          # → build\monitor_app.exe
-# Launch: build\monitor_app.exe      → https://gam.local/index.html (dist embedded in exe, served from memory)
+# Launch: build\monitor_app.exe      → http://localhost:8888
 ```
 
 | | Dev (`build_dev.cmd`) | Prod (`build.cmd`) |
@@ -281,23 +216,6 @@ cd monitor_app && build.cmd          # → build\monitor_app.exe
 | CRT | `/MT` | `/MT` |
 | Macro | `DEV_MODE` | `NDEBUG` |
 | Binary | ~2.4 MB | ~451 KB |
-
-### Prod asset serving (self-contained exe)
-
-Prod embeds the built frontend into the exe — no external `dist/` folder, no HTTP
-port. `build.cmd` runs `node tools/gen_assets.mjs` to compile `monitor_web/dist/**`
-into `src/embedded_assets.h` (byte arrays + `g_embedded_assets[]` table), then
-`rc.exe` compiles `app.rc` (icon + VERSIONINFO) into `build/app.res`.
-
-At runtime (prod only, `#ifndef DEV_MODE`), `main.cpp`'s `WebResourceRequestedHandler`
-intercepts every `https://gam.local/*` request via `AddWebResourceRequestedFilter` +
-`add_WebResourceRequested`, looks the path up in `g_embedded_assets`, and answers from
-memory (`SHCreateMemStream` → `CreateWebResourceResponse`). `"/"` maps to `/index.html`.
-Replaces the old `SetVirtualHostNameToFolderMapping` (which needed dist/ on disk).
-
-Result: shipping = copy the single `build\monitor_app.exe`. Only external prerequisite
-is the WebView2 Runtime (system-level, Win11 built-in). Dev is unchanged (Vite :1420);
-`embedded_assets.h` is `#ifndef DEV_MODE`-excluded, so dev never regenerates it.
 
 ### Single-instance guard
 
@@ -321,7 +239,7 @@ attached console. So it communicates purely via return code:
 | `2` | Instance already running — raised the existing window, then exited |
 | other | Normal run (0 on clean exit; window stayed open until closed) |
 
-**Launching the app from a terminal (Claude): check `$?`.** A GUI exe blocks bash
+**Launching the app from a terminal (Codex): check `$?`.** A GUI exe blocks bash
 until it exits. Probe first, then decide:
 
 ```bash
@@ -345,8 +263,7 @@ Frames saved as `snap_YYYYMMDD_HHMMSS_ms.png` or `stream_YYYYMMDD_HHMMSS_ms.png`
 
 # 4. Prod mode
 cd monitor_web && npm run build      # Vite → dist/
-cd monitor_app && build.cmd          # embeds dist + compiles rc → self-contained build\monitor_app.exe
-build\monitor_app.exe                # → https://gam.local (dist served from memory, no external files)
+cd monitor_app && build\monitor_app.exe         # WebView2 → localhost:8888
 ```
 
 ## Internal Architecture (C++ host)
@@ -582,93 +499,6 @@ Never use `any` for WebView2 event handlers — the `.d.ts` enables compile-time
 of method names (e.g. `e.additionalData` not `e.getAdditionalData()`).
 
 ## Recent Fixes (2026-07-09)
-
-### Component decomposition — 1798-line App.tsx → 11 modular files (major)
-Split monolithic App.tsx into reusable components under `src/components/` and
-shared lib under `src/lib/`:
-
-| File | Exports |
-|------|---------|
-| `lib/bridge.ts` | `hostCall`, `LogManager`, `logMgr`, `addLog`, `applyTheme` |
-| `lib/types.ts` | `WindowInfo`, `HistoryFile`, `LogEntry` |
-| `lib/constants.ts` | `CAPTURE_METHODS`, `RENDER_METHODS`, `INPUT_METHODS`, `STATE_LABEL`, etc. |
-| `components/Toolkit.tsx` | `Tooltip`, `ActionBtn`, `ThemeBtn` |
-| `components/TopBar.tsx` | Tab bar + Start/Stop + ThemeBtn |
-| `components/BottomBar.tsx` | Status strip (target, method, agent TCP, version) |
-| `components/TargetPickerModal.tsx` | Window list + capture mode picker |
-| `components/ConnectionPanel.tsx` | Target connection (blue accent) |
-| `components/ScreenshotPanel.tsx` | SharedBuffer canvas (violet accent) + `bare` mode |
-| `components/LogPanel.tsx` | Log viewer (amber accent) — compact + full modes |
-| `components/SettingsView.tsx` | Settings page with SettingsCard + StatusBar |
-| `components/MonitorView.tsx` | Main workspace: large preview + mouse input mapping |
-
-Zero TS errors. Vite HMR unchanged. App.tsx now ~530 lines (pure orchestration).
-
-### Input mapping — C++ send_input + frontend mouse forwarding (major)
-**C++ `cmd_send_input`** (`commands.cpp`): three-tier input injection:
-| Method | Implementation | Notes |
-|--------|---------------|-------|
-| `sendinput` | `SendInput` API, MOUSEEVENTF_ABSOLUTE (0-65535) | Recommended default |
-| `postmessage` | `PostMessageW(WM_LBUTTONDOWN/UP)` directly to window | May bypass some protections |
-| `driver` | — | Returns error, not implemented |
-
-Coordinate flow: norm(0-1) → GetClientRect → client pixels → ClientToScreen(screen) → SendInput absolute / PostMessage LPARAM.
-New `json_get_double` in `json_helper.h` for floating-point args.
-**Frontend**: Settings → Capture → Input Method selector (🖱). MonitorView click handler calls
-`hostCall('send_input', {hwnd, type, x_norm, y_norm, button, method})`.
-Crosshair cursor + overlay hint when previewing non-desktop target.
-
-### Monitor tab redesign + BottomBar status strip
-Monitor tab now shows: toolbar (target + method badges + Snapshot/Preview buttons) +
-large preview area (ScreenshotPanel bare mode) + mouse click-to-forward overlay.
-BottomBar redesigned from `Idle | FPS:0 | Lat:0ms` to real status strip:
-`🖥 window │ 📷 WGC ▶ WGC 60fps ● │ 1920×1080 │ TCP :9999 ● Agent在线 │ v0.3.0`
-FPS/dims flow via `onFps`/`onDims` callbacks from ScreenshotPanel → App → BottomBar.
-
-### Panel color differentiation + scrollbar thinning
-Right-sidebar panels now have colored icon backgrounds:
-Connection (blue-400/15), Screenshot (violet-400/15), Log (amber-400/15).
-Scrollbar: 6px → 4px, added Firefox `scrollbar-width: thin`.
-
-### Connection header: state/recommend badges moved to title
-状态/推荐 labels removed; 桌面 + WGC badges moved next to Connection title on the left.
-Old markup deleted (JSX `{/* */}` comment caused OXc parse error).
-
-### Dark theme — VSCode-inspired deep blue-gray palette
-Replaced harsh pure-black palette (`#09090b`/`#18181b`/`#27272a`) with VSCode Dark+
-inspired colors (`#1e1e1e`/`#252526`/`#2d2d2d`). Reduced text contrast from pure white
-(`#fafafa`) to VSCode default gray (`#cccccc`). Accent tint: `#1e3a5f` → `#264f78`
-(VSCode selection blue). All colors in `index.css` `.dark` block, zero code changes.
-
-### LogPanel lazy load — skip history file list in compact mode
-Compact LogPanel (right sidebar) no longer calls `loadHistory` on mount. Only
-the full Log tab loads history file names, and content is loaded on expand click.
-Compact mode only shows ring buffer entries — history files are irrelevant there.
-Removes unnecessary `read_logs` C++ call that was generating noise in the log.
-
-### Pin lock + safe setter for right-sidebar panels (major)
-Right-sidebar panels (Connection / Screenshot / Log) now each have a 📌 Pin button
-on the header right side. Pin locks the panel at its current expanded/collapsed state
-against ALL subsequent changes — manual toggle, auto-layout, and content-driven events
-(📷 snapshot, ▶ stream, ⏹ stop) all go through a centralized safe setter that returns
-`false` when pinned, making pin enforcement low-coupling (no scattered guard clauses).
-
-**Architecture**: `xxxPinLocked` ref (`null | boolean`) + safe setter `setXxxExpanded(v): boolean`.
-Pin toggle records `expandedRef.current` into the lock ref; safe setter checks lock ref
-before calling React setState. All call sites (onToggle, takeSnapshot, startStream,
-stopStream, auto-layout) use the safe setter — double-checking is harmless.
-
-**Auto-layout priority** (after pin refactor):
-| Direction | Priority |
-|-----------|----------|
-| Collapse (shrink) | Log → Connection → Screenshot(empty) → Screenshot(has content) |
-| Expand (grow) | Screenshot(has content) → Connection → Screenshot(empty) → Log |
-
-Pinned panels are skipped by auto-layout (`xxxPinLocked.current === null` check).
-All-three-pinned overflow: do nothing, user's responsibility.
-
-**Screenshot `ssHasContentRef`** tracks whether canvas has rendered content,
-used by auto-layout to prioritize content-bearing Screenshot over empty placeholder.
 
 ### UI operation conflict resolution — TS-side state machine (major)
 All capture operation conflicts resolved in TypeScript (铁律 5 推广: C++ 不替前端做决策).

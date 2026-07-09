@@ -86,3 +86,12 @@ body {
 ::-webkit-scrollbar-thumb:hover { background: var(--color-text-muted); }
 /* Firefox */
 * { scrollbar-width: thin; scrollbar-color: var(--color-border-strong) transparent; }
+
+/* Click ripple animation (MonitorView) */
+@keyframes ping-once {
+  0%   { transform: scale(0.3); opacity: 1; }
+  100% { transform: scale(2.5); opacity: 0; }
+}
+.animate-ping-once {
+  animation: ping-once 400ms ease-out forwards;
+}

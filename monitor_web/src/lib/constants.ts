@@ -50,7 +50,8 @@ export const CAPTURE_MODES = [
 ]
 
 export const INPUT_METHODS = [
-  { v: 'sendinput',  name: 'SendInput',  eng: 'Win32 API', rec: '推荐', desc: '应用层合成输入，SendInput API。兼容性最好，大多数窗口都能接受。' },
-  { v: 'postmessage', name: 'PostMessage', eng: 'Window Msg', rec: '备选', desc: '窗口消息层，直接向目标窗口队列投递 WM_LBUTTONDOWN/UP。可能绕过某些输入保护。' },
-  { v: 'driver',      name: 'Driver',     eng: 'Kernel',    rec: '未实现', desc: '驱动层输入，内核级拦截/注入。需要安装驱动，兼容性取决于驱动实现。' },
+  { v: 'sendinput',  name: 'SendInput',  eng: '应用层', rec: '推荐', desc: 'SendInput API 合成系统输入，与真实硬件走相同路径。支持单击/双击/拖拽/滚轮/键盘/组合键/Unicode文本。兼容性最好，受UIPI限制。' },
+  { v: 'winapi',     name: 'WinAPI',     eng: 'OS层',   rec: '进阶', desc: 'AttachThreadInput 挂接线程 + SetForegroundWindow 激活窗口 + SendMessage 同步投递。正确更新目标线程输入状态，绕过部分UIPI限制。' },
+  { v: 'postmessage', name: 'PostMessage', eng: '窗口消息层', rec: '备选', desc: '直接向目标窗口队列投递 WM_* 消息，异步非阻塞。部分应用依赖实时输入状态可能无响应。' },
+  { v: 'driver',      name: 'Driver',     eng: '驱动层', rec: '未实现', desc: 'Interception/虚拟HID内核级注入。系统视为真实硬件，完全绕过UIPI。需安装驱动，后期迭代。' },
 ]
