@@ -798,10 +798,11 @@ function LogPanel({ compact, expanded: exp, onToggle, keepFiles, pinned, onToggl
     return logMgr.subscribe(() => setEntries([...logMgr.getAll()]))
   }, [])
 
-  // Load history files from disk on mount
+  // Load history file names on mount (full mode only — compact sidebar doesn't show them)
   useEffect(() => {
+    if (compact) return
     logMgr.loadHistory(keepFiles ?? 5).then(setHistoryFiles)
-  }, [keepFiles])
+  }, [keepFiles, compact])
 
   // Format in-memory entries as display lines (same format as disk)
   const formatLine = (e: LogEntry) => `[${e.ts}] ${e.msg}`

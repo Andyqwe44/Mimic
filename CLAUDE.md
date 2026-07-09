@@ -542,6 +542,12 @@ of method names (e.g. `e.additionalData` not `e.getAdditionalData()`).
 
 ## Recent Fixes (2026-07-09)
 
+### LogPanel lazy load — skip history file list in compact mode
+Compact LogPanel (right sidebar) no longer calls `loadHistory` on mount. Only
+the full Log tab loads history file names, and content is loaded on expand click.
+Compact mode only shows ring buffer entries — history files are irrelevant there.
+Removes unnecessary `read_logs` C++ call that was generating noise in the log.
+
 ### Pin lock + safe setter for right-sidebar panels (major)
 Right-sidebar panels (Connection / Screenshot / Log) now each have a 📌 Pin button
 on the header right side. Pin locks the panel at its current expanded/collapsed state
