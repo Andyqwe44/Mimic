@@ -154,6 +154,12 @@ export function SettingsView({
   const lastComboRef = useRef('')                         // cached combo string (survives onUp splice)
   const savedComboRef = useRef(mappingHotkey)             // pre-recording value for cancel
 
+  // ── Modifier-only warning ──
+  // Check if current hotkey consists solely of modifier keys (Ctrl/Alt/Shift/Win).
+  // Pure-modifier combos are technically valid but prone to OS-level conflicts.
+  const MODIFIER_NAMES = new Set(['Ctrl', 'Alt', 'Shift', 'Win'])
+  const isModifierOnly = mappingHotkey.split('+').every((k) => MODIFIER_NAMES.has(k))
+
   const startRecording = useCallback(() => {
     savedComboRef.current = mappingHotkey
     lastComboRef.current = ''
@@ -299,6 +305,7 @@ export function SettingsView({
                 </span>
                 <label className="flex items-center gap-1.5 cursor-pointer select-none">
                   <span className="text-xs text-text-muted">Auto</span>
+                  <Tooltip text="自动根据窗口状态选择截图方式：前台/后台→WGC，桌面/最小化→DXGI">
                   <button
                     onClick={(e) => {
                       e.stopPropagation()
@@ -318,6 +325,7 @@ export function SettingsView({
                       className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${autoSnap ? 'translate-x-5' : ''}`}
                     />
                   </button>
+                  </Tooltip>
                 </label>
               </div>
               <div className="flex flex-col gap-2">
@@ -373,6 +381,7 @@ export function SettingsView({
                 </span>
                 <label className="flex items-center gap-1.5 cursor-pointer select-none">
                   <span className="text-xs text-text-muted">Auto</span>
+                  <Tooltip text="自动选择流传输方式（当前仅 WGC 支持实时流）">
                   <button
                     onClick={(e) => {
                       e.stopPropagation()
@@ -387,6 +396,7 @@ export function SettingsView({
                       className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${autoStream ? 'translate-x-5' : ''}`}
                     />
                   </button>
+                  </Tooltip>
                 </label>
               </div>
               <div className="flex flex-col gap-2">
@@ -601,12 +611,12 @@ export function SettingsView({
             <label className="text-sm text-text-secondary w-24 shrink-0">Theme</label>
             <div className="flex gap-1">
               {[
-                ['Light', 'light'],
-                ['Dark', 'dark'],
-                ['System', 'system'],
-              ].map(([l, v]) => (
+                ['Light', 'light', '亮色主题 — 白底黑字'],
+                ['Dark', 'dark', '暗色主题 — VSCode 风格深蓝灰'],
+                ['System', 'system', '跟随系统 — 自动切换亮暗'],
+              ].map(([l, v, tip]) => (
+                <Tooltip key={v} text={tip}>
                 <button
-                  key={v}
                   onClick={() => {
                     setTheme(v as 'light' | 'dark' | 'system')
                     addLog(`[Theme] ${l}`)
@@ -615,6 +625,7 @@ export function SettingsView({
                 >
                   {l}
                 </button>
+                </Tooltip>
               ))}
             </div>
           </div>
@@ -738,6 +749,7 @@ export function SettingsView({
           </div>
           <div className="flex items-center gap-2">
             <label className="text-sm text-text-secondary w-24 shrink-0">Dev mode</label>
+            <Tooltip text="开发者模式 — 强制红色/黑客绿主题，解锁帧保存功能">
             <button
               onClick={() => {
                 setDevMode(!devMode)
@@ -749,6 +761,7 @@ export function SettingsView({
                 className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${devMode ? 'translate-x-5' : ''}`}
               />
             </button>
+            </Tooltip>
           </div>
           <div className="flex items-center gap-2">
             <label className="text-sm text-text-secondary w-24 shrink-0">Mapping key</label>
@@ -758,27 +771,45 @@ export function SettingsView({
                   {displayCombo || 'Press keys...'}
                 </span>
                 <span className="flex-1" />
+                <Tooltip text="快捷键触发指示器 — 按下快捷键时闪烁绿光">
                 <span className={`w-2.5 h-2.5 rounded-full shrink-0 transition-colors duration-100 ${triggerFlash ? 'bg-accent shadow-[0_0_6px_var(--color-accent)]' : 'bg-border'}`} />
+                </Tooltip>
+                <Tooltip text="取消修改，恢复原快捷键">
                 <button
                   onClick={cancelRecording}
                   className="px-2.5 h-7 rounded-md text-xs font-medium border border-border text-text-secondary hover:bg-bg-hover transition-colors"
                 >
                   Cancel
                 </button>
+                </Tooltip>
               </>
             ) : (
               <>
+                <Tooltip text="当前快捷键，点击 Change 可修改">
                 <span className="h-7 px-3 rounded-lg border border-border bg-bg-primary text-sm font-mono text-text-primary flex items-center min-w-[80px]">
                   {mappingHotkey}
                 </span>
+                </Tooltip>
+                {/* ── Modifier-only warning badge ── */}
+                {isModifierOnly && (
+                  <Tooltip text="快捷键仅含修饰键（Ctrl/Alt/Shift/Win），可能与系统快捷键冲突。建议加入至少一个非修饰键，如字母、数字或 F1-F12。">
+                  <span className="h-7 px-2 rounded-md text-xs font-medium text-accent-dev bg-accent-dev/10 border border-accent-dev/30 flex items-center shrink-0 whitespace-nowrap">
+                    ⚠ 纯修饰键
+                  </span>
+                  </Tooltip>
+                )}
                 <span className="flex-1" />
+                <Tooltip text="快捷键触发指示器 — 按下快捷键时闪烁绿光">
                 <span className={`w-2.5 h-2.5 rounded-full shrink-0 transition-colors duration-100 ${triggerFlash ? 'bg-accent shadow-[0_0_6px_var(--color-accent)]' : 'bg-border'}`} />
+                </Tooltip>
+                <Tooltip text="点击后按下新快捷键，松开所有按键确认">
                 <button
                   onClick={startRecording}
                   className="px-2.5 h-7 rounded-md text-xs font-medium border border-border text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors"
                 >
                   Change
                 </button>
+                </Tooltip>
               </>
             )}
           </div>
@@ -799,6 +830,7 @@ export function SettingsView({
                   Save each 📷 snapshot as PNG to disk
                 </div>
               </div>
+              <Tooltip text="开启后每次截图自动保存为 PNG 文件到 Dump dir">
               <button
                 onClick={() => {
                   const v = !saveCaptureFrames
@@ -815,6 +847,7 @@ export function SettingsView({
                   className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${saveCaptureFrames ? 'translate-x-5' : ''}`}
                 />
               </button>
+              </Tooltip>
             </div>
             <div className="flex items-center justify-between">
               <div>
@@ -823,6 +856,7 @@ export function SettingsView({
                   Save each ▶ preview frame as PNG to disk
                 </div>
               </div>
+              <Tooltip text="开启后每次预览帧自动保存为 PNG 文件到 Dump dir（注意磁盘空间）">
               <button
                 onClick={() => {
                   const v = !saveStreamFrames
@@ -839,6 +873,7 @@ export function SettingsView({
                   className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${saveStreamFrames ? 'translate-x-5' : ''}`}
                 />
               </button>
+              </Tooltip>
             </div>
             <div className="flex items-center gap-2">
               <label className="text-sm text-text-secondary w-24 shrink-0">Dump dir</label>
@@ -908,6 +943,7 @@ export function SettingsView({
           </div>
           <div className="border-t border-border pt-2 flex items-center justify-between">
             <div className="text-xs text-text-muted min-w-0">
+              <Tooltip text="在浏览器中打开项目 GitHub 页面">
               <button
                 onClick={() => {
                   try {
@@ -919,6 +955,7 @@ export function SettingsView({
               >
                 github.com/Andyqwe44/tictactoe
               </button>
+              </Tooltip>
               <span className="mx-2 text-border hidden sm:inline">|</span>
               <span className="hidden sm:inline">
                 C++ WebView2 · React · Tailwind · DXGI · WGC

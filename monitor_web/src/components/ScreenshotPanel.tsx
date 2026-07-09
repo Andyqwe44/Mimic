@@ -1,4 +1,6 @@
-// ═══ Screenshot Panel ───
+// ═══ Screenshot Panel — canvas + snapshot/stream controls ═══
+// Two modes: bare (canvas-only, used in MonitorView) and full (sidebar card).
+// SharedBuffer handler receives BGRA→RGBA frames from C++ and renders to canvas.
 import { useState, useEffect, useRef } from 'react'
 import { Camera, Play, Square, ChevronDown, Pin } from 'lucide-react'
 import { Tooltip } from './Toolkit'
@@ -46,17 +48,19 @@ export function ScreenshotPanel({
   onFps?: (fps: number) => void
   onDims?: (w: number, h: number) => void
 }) {
+  // ── Canvas state ──
   const [hasContent, setHasContent] = useState(false)
   useEffect(() => {
     hasContentRef.current = hasContent
   }, [hasContent])
   const [snapshotLatency, setSnapshotLatency] = useState<number | null>(null)
   const [fps, setFps] = useState(0)
-  const framesRef = useRef(0)
-  const lastFpsRef = useRef(Date.now())
+  const framesRef = useRef(0)           // frame counter for FPS calculation
+  const lastFpsRef = useRef(Date.now())  // last FPS sample timestamp
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [canvasDims, setCanvasDims] = useState({ w: 0, h: 0 })
 
+  // ── Reset FPS when preview toggles ──
   useEffect(() => {
     setFps(0)
     framesRef.current = 0
@@ -76,7 +80,9 @@ export function ScreenshotPanel({
     }
   }, [canvasDims, onDims])
 
-  // SharedBuffer → Canvas
+  // ── SharedBuffer → Canvas render handler ──
+  // C++ pushes BGRA frame via PostSharedBufferToScript → 'sharedbufferreceived' event.
+  // Converts to ImageData → putImageData. Counts frames for FPS. Detects snapshot latency.
   useEffect(() => {
     const wv = (window as any).chrome?.webview
     if (!wv) {
@@ -94,6 +100,7 @@ export function ScreenshotPanel({
         if (!meta.w || !meta.h || meta.w <= 0 || meta.h <= 0) return
         const pixelCount = meta.w * meta.h * 4
         if (buf.byteLength < pixelCount) return
+        // Create ImageData from SharedBuffer — BGRA already swapped to RGBA by C++
         const imgData = new ImageData(
           new Uint8ClampedArray(buf, 0, pixelCount),
           meta.w,
@@ -108,6 +115,7 @@ export function ScreenshotPanel({
           if (ctx) ctx.putImageData(imgData, 0, 0)
         }
         setHasContent(true)
+        // ── FPS counter: sample every 1s ──
         framesRef.current++
         const now = Date.now()
         const elapsed = now - lastFpsRef.current
@@ -118,6 +126,7 @@ export function ScreenshotPanel({
         }
         if (snapshotRef.current) {
           snapshotRef.current = false
+          // ── Snapshot latency: button press → frame rendered ──
           const latency = Date.now() - snapshotStartRef.current
           setSnapshotLatency(latency)
         }
@@ -222,7 +231,7 @@ export function ScreenshotPanel({
               </button>
             </Tooltip>
           )}
-          <Tooltip text={pinned ? '取消固定' : '固定面板'}>
+          <Tooltip text={pinned ? '取消固定 — 允许自动布局调整' : '固定面板 — 不受自动布局影响'}>
             <button
               onClick={(e) => {
                 e.stopPropagation()

@@ -1,16 +1,21 @@
-// ═══ WebView2 WebMessage bridge (replaces Tauri invoke) ═══
+// ═══ WebView2 WebMessage bridge — replaces Tauri invoke() ═══
+//   JS hostCall() → postMessage(JSON) → C++ HandleWebMessage → PostWebMessageAsJson
+//   → JS 'message' event → resolve by msg.id
 import type { LogEntry, HistoryFile } from './types'
 
+// ── Pending call tracker ──
 type PendingCall = {
   resolve: (value: any) => void
   reject: (reason: any) => void
-  timer: ReturnType<typeof setTimeout>
+  timer: ReturnType<typeof setTimeout>   // 30s timeout
 }
 
 let _callId = 0
-const _pending = new Map<number, PendingCall>()
+const _pending = new Map<number, PendingCall>()   // id → {resolve, reject, timer}
 
-// Replacement for invoke()
+// ── hostCall — async C++ command invocation ──
+// Auto-unwraps {id, result} envelope → caller receives raw result.
+// 30s timeout rejects with descriptive error.
 export function hostCall(cmd: string, args?: Record<string, any>): Promise<any> {
   return new Promise((resolve, reject) => {
     const id = ++_callId
@@ -35,31 +40,38 @@ export function hostCall(cmd: string, args?: Record<string, any>): Promise<any> 
   })
 }
 
-// ── Smooth theme switch ──
+// ── Smooth theme switch — 200ms CSS transition class ──
 export function applyTheme(isDark: boolean) {
   document.documentElement.classList.add('theme-switching')
   document.documentElement.classList.toggle('dark', isDark)
   setTimeout(() => document.documentElement.classList.remove('theme-switching'), 220)
 }
 
-// ── Time formatter ──
+// ── Timestamp formatter — HH:MM:SS.ms ──
 function timeStr() {
   const d = new Date()
   return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}.${d.getMilliseconds().toString().padStart(3, '0')}`
 }
 
 // ═══ LogManager — single source of truth for all log views ═══
+// Three consumers (right panel, Log tab, disk files) see identical content.
+// Entries flow: TS addLog → LogManager.entries → React (0ms)
+//            + hostCall('log_ui_event') → C++ LOG() → ring buffer + file
+// C++ LOG()  → 'message' event → addRemote → LogManager.entries → React
 class LogManager {
   private entries: LogEntry[] = []
   private listeners = new Set<() => void>()
   private initialSyncDone = false
 
+  // ── TS-side add (UI events, user actions) ──
   add(msg: string) {
     this.entries.push({ ts: timeStr(), msg: `[ui] ${msg}` })
     this.listeners.forEach((f) => f())
     hostCall('log_ui_event', { event: msg, detail: '' }).catch(() => {})
   }
 
+  // ── C++-side add (remote log push via 'message' event) ──
+  // Dedup by (ts, msg) — prevents double-insert when TS also wrote the entry
   addRemote(ts: string, tag: string, msg: string) {
     const dup = this.entries.find((e) => e.ts === ts && e.msg === `[${tag}] ${msg}`)
     if (dup) return
@@ -72,6 +84,7 @@ class LogManager {
     return this.entries
   }
 
+  // ── Subscribe to entry changes (React setState in components) ──
   subscribe(fn: () => void): () => void {
     this.listeners.add(fn)
     return () => {
@@ -79,6 +92,7 @@ class LogManager {
     }
   }
 
+  // ── One-time ring buffer sync at startup (before WebView2 was ready) ──
   async initSync() {
     if (this.initialSyncDone) return
     this.initialSyncDone = true
@@ -107,6 +121,7 @@ class LogManager {
     setTimeout(() => this.initSync(), 100)
   }
 
+  // ── Load history file list (Log tab only, not compact mode) ──
   async loadHistory(maxFiles: number): Promise<HistoryFile[]> {
     try {
       const data = await hostCall('read_logs', { max_files: maxFiles })
@@ -119,20 +134,25 @@ class LogManager {
   }
 }
 
+// ── Singleton ──
 export const logMgr = new LogManager()
+
+// ── Convenience: add UI-side log entry ──
 export function addLog(msg: string) {
   logMgr.add(msg)
 }
 
-// Listen for responses from C++ host
+// ── C++ → JS message listener (responses + remote log push) ──
 if (typeof (window as any).chrome?.webview !== 'undefined') {
   ;(window as any).chrome.webview.addEventListener('message', (e: any) => {
     try {
       const msg = typeof e.data === 'string' ? JSON.parse(e.data) : e.data
+      // Log push: C++ capture_log_write_msg → notify callback → PostWebMessage
       if (msg.type === 'log') {
         logMgr.addRemote(msg.ts, msg.tag, msg.msg)
         return
       }
+      // Command response: {id, result} envelope → resolve matching pending call
       const pending = _pending.get(msg.id)
       if (pending) {
         clearTimeout(pending.timer)

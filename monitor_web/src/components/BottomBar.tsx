@@ -1,4 +1,4 @@
-// ═══ BottomBar — status strip ═══
+// ═══ BottomBar — status strip: target, methods, FPS, dims, TCP, version ═══
 import { Monitor, Camera, Play } from 'lucide-react'
 import { METHOD_SHORT } from '../lib/constants'
 

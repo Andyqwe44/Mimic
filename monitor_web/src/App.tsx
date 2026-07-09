@@ -1,4 +1,6 @@
-// ═══ App — Game Agent Monitor ═══
+// ═══ App — Game Agent Monitor root ═══
+// Orchestrates: tab routing, right-panel layout, capture state machine,
+// theme, pin lock, window polling, and resize handling.
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { TopBar } from './components/TopBar'
 import { BottomBar } from './components/BottomBar'
@@ -17,11 +19,14 @@ const MIN_LEFT_WIDTH = 360
 const DEFAULT_RIGHT_WIDTH = 324
 
 export default function App() {
+  // ═══ UI state ═══
   const [tab, setTab] = useState<'Monitor' | 'Log' | 'Settings'>('Settings')
   const [running, setRunning] = useState(false)
   const [appVersion, setAppVersion] = useState('v0.3.0')
   const [rightWidth, setRightWidth] = useState(DEFAULT_RIGHT_WIDTH)
   const [rightCollapsed, setRightCollapsed] = useState(false)
+
+  // ── Right panel expanded/collapsed state + refs (used in layout callbacks) ──
   const [connectionExpanded, setConnectionExpanded] = useState(true)
   const [screenshotExpanded, setScreenshotExpanded] = useState(false)
   const [logExpanded, setLogExpanded] = useState(true)
@@ -32,16 +37,18 @@ export default function App() {
   const logExpandedRef = useRef(logExpanded)
   logExpandedRef.current = logExpanded
 
-  // ── Pin lock ──
+  // ── Pin lock — prevents auto-layout from changing pinned panels ──
+  // null = not pinned; true/false = locked to that expanded state
   const connPinLocked = useRef<boolean | null>(null)
   const ssPinLocked = useRef<boolean | null>(null)
   const logPinLocked = useRef<boolean | null>(null)
   const [connectionPinned, setConnectionPinned] = useState(false)
   const [screenshotPinned, setScreenshotPinned] = useState(false)
   const [logPinned, setLogPinned] = useState(false)
-  const ssHasContentRef = useRef(false)
+  const ssHasContentRef = useRef(false)   // tracks whether Screenshot canvas has rendered content
 
-  // Safe setters
+  // ── Safe setters — check pin lock before modifying expanded state ──
+  // Return false when pinned (caller can detect rejection); true when state was set
   const setConnExpanded = useCallback((v: boolean): boolean => {
     if (connPinLocked.current !== null) return false
     setConnectionExpanded(v)
@@ -58,7 +65,7 @@ export default function App() {
     return true
   }, [])
 
-  // Pin toggles
+  // ── Pin toggles — record current expanded state as lock, or release lock ──
   const toggleConnPin = useCallback(() => {
     if (connPinLocked.current === null) {
       connPinLocked.current = connectionExpandedRef.current
@@ -88,11 +95,12 @@ export default function App() {
   }, [])
   const rightPanelRef = useRef<HTMLDivElement>(null)
 
-  // ── Theme ──
+  // ═══ Theme ═══
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('light')
   const [systemDark, setSystemDark] = useState(false)
   const resolvedDark = theme === 'system' ? systemDark : theme === 'dark'
 
+  // ── Listen for OS-level dark mode changes ──
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
     setSystemDark(mq.matches)
@@ -101,16 +109,21 @@ export default function App() {
     return () => mq.removeEventListener('change', onChange)
   }, [])
 
+  // ── Apply theme CSS class whenever resolvedDark changes ──
   useEffect(() => {
     applyTheme(resolvedDark)
   }, [resolvedDark])
 
-  // ── Right panel auto-layout ──
+  // ═══ Right panel auto-layout ═══
+  // Measures collapsed/expanded heights, then auto-collapses/expands panels
+  // as the window resizes or the divider is dragged.
+  // H = measured heights: C/S/L = expanded, Cp/Sp/Lp = collapsed (header only)
   const H = useRef({ C: 180, S: 300, L: 250, Cp: 44, Sp: 44, Lp: 44 })
-  const GAP = 60
-  const prevClientH = useRef(0)
-  const guard = useRef({ C: 0, S: 0, L: 0 })
+  const GAP = 60                         // gap between panels (p-3 = 12px × 2 + gap-3 = 12px ≈ 36px total; extra for safety)
+  const prevClientH = useRef(0)          // previous container height (detect grow vs shrink)
+  const guard = useRef({ C: 0, S: 0, L: 0 })  // debounce timestamps per panel
 
+  // ── Measure actual rendered heights of each panel ──
   const measureLayout = useCallback(() => {
     const el = rightPanelRef.current
     if (!el) return
@@ -159,7 +172,7 @@ export default function App() {
     logMgr.initSync()
   }, [])
 
-  // Initial layout check
+  // ── Initial layout check — auto-collapse if panels overflow container ──
   useEffect(() => {
     const check = () => {
       measureLayout()
@@ -203,7 +216,7 @@ export default function App() {
     return () => clearTimeout(t)
   }, [])
 
-  // Resize auto-layout
+  // ── Window resize → auto-collapse/expand panels ──
   useEffect(() => {
     const onResize = () => {
       const el = rightPanelRef.current
@@ -318,7 +331,7 @@ export default function App() {
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
-  // Drag overflow check
+  // ── Drag-end overflow check — same logic as resize but called after divider drag ──
   const checkVerticalLayout = useCallback(() => {
     const el = rightPanelRef.current
     if (!el) return
@@ -398,7 +411,7 @@ export default function App() {
     }
   }, [])
 
-  // Horizontal auto-collapse
+  // ── Horizontal auto-collapse — when window too narrow for both panels ──
   const H_COLLAPSE_THRESHOLD = MIN_LEFT_WIDTH + DEFAULT_RIGHT_WIDTH + 24
   const autoCollapsedByWidth = useRef(false)
 
@@ -420,44 +433,56 @@ export default function App() {
     return () => window.removeEventListener('resize', onResize)
   }, [rightCollapsed])
 
-  // ── Capture state ──
+  // ═══ Capture state ═══
   const isResizing = useRef(false)
+  // ── Selected target window ──
   const [selWindow, setSelWindow] = useState<WindowInfo>({
     title: ' Entire Desktop',
     category: 'desktop',
     hwnd: 0,
   })
   const [screenRatio, setScreenRatio] = useState(16 / 9)
+
+  // ── Capture method config (snapshot + stream independent) ──
   const [snapMethod, setSnapMethod] = useState('dxgi')
   const [streamMethod, setStreamMethod] = useState('wgc')
   const [autoSnap, setAutoSnap] = useState(true)
   const [autoStream, setAutoStream] = useState(true)
   const [renderMethod, setRenderMethod] = useState('shared')
   const [expectedCaptureState, setExpectedCaptureState] = useState('desktop')
+
+  // ── General settings ──
   const [keepFiles, setKeepFiles] = useState(5)
   const [inputMethod, setInputMethod] = useState('sendinput')
   const [mappingEnabled, setMappingEnabled] = useState(false)
   const [mappingHotkey, setMappingHotkey] = useState('F10')
+
+  // ── Dev mode + frame dump ──
   const [devMode, setDevMode] = useState(false)
   const [saveCaptureFrames, setSaveCaptureFrames] = useState(false)
   const [saveStreamFrames, setSaveStreamFrames] = useState(false)
   const [frameDumpDir, setFrameDumpDir] = useState('')
+
+  // ── Target window state (polled every 500ms) ──
   const [winState, setWinState] = useState('desktop')
   const lastWinStateRef = useRef('desktop')
 
-  // Capture operation state machine
+  // ── Capture operation state machine ──
+  // idle → snapshotting → idle  (single frame, auto-transitions back)
+  // idle → streaming → idle     (continuous, stays until stopStream)
   const opStateRef = useRef<'idle' | 'snapshotting' | 'streaming'>('idle')
-  const snapCancelRef = useRef(0)
+  const snapCancelRef = useRef(0)             // incremented to cancel stale snapshots
   const [previewing, setPreviewing] = useState(false)
-  const previewingRef = useRef(false)
-  const snapshotRef = useRef(false)
-  const snapshotStartRef = useRef(0)
-  const [capMethod, setCapMethod] = useState('')
+  const previewingRef = useRef(false)          // ref version for SharedBuffer handler closure
+  const snapshotRef = useRef(false)            // true while waiting for snapshot frame
+  const snapshotStartRef = useRef(0)           // Date.now() when snapshot was triggered
+  const [capMethod, setCapMethod] = useState('')        // actual method used (from C++ response)
   const [snapshotLatency, setSnapshotLatency] = useState<number | null>(null)
   const [streamFps, setStreamFps] = useState(0)
   const [targetDims, setTargetDims] = useState<{w:number,h:number} | null>(null)
   const [agentConnected] = useState(false) // placeholder — future TCP agent detection
 
+  // ── Load screen info for aspect ratio ──
   useEffect(() => {
     ;(async () => {
       try {
@@ -467,7 +492,7 @@ export default function App() {
     })()
   }, [])
 
-  // Window state polling
+  // ── Poll window state every 500ms (foreground/background/minimized) ──
   useEffect(() => {
     const poll = async () => {
       try {
@@ -483,7 +508,8 @@ export default function App() {
     return () => clearInterval(iv)
   }, [selWindow.hwnd])
 
-  // Auto-select capture methods
+  // ── Auto-select capture methods based on window state ──
+  // Desktop/minimized → DXGI; foreground/background window → WGC
   useEffect(() => {
     const isDesktop = selWindow.hwnd === 0
     if (autoSnap) {
@@ -494,7 +520,8 @@ export default function App() {
     }
   }, [selWindow.hwnd, winState, autoSnap, autoStream])
 
-  // ── Capture operations ──
+  // ═══ Capture operations ═══
+  // ── Stop stream → idle ──
   const stopStream = useCallback(async () => {
     if (opStateRef.current !== 'streaming') return
     previewingRef.current = false
@@ -507,6 +534,8 @@ export default function App() {
     setSsExpanded(false)
   }, [])
 
+  // ── Take single snapshot ──
+  // Auto-stops stream if running. Guards against re-entry and minimized+cantCapture.
   const takeSnapshot = useCallback(async () => {
     if (opStateRef.current === 'streaming') {
       addLog('[Capture] auto-stop stream before snapshot')
@@ -559,6 +588,8 @@ export default function App() {
     opStateRef.current = 'idle'
   }, [selWindow.hwnd, snapMethod, winState, stopStream])
 
+  // ── Start live preview stream ──
+  // Cancels any in-flight snapshot (increments snapCancelRef).
   const startStream = useCallback(async () => {
     ++snapCancelRef.current
     snapshotRef.current = false
@@ -597,6 +628,7 @@ export default function App() {
     if (!screenshotExpanded) setSsExpanded(true)
   }, [selWindow.hwnd, streamMethod, winState, renderMethod, screenshotExpanded])
 
+  // ── Toggle preview on/off ──
   const togglePreview = useCallback(async () => {
     if (previewing) {
       await stopStream()
@@ -605,6 +637,7 @@ export default function App() {
     }
   }, [previewing, stopStream, startStream])
 
+  // ── Cleanup on unmount: stop any active stream ──
   useEffect(() => {
     return () => {
       previewingRef.current = false
@@ -613,7 +646,7 @@ export default function App() {
     }
   }, [])
 
-  // ── Resize handler ──
+  // ── Resize divider drag handler ──
   const handleResizeStart = useCallback(
     (e: React.MouseEvent) => {
       autoCollapsedByWidth.current = false
@@ -647,9 +680,10 @@ export default function App() {
     [measureLayout, checkVerticalLayout],
   )
 
-  // ── Render ──
+  // ═══ Render ═══
   return (
     <div className="h-full flex flex-col bg-bg-primary">
+      {/* ── Top bar: tabs + Start/Stop + theme ── */}
       <TopBar
         tab={tab}
         setTab={setTab}
@@ -659,11 +693,14 @@ export default function App() {
         dark={resolvedDark}
         onToggleTheme={() => setTheme(resolvedDark ? 'light' : 'dark')}
       />
+      {/* ── Main content area: left (tab content) + resize divider + right (panels) ── */}
       <div className="flex-1 flex overflow-hidden">
+        {/* ── Left: tab content (Settings / Monitor / Log) ── */}
         <div
           className="flex-1 flex flex-col overflow-hidden border-r border-border"
           style={{ minWidth: MIN_LEFT_WIDTH }}
         >
+          {/* Settings tab */}
           {tab === 'Settings' && (
             <SettingsView
               snapMethod={snapMethod} setSnapMethod={setSnapMethod}
@@ -700,6 +737,7 @@ export default function App() {
               mappingHotkey={mappingHotkey} setMappingHotkey={setMappingHotkey}
             />
           )}
+          {/* Monitor tab */}
           {tab === 'Monitor' && (
             <MonitorView
               selWin={selWindow} winState={winState}
@@ -732,7 +770,9 @@ export default function App() {
               />
             </MonitorView>
           )}
+          {/* Log tab */}
           {tab === 'Log' && <LogPanel keepFiles={keepFiles} />}
+          {/* ── Bottom status strip ── */}
           <BottomBar
             selWin={selWindow.title}
             snapMethod={snapMethod} streamMethod={streamMethod}
@@ -742,6 +782,7 @@ export default function App() {
             agentConnected={agentConnected}
           />
         </div>
+        {/* ── Resize divider ── */}
         <Tooltip
           text={
             rightCollapsed ? '向右拖拽展开面板' : '拖拽调整面板宽度，向右拖到底可折叠'
@@ -754,12 +795,14 @@ export default function App() {
             <div className="w-[2px] h-8 rounded-full transition-colors bg-border group-hover:bg-accent" />
           </div>
         </Tooltip>
+        {/* ── Right panel stack: Connection → Screenshot → Log → spacer ── */}
         {!rightCollapsed && (
           <div
             ref={rightPanelRef}
             className="flex flex-col p-3 gap-3 overflow-hidden min-h-0"
             style={{ width: rightWidth, minWidth: 324, maxWidth: 400 }}
           >
+            {/* Connection panel */}
             <div className="shrink-0">
               <ConnectionPanel
                 onSelect={(w: WindowInfo) => {
@@ -786,6 +829,7 @@ export default function App() {
                 pinned={connectionPinned} onTogglePin={toggleConnPin}
               />
             </div>
+            {/* Screenshot panel (overflow-hidden for grid animation) */}
             <div className="shrink-0 overflow-hidden">
               <ScreenshotPanel
                 selWin={selWindow} screenRatio={screenRatio}
@@ -804,6 +848,7 @@ export default function App() {
                 onDims={(w, h) => setTargetDims({w, h})}
               />
             </div>
+            {/* Log panel (compact mode in sidebar) */}
             <div className="shrink-0">
               <LogPanel
                 compact expanded={logExpanded}
@@ -811,6 +856,7 @@ export default function App() {
                 pinned={logPinned} onTogglePin={toggleLogPin}
               />
             </div>
+            {/* Flexible spacer to absorb leftover vertical space */}
             <div className="flex-1" />
           </div>
         )}

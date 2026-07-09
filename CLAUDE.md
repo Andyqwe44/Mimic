@@ -788,6 +788,30 @@ Settings → Capture card now has three independent selectors:
 - `renderMethod` state controls transport param in `capture_stream_start`
 - Method selectors moved from ConnectionPanel to Capture SettingsCard
 
+### Frontend-wide code comments + GUI Tooltips (major)
+All 12 frontend source files annotated with structured comments:
+- `═══` file/component header — what the file does
+- `──` section separator — groups of related state/handlers/render logic
+- `//` inline — key logic explanation (SharedBuffer pipeline, FPS counter, pin lock, etc.)
+
+GUI Tooltips (`<Tooltip text="...">`) added to all previously un-annotated interactive elements:
+- 3 tab buttons (Monitor/Log/Settings), 6 theme buttons, Auto toggles, Dev mode toggle
+- Mapping key: display span, indicator dot, Change/Cancel buttons
+- Dev mode frame dump toggles, GitHub link
+- TargetPickerModal: 3 capture mode buttons
+- Pin button tooltips enhanced with state description
+
+### Modifier-only hotkey warning
+Settings → General → Mapping key: if the configured hotkey consists solely of modifier
+keys (Ctrl/Alt/Shift/Win), an inline `⚠ 纯修饰键` badge appears in c2 (`accent-dev`)
+colors. Full explanation shown on hover via Tooltip. Disappears when a non-modifier key
+is included. Suppressed during recording to avoid confusion.
+
+### LogPanel state declaration fix
+Accidental deletion of `entries`, `localExpanded`, `refreshingIdx` state declarations +
+history `useEffect` during comment edits caused `ReferenceError: entries is not defined`
+→ white screen. Restored all missing declarations.
+
 ## Recent Fixes (2026-07-08)
 
 ### Method routing — 铁律 5 full enforcement (major)

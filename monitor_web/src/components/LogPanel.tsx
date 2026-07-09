@@ -1,4 +1,6 @@
-// ═══ Log Panel ───
+// ═══ Log Panel — real-time log viewer ═══
+// Two modes: compact (right sidebar, last 100 lines, no history) and full
+// (Log tab: current session + lazy-loaded history file cards).
 import { useState, useEffect, useRef } from 'react'
 import { FileText, ChevronDown, ArrowDown, Copy, Check, RefreshCw, Pin } from 'lucide-react'
 import { Tooltip } from './Toolkit'
@@ -21,6 +23,7 @@ export function LogPanel({
   pinned?: boolean
   onTogglePin?: () => void
 }) {
+  // ── Panel state ──
   const [localExpanded, setLocalExpanded] = useState(true)
   const expanded = exp !== undefined ? exp : localExpanded
   const toggle = onToggle || (() => setLocalExpanded((v) => !v))
@@ -34,14 +37,17 @@ export function LogPanel({
   const [currentExpanded, setCurrentExpanded] = useState(true)
   const [sessionCopied, setSessionCopied] = useState(false)
   const [copiedFileIdx, setCopiedFileIdx] = useState<number | null>(null)
+  // ── Copy feedback state ──
   const [refreshingIdx, setRefreshingIdx] = useState<number | null>(null)
   const [entries, setEntries] = useState(logMgr.getAll())
 
+  // ── Subscribe to LogManager changes ──
   useEffect(() => {
     setEntries(logMgr.getAll())
     return logMgr.subscribe(() => setEntries([...logMgr.getAll()]))
   }, [])
 
+  // ── Load history file list (full mode only, not compact sidebar) ──
   useEffect(() => {
     if (compact) return
     logMgr.loadHistory(keepFiles ?? 5).then(setHistoryFiles)
@@ -72,6 +78,7 @@ export function LogPanel({
   }, [entryCount, compact, scrolledUp])
 
   // ── Full-card mode (Log tab) ──
+  // Shows two card types: "Current Session" (ring buffer) + per-file "History" cards
   if (!compact) {
     return (
       <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-3">
@@ -351,6 +358,7 @@ export function LogPanel({
   }
 
   // ── Compact mode (right sidebar) ──
+  // Shows last 100 lines only, no history files. Pin + copy + scroll-down buttons.
   return (
     <div className="bg-bg-secondary rounded-xl ring-1 ring-inset ring-border overflow-hidden flex flex-col min-h-0">
       <div
@@ -408,7 +416,7 @@ export function LogPanel({
             </button>
           </Tooltip>
           {pinned !== undefined && onTogglePin && (
-            <Tooltip text={pinned ? '取消固定' : '固定面板'}>
+            <Tooltip text={pinned ? '取消固定 — 允许自动布局调整' : '固定面板 — 不受自动布局影响'}>
               <button
                 onClick={(e) => {
                   e.stopPropagation()

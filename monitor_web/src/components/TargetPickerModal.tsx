@@ -299,14 +299,15 @@ export function TargetPickerModal({
                 请选择目标窗口的当前状态，系统将自动推荐最优捕获方案：
               </div>
               {CAPTURE_MODES.map((m) => (
+                <Tooltip key={m.v} text={m.desc}>
                 <button
-                  key={m.v}
                   onClick={() => handlePickMode(m.method, m.v)}
                   className="w-full flex flex-col items-start gap-0.5 px-3 py-2.5 rounded-lg text-left transition-colors hover:bg-bg-hover border border-border"
                 >
                   <span className="text-sm font-medium text-text-primary">{m.label}</span>
                   <span className="text-xs text-text-muted">{m.desc}</span>
                 </button>
+                </Tooltip>
               ))}
             </div>
           </div>

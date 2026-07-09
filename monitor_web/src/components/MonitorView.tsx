@@ -1,4 +1,6 @@
-// ═══ Monitor View — main workspace with large preview + input forwarding ═══
+// ═══ Monitor View — live preview + remote-control input forwarding ═══
+// Renders ScreenshotPanel in bare mode, adds toolbar + canvas overlay for
+// mouse/keyboard input mapping. Supports click/dblclick/drag/wheel/keyboard.
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { Camera, Play, Square, MousePointer2, Power } from 'lucide-react'
 import { ActionBtn, Tooltip } from './Toolkit'
@@ -93,28 +95,28 @@ export function MonitorView({
   const isDesktop = selWin.hwnd === 0
   const stateLabel = STATE_LABEL[winState] || winState
 
-  // ── Interaction state ──
-  const [focused, setFocused] = useState(false)
+  // ═══ Interaction state ═══
+  const [focused, setFocused] = useState(false)    // canvas has keyboard focus
   const [mouseOn, setMouseOn] = useState(false)
   const [lastClick, setLastClick] = useState<{ x: number; y: number } | null>(null)
   const [dragging, setDragging] = useState(false)
   const dragPathRef = useRef<{ x: number; y: number }[]>([])
-  const dragButtonRef = useRef<string>('left')
+  const dragButtonRef = useRef<string>('left')     // button held during drag
   const dragStartRef = useRef<{ rx: number; ry: number } | null>(null)
   const dragCurrentRef = useRef<{ rx: number; ry: number } | null>(null)
-  const lastSampleRef = useRef<number>(0)
-  const pressedKeysRef = useRef<PressedKey[]>([])
+  const lastSampleRef = useRef<number>(0)           // throttle drag sampling at 50ms
+  const pressedKeysRef = useRef<PressedKey[]>([])   // currently held keys (for auto-release on blur)
   const containerRef = useRef<HTMLDivElement>(null)
 
-  // Visual feedback
+  // ── Visual feedback refs ──
   const [ripples, setRipples] = useState<Ripple[]>([])
   const [keyToast, setKeyToast] = useState<KeyToast | null>(null)
   const idCounterRef = useRef(0)
   const nextId = () => { idCounterRef.current += 1; return idCounterRef.current }
   const dblclickSuppressRef = useRef(false)   // skip mouseup click when dblclick already sent
-  const lastMoveSendRef = useRef(0)          // throttle mouse-move forwarding
+  const lastMoveSendRef = useRef(0)          // throttle mouse-move forwarding at 60fps
 
-  // Cleanup ripples
+  // ── Cleanup expired ripples ──
   useEffect(() => {
     if (ripples.length === 0) return
     const timer = setTimeout(() => {
@@ -123,7 +125,7 @@ export function MonitorView({
     return () => clearTimeout(timer)
   }, [ripples])
 
-  // Cleanup key toast
+  // ── Cleanup expired key toast ──
   useEffect(() => {
     if (!keyToast) return
     const timer = setTimeout(() => setKeyToast(null), 1000)
@@ -163,7 +165,7 @@ export function MonitorView({
 
   // No cleanup needed — immediate clicks have no pending state
 
-  // ── Auto-release keys on blur ──
+  // ── Auto-release all held keys on blur (prevents stuck keys in target) ──
   const releaseAllKeys = useCallback(() => {
     const keys = pressedKeysRef.current
     if (keys.length === 0) return
@@ -199,7 +201,7 @@ export function MonitorView({
     }
   }, [releaseAllKeys, dragging, selWin.hwnd, inputMethod])
 
-  // ── Mouse handlers ──
+  // ── Mouse down → start drag (or click if released without moving) ──
   const handleMouseDown = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (isDesktop || !previewing || !mappingEnabled) return
@@ -226,6 +228,7 @@ export function MonitorView({
     [isDesktop, previewing, mappingEnabled, targetDims],
   )
 
+  // ── Mouse move → drag sampling OR cursor forwarding ──
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (isDesktop || !previewing || !mappingEnabled) return
@@ -257,6 +260,7 @@ export function MonitorView({
     [dragging, previewing, isDesktop, mappingEnabled, targetDims, selWin.hwnd, inputMethod],
   )
 
+  // ── Mouse up → send click or drag (immediate, no defer) ──
   const handleMouseUp = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (!dragging) return
@@ -327,6 +331,7 @@ export function MonitorView({
     [dragging, selWin.hwnd, inputMethod, targetDims],
   )
 
+  // ── Double click — suppresses second mouseup click, sends dblclick immediately ──
   const handleDoubleClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (isDesktop || !previewing || !mappingEnabled) return
@@ -358,6 +363,7 @@ export function MonitorView({
     [isDesktop, previewing, mappingEnabled, selWin.hwnd, inputMethod, targetDims],
   )
 
+  // ── Mouse wheel → normalized delta (deltaMode-aware) ──
   const handleWheel = useCallback(
     (e: React.WheelEvent<HTMLDivElement>) => {
       if (isDesktop || !previewing || !mappingEnabled) return
@@ -390,7 +396,9 @@ export function MonitorView({
     [isDesktop, previewing, mappingEnabled, selWin.hwnd, inputMethod, targetDims],
   )
 
-  // ── Keyboard handlers ──
+  // ── Keyboard handlers — all keys use individual keydown/keyup ──
+  // System naturally recognizes combos (Ctrl+C) because Ctrl is already held
+  // from a previous keydown. No separate "combo" type needed.
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
       if (isDesktop || !previewing || !focused || !mappingEnabled) return
@@ -446,7 +454,7 @@ export function MonitorView({
     [isDesktop, previewing, focused, mappingEnabled, selWin.hwnd, inputMethod],
   )
 
-  // ── Visual feedback elements ──
+  // ── Drag selection overlay (lazy-evaluated to avoid stale closure) ──
   const dragOverlay = dragging && dragStartRef.current && dragCurrentRef.current && (() => {
     const s = dragStartRef.current!
     const c = dragCurrentRef.current!
@@ -523,7 +531,7 @@ export function MonitorView({
         )}
       </div>
 
-      {/* Preview canvas area */}
+      {/* ── Preview canvas area — contains ScreenshotPanel children + overlays ── */}
       <div className="flex-1 overflow-hidden p-4">
         <div
           ref={containerRef}

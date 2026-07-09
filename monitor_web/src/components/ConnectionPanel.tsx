@@ -1,4 +1,5 @@
-// ═══ Connection Panel (MXU-style collapsible card) ───
+// ═══ Connection Panel — target selection + TCP config ═══
+// MXU-style collapsible card with window picker, disconnect, IP/port inputs.
 import { useState, useEffect } from 'react'
 import { ChevronDown, MonitorUp, Unlink, Pin } from 'lucide-react'
 import { Tooltip, ActionBtn } from './Toolkit'
@@ -43,12 +44,14 @@ export function ConnectionPanel({
   pinned?: boolean
   onTogglePin?: () => void
 }) {
+  // ── Local state ──
   const [pickerOpen, setPickerOpen] = useState(false)
   const [selTitle, setSelTitle] = useState(' Entire Desktop')
   const [ip, setIp] = useState('127.0.0.1')
   const [port, setPort] = useState('9999')
   const isDesktop = selTitle === ' Entire Desktop'
 
+  // ── Window selection handlers ──
   const handleSelectWindow = (w: WindowInfo) => {
     setSelTitle(w.title)
     onSelect(w)
@@ -60,12 +63,14 @@ export function ConnectionPanel({
     if (setExpectedCaptureState) setExpectedCaptureState(expectedState)
   }
 
+  // ── Sync selTitle when selWin changes externally (e.g. disconnect) ──
   useEffect(() => {
     if (selWin && selWin.title !== selTitle) {
       setSelTitle(selWin.title)
     }
   }, [selWin?.title])
 
+  // ── Derived: can current stream method capture this window? ──
   const cantCapture = !isDesktop && cantCaptureMinimized(streamMethod, winState)
   const recommendedMethod = winState === 'minimized' ? 'dxgi' : 'wgc'
 
@@ -100,7 +105,7 @@ export function ConnectionPanel({
         <div className="flex items-center gap-2 ml-2">
           {cantCapture && <span className="text-xs text-error shrink-0">⚠</span>}
           {onTogglePin && (
-            <Tooltip text={pinned ? '取消固定' : '固定面板'}>
+            <Tooltip text={pinned ? '取消固定 — 允许自动布局调整' : '固定面板 — 不受自动布局影响'}>
               <button
                 onClick={(e) => {
                   e.stopPropagation()
