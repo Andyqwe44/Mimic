@@ -542,6 +542,30 @@ of method names (e.g. `e.additionalData` not `e.getAdditionalData()`).
 
 ## Recent Fixes (2026-07-09)
 
+### Pin lock + safe setter for right-sidebar panels (major)
+Right-sidebar panels (Connection / Screenshot / Log) now each have a 📌 Pin button
+on the header right side. Pin locks the panel at its current expanded/collapsed state
+against ALL subsequent changes — manual toggle, auto-layout, and content-driven events
+(📷 snapshot, ▶ stream, ⏹ stop) all go through a centralized safe setter that returns
+`false` when pinned, making pin enforcement low-coupling (no scattered guard clauses).
+
+**Architecture**: `xxxPinLocked` ref (`null | boolean`) + safe setter `setXxxExpanded(v): boolean`.
+Pin toggle records `expandedRef.current` into the lock ref; safe setter checks lock ref
+before calling React setState. All call sites (onToggle, takeSnapshot, startStream,
+stopStream, auto-layout) use the safe setter — double-checking is harmless.
+
+**Auto-layout priority** (after pin refactor):
+| Direction | Priority |
+|-----------|----------|
+| Collapse (shrink) | Log → Connection → Screenshot(empty) → Screenshot(has content) |
+| Expand (grow) | Screenshot(has content) → Connection → Screenshot(empty) → Log |
+
+Pinned panels are skipped by auto-layout (`xxxPinLocked.current === null` check).
+All-three-pinned overflow: do nothing, user's responsibility.
+
+**Screenshot `ssHasContentRef`** tracks whether canvas has rendered content,
+used by auto-layout to prioritize content-bearing Screenshot over empty placeholder.
+
 ### UI operation conflict resolution — TS-side state machine (major)
 All capture operation conflicts resolved in TypeScript (铁律 5 推广: C++ 不替前端做决策).
 **Principle**: last action wins — newer operation auto-cancels older one.

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { Play, Square, Camera, Monitor, Settings, Moon, Sun, ChevronDown, ChevronLeft, FileText, X, MonitorUp, Search, MonitorSmartphone, RefreshCw, FolderOpen, Cpu, Pencil, Copy, Check, ArrowDown, Unlink } from 'lucide-react'
+import { Play, Square, Camera, Monitor, Settings, Moon, Sun, ChevronDown, ChevronLeft, FileText, X, MonitorUp, Search, MonitorSmartphone, RefreshCw, FolderOpen, Cpu, Pencil, Copy, Check, ArrowDown, Unlink, Pin } from 'lucide-react'
 // ── WebView2 WebMessage bridge (replaces Tauri invoke) ──
 type PendingCall = {
   resolve: (value: any) => void;
@@ -445,7 +445,7 @@ const RENDER_METHODS = [
 ]
 
 // ═══ Connection Panel (MXU-style collapsible card) ═══
-function ConnectionPanel({ onSelect, onDisconnect, setSnapMethod, streamMethod, setStreamMethod, selWin, winState, expectedCaptureState, setExpectedCaptureState, expanded, onToggle }: { onSelect: (w: WindowInfo) => void; onDisconnect?: () => void; snapMethod: string; setSnapMethod?: (m: string) => void; streamMethod: string; setStreamMethod?: (m: string) => void; selWin?: WindowInfo; winState: string; expectedCaptureState?: string; setExpectedCaptureState?: (s: string) => void; expanded: boolean; onToggle: () => void }) {
+function ConnectionPanel({ onSelect, onDisconnect, setSnapMethod, streamMethod, setStreamMethod, selWin, winState, expectedCaptureState, setExpectedCaptureState, expanded, onToggle, pinned, onTogglePin }: { onSelect: (w: WindowInfo) => void; onDisconnect?: () => void; snapMethod: string; setSnapMethod?: (m: string) => void; streamMethod: string; setStreamMethod?: (m: string) => void; selWin?: WindowInfo; winState: string; expectedCaptureState?: string; setExpectedCaptureState?: (s: string) => void; expanded: boolean; onToggle: () => void; pinned?: boolean; onTogglePin?: () => void }) {
   const [pickerOpen, setPickerOpen] = useState(false)
   const [selTitle, setSelTitle] = useState(' Entire Desktop')
   const [ip, setIp] = useState('127.0.0.1')
@@ -490,6 +490,14 @@ function ConnectionPanel({ onSelect, onDisconnect, setSnapMethod, streamMethod, 
           <span className="text-[10px] text-text-muted shrink-0">推荐</span>
           <span className="text-[11px] font-medium text-accent bg-accent/10 px-1.5 py-0.5 rounded shrink-0">{METHOD_SHORT[recommendedMethod] || recommendedMethod}</span>
           {cantCapture && <span className="text-xs text-error shrink-0">⚠</span>}
+          {onTogglePin && (
+            <Tooltip text={pinned ? "取消固定" : "固定面板"}>
+              <button onClick={e => { e.stopPropagation(); onTogglePin() }}
+                className={`p-1 rounded-md transition-colors ${pinned ? 'text-accent hover:bg-bg-tertiary' : 'text-text-secondary hover:text-text-primary hover:bg-bg-tertiary'}`}>
+                <Pin className={`w-3.5 h-3.5 ${pinned ? 'fill-current' : ''}`} />
+              </button>
+            </Tooltip>
+          )}
           <ChevronDown className={`w-4 h-4 text-text-muted transition-transform duration-150 ${expanded?'rotate-180':''}`} />
         </div>
       </div>
@@ -548,13 +556,17 @@ function ConnectionPanel({ onSelect, onDisconnect, setSnapMethod, streamMethod, 
 // ═══ Screenshot Panel ───
 // Single Canvas for both snapshot and real-time preview.
 // Frames arrive via SharedBuffer (zero-copy) → sharedbufferreceived event → putImageData.
-function ScreenshotPanel({ screenRatio, expanded, onToggle, previewing, previewingRef, snapshotRef, snapshotStartRef, capMethod, onTakeSnapshot, onTogglePreview }: {
+function ScreenshotPanel({ screenRatio, expanded, onToggle, previewing, previewingRef, snapshotRef, snapshotStartRef, capMethod, onTakeSnapshot, onTogglePreview, pinned, onTogglePin, hasContentRef }: {
   selWin?: WindowInfo; screenRatio: number; snapMethod: string; streamMethod: string; renderMethod: string; winState: string; expanded: boolean; onToggle: () => void;
   previewing: boolean; previewingRef: React.MutableRefObject<boolean>; snapshotRef: React.MutableRefObject<boolean>; snapshotStartRef: React.MutableRefObject<number>;
   capMethod: string;
   onTakeSnapshot: () => void; onTogglePreview: () => void;
+  pinned: boolean; onTogglePin: () => void;
+  hasContentRef: React.MutableRefObject<boolean>;
 }) {
   const [hasContent, setHasContent] = useState(false)
+  // Sync hasContent to parent ref for auto-layout decisions
+  useEffect(() => { hasContentRef.current = hasContent }, [hasContent])
   const [snapshotLatency, setSnapshotLatency] = useState<number | null>(null)
   const [fps, setFps] = useState(0)
   const framesRef = useRef(0)
@@ -646,6 +658,12 @@ function ScreenshotPanel({ screenRatio, expanded, onToggle, previewing, previewi
             : <Tooltip text="开始实时预览"><button onClick={e => { e.stopPropagation(); onTogglePreview() }}
                 className="p-1 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-tertiary transition-colors"><Play className="w-3.5 h-3.5" /></button></Tooltip>
           }
+          <Tooltip text={pinned ? "取消固定" : "固定面板"}>
+            <button onClick={e => { e.stopPropagation(); onTogglePin() }}
+              className={`p-1 rounded-md transition-colors ${pinned ? 'text-accent hover:bg-bg-tertiary' : 'text-text-secondary hover:text-text-primary hover:bg-bg-tertiary'}`}>
+              <Pin className={`w-3.5 h-3.5 ${pinned ? 'fill-current' : ''}`} />
+            </button>
+          </Tooltip>
           <ChevronDown className={`w-4 h-4 text-text-muted transition-transform duration-150 ${expanded?'rotate-180':''}`} />
         </div>
       </div>
@@ -757,7 +775,7 @@ function addLog(msg: string) { logMgr.add(msg) }
 // ═══ Log Panel ───
 type HistoryFile = { name: string; lines: string[] }
 
-function LogPanel({ compact, expanded: exp, onToggle, keepFiles }: { compact?: boolean; expanded?: boolean; onToggle?: () => void; keepFiles?: number }) {
+function LogPanel({ compact, expanded: exp, onToggle, keepFiles, pinned, onTogglePin }: { compact?: boolean; expanded?: boolean; onToggle?: () => void; keepFiles?: number; pinned?: boolean; onTogglePin?: () => void }) {
   const [localExpanded, setLocalExpanded] = useState(true)
   const expanded = exp !== undefined ? exp : localExpanded
   const toggle = onToggle || (() => setLocalExpanded(v => !v))
@@ -959,6 +977,14 @@ function LogPanel({ compact, expanded: exp, onToggle, keepFiles }: { compact?: b
               {sessionCopied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
             </button>
           </Tooltip>
+          {pinned !== undefined && onTogglePin && (
+            <Tooltip text={pinned ? "取消固定" : "固定面板"}>
+              <button onClick={e => { e.stopPropagation(); onTogglePin() }}
+                className={`p-1 rounded-md transition-colors ${pinned ? 'text-accent hover:bg-bg-tertiary' : 'text-text-secondary hover:text-text-primary hover:bg-bg-tertiary'}`}>
+                <Pin className={`w-3.5 h-3.5 ${pinned ? 'fill-current' : ''}`} />
+              </button>
+            </Tooltip>
+          )}
           <ChevronDown className={`w-4 h-4 text-text-muted transition-transform duration-150 ${expanded?'rotate-180':''}`} />
         </div>
       </div>
@@ -1232,6 +1258,61 @@ export default function App() {
   screenshotExpandedRef.current = screenshotExpanded
   const logExpandedRef = useRef(logExpanded)
   logExpandedRef.current = logExpanded
+  // ── Pin lock: safe setter gate blocks all changes when locked ──
+  // null = unlocked; true/false = locked at that expanded state
+  const connPinLocked = useRef<boolean | null>(null)
+  const ssPinLocked = useRef<boolean | null>(null)
+  const logPinLocked = useRef<boolean | null>(null)
+  const [connectionPinned, setConnectionPinned] = useState(false)
+  const [screenshotPinned, setScreenshotPinned] = useState(false)
+  const [logPinned, setLogPinned] = useState(false)
+  const ssHasContentRef = useRef(false)
+
+  // Safe setters — single gate, no scattered guard clauses needed
+  const setConnExpanded = useCallback((v: boolean): boolean => {
+    if (connPinLocked.current !== null) return false
+    setConnectionExpanded(v)
+    return true
+  }, [])
+  const setSsExpanded = useCallback((v: boolean): boolean => {
+    if (ssPinLocked.current !== null) return false
+    setScreenshotExpanded(v)
+    return true
+  }, [])
+  const setLogPanelExpanded = useCallback((v: boolean): boolean => {
+    if (logPinLocked.current !== null) return false
+    setLogExpanded(v)
+    return true
+  }, [])
+
+  // Pin toggle: lock at current state / unlock
+  const toggleConnPin = useCallback(() => {
+    if (connPinLocked.current === null) {
+      connPinLocked.current = connectionExpandedRef.current
+      setConnectionPinned(true)
+    } else {
+      connPinLocked.current = null
+      setConnectionPinned(false)
+    }
+  }, [])
+  const toggleSsPin = useCallback(() => {
+    if (ssPinLocked.current === null) {
+      ssPinLocked.current = screenshotExpandedRef.current
+      setScreenshotPinned(true)
+    } else {
+      ssPinLocked.current = null
+      setScreenshotPinned(false)
+    }
+  }, [])
+  const toggleLogPin = useCallback(() => {
+    if (logPinLocked.current === null) {
+      logPinLocked.current = logExpandedRef.current
+      setLogPinned(true)
+    } else {
+      logPinLocked.current = null
+      setLogPinned(false)
+    }
+  }, [])
   const rightPanelRef = useRef<HTMLDivElement>(null)
 
   // ── Theme state (shared by ThemeBtn + Settings General) ──
@@ -1304,7 +1385,8 @@ export default function App() {
   }, [])
 
   // Initial layout check — resize event doesn't fire on startup. If all panels
-  // expanded overflow the right panel, collapse L → S → C until they fit.
+  // expanded overflow the right panel, collapse L → C → S(empty) → S(content).
+  // Safe setters reject pinned panels automatically.
   useEffect(() => {
     const check = () => {
       measureLayout()
@@ -1314,17 +1396,22 @@ export default function App() {
       for (let i = 0; i < 3; i++) kidsH += (kids[i] as HTMLElement).offsetHeight
       const overflow = kidsH + GAP - el.clientHeight
       if (overflow > 4) {
-        if (logExpandedRef.current) {
+        // Priority: Log → Connection → Screenshot(empty) → Screenshot(content)
+        if (logExpandedRef.current && logPinLocked.current === null) {
           addLog(`[Layout] init overflow ${overflow}px → auto-collapse log`)
           setLogExpanded(false)
-          setTimeout(check, 250) // re-check after CSS animation
-        } else if (screenshotExpandedRef.current) {
+          setTimeout(check, 250)
+        } else if (connectionExpandedRef.current && connPinLocked.current === null) {
+          addLog(`[Layout] init overflow ${overflow}px → auto-collapse connection`)
+          setConnectionExpanded(false)
+          setTimeout(check, 250)
+        } else if (screenshotExpandedRef.current && ssPinLocked.current === null && !ssHasContentRef.current) {
           addLog(`[Layout] init overflow ${overflow}px → auto-collapse screenshot`)
           setScreenshotExpanded(false)
           setTimeout(check, 250)
-        } else if (connectionExpandedRef.current) {
-          addLog(`[Layout] init overflow ${overflow}px → auto-collapse connection`)
-          setConnectionExpanded(false)
+        } else if (screenshotExpandedRef.current && ssPinLocked.current === null && ssHasContentRef.current) {
+          addLog(`[Layout] init overflow ${overflow}px → auto-collapse screenshot (has content)`)
+          setScreenshotExpanded(false)
         }
       }
       prevClientH.current = el.clientHeight
@@ -1351,34 +1438,43 @@ export default function App() {
       const h = H.current
 
       if (ch < prev) {
-        // Shrinking: actual overflow → collapse L → S → C (one per event)
+        // Shrinking: collapse L → C → S(empty) → S(content), skip pinned
         if (overflow > 4) {
-          if (logExpandedRef.current && now - guard.current.L > 350) {
+          if (logExpandedRef.current && logPinLocked.current === null && now - guard.current.L > 350) {
             addLog(`[Layout] overflow ${overflow}px → auto-collapse log`)
             setLogExpanded(false); guard.current.L = now
-          } else if (screenshotExpandedRef.current && now - guard.current.S > 350) {
-            addLog(`[Layout] overflow ${overflow}px → auto-collapse screenshot`)
-            setScreenshotExpanded(false); guard.current.S = now
-          } else if (connectionExpandedRef.current && now - guard.current.C > 350) {
+          } else if (connectionExpandedRef.current && connPinLocked.current === null && now - guard.current.C > 350) {
             addLog(`[Layout] overflow ${overflow}px → auto-collapse connection`)
             setConnectionExpanded(false); guard.current.C = now
+          } else if (screenshotExpandedRef.current && ssPinLocked.current === null && !ssHasContentRef.current && now - guard.current.S > 350) {
+            addLog(`[Layout] overflow ${overflow}px → auto-collapse screenshot`)
+            setScreenshotExpanded(false); guard.current.S = now
+          } else if (screenshotExpandedRef.current && ssPinLocked.current === null && ssHasContentRef.current && now - guard.current.S > 350) {
+            addLog(`[Layout] overflow ${overflow}px → auto-collapse screenshot (has content)`)
+            setScreenshotExpanded(false); guard.current.S = now
           }
         }
       } else if (ch > prev) {
-        // Growing: if room for next collapsed panel, expand C → S → L (one per event)
-        if (!connectionExpandedRef.current && now - guard.current.C > 350) {
+        // Growing: expand S(content) → C → S(empty) → L, skip pinned
+        if (!screenshotExpandedRef.current && ssPinLocked.current === null && ssHasContentRef.current && now - guard.current.S > 350) {
+          const wouldNeed = (kidsH - h.Sp + h.S) + GAP
+          if (ch >= wouldNeed) {
+            addLog(`[Layout] room for S (has content, need ${wouldNeed}px) → auto-expand screenshot`)
+            setScreenshotExpanded(true); guard.current.S = now
+          }
+        } else if (!connectionExpandedRef.current && connPinLocked.current === null && now - guard.current.C > 350) {
           const wouldNeed = (kidsH - h.Cp + h.C) + GAP
           if (ch >= wouldNeed) {
             addLog(`[Layout] room for C (need ${wouldNeed}px) → auto-expand connection`)
             setConnectionExpanded(true); guard.current.C = now
           }
-        } else if (!screenshotExpandedRef.current && now - guard.current.S > 350) {
+        } else if (!screenshotExpandedRef.current && ssPinLocked.current === null && !ssHasContentRef.current && now - guard.current.S > 350) {
           const wouldNeed = (kidsH - h.Sp + h.S) + GAP
           if (ch >= wouldNeed) {
             addLog(`[Layout] room for S (need ${wouldNeed}px) → auto-expand screenshot`)
             setScreenshotExpanded(true); guard.current.S = now
           }
-        } else if (!logExpandedRef.current && now - guard.current.L > 350) {
+        } else if (!logExpandedRef.current && logPinLocked.current === null && now - guard.current.L > 350) {
           const wouldNeed = (kidsH - h.Lp + h.L) + GAP
           if (ch >= wouldNeed) {
             addLog(`[Layout] room for L (need ${wouldNeed}px) → auto-expand log`)
@@ -1405,32 +1501,41 @@ export default function App() {
     const overflow = kidsH + GAP - ch
 
     if (overflow > 4) {
-      // Collapse L → S → C
-      if (logExpandedRef.current) {
+      // Collapse L → C → S(empty) → S(content), skip pinned
+      if (logExpandedRef.current && logPinLocked.current === null) {
         addLog(`[Layout] drag overflow ${overflow}px → auto-collapse log`)
         setLogExpanded(false)
-      } else if (screenshotExpandedRef.current) {
-        addLog(`[Layout] drag overflow ${overflow}px → auto-collapse screenshot`)
-        setScreenshotExpanded(false)
-      } else if (connectionExpandedRef.current) {
+      } else if (connectionExpandedRef.current && connPinLocked.current === null) {
         addLog(`[Layout] drag overflow ${overflow}px → auto-collapse connection`)
         setConnectionExpanded(false)
+      } else if (screenshotExpandedRef.current && ssPinLocked.current === null && !ssHasContentRef.current) {
+        addLog(`[Layout] drag overflow ${overflow}px → auto-collapse screenshot`)
+        setScreenshotExpanded(false)
+      } else if (screenshotExpandedRef.current && ssPinLocked.current === null && ssHasContentRef.current) {
+        addLog(`[Layout] drag overflow ${overflow}px → auto-collapse screenshot (has content)`)
+        setScreenshotExpanded(false)
       }
     } else if (overflow < -4) {
-      // Room available — expand C → S → L
-      if (!connectionExpandedRef.current) {
+      // Room available — expand S(content) → C → S(empty) → L, skip pinned
+      if (!screenshotExpandedRef.current && ssPinLocked.current === null && ssHasContentRef.current) {
+        const wouldNeed = (kidsH - h.Sp + h.S) + GAP
+        if (ch >= wouldNeed) {
+          addLog(`[Layout] drag room for S (has content, need ${wouldNeed}px) → auto-expand screenshot`)
+          setScreenshotExpanded(true)
+        }
+      } else if (!connectionExpandedRef.current && connPinLocked.current === null) {
         const wouldNeed = (kidsH - h.Cp + h.C) + GAP
         if (ch >= wouldNeed) {
           addLog(`[Layout] drag room for C (need ${wouldNeed}px) → auto-expand connection`)
           setConnectionExpanded(true)
         }
-      } else if (!screenshotExpandedRef.current) {
+      } else if (!screenshotExpandedRef.current && ssPinLocked.current === null && !ssHasContentRef.current) {
         const wouldNeed = (kidsH - h.Sp + h.S) + GAP
         if (ch >= wouldNeed) {
           addLog(`[Layout] drag room for S (need ${wouldNeed}px) → auto-expand screenshot`)
           setScreenshotExpanded(true)
         }
-      } else if (!logExpandedRef.current) {
+      } else if (!logExpandedRef.current && logPinLocked.current === null) {
         const wouldNeed = (kidsH - h.Lp + h.L) + GAP
         if (ch >= wouldNeed) {
           addLog(`[Layout] drag room for L (need ${wouldNeed}px) → auto-expand log`)
@@ -1532,8 +1637,8 @@ export default function App() {
     try { await hostCall('capture_stream_stop') } catch (_) {}
     opStateRef.current = 'idle'
     addLog('[Capture] stream stopped')
-    // Auto-collapse ScreenshotPanel when stream stops
-    setScreenshotExpanded(false)
+    // Auto-collapse ScreenshotPanel when stream stops (safe setter: no-op if pinned)
+    setSsExpanded(false)
   }, [])
 
   const takeSnapshot = useCallback(async () => {
@@ -1558,8 +1663,8 @@ export default function App() {
       opStateRef.current = 'idle'
       return
     }
-    // Auto-expand ScreenshotPanel to show the result
-    if (!screenshotExpanded) setScreenshotExpanded(true)
+    // Auto-expand ScreenshotPanel to show the result (safe setter: no-op if pinned collapsed)
+    if (!screenshotExpanded) setSsExpanded(true)
     // addLog(`[Capture] ${METHOD_SHORT[method] || method} ${hwnd ? 'hwnd='+hwnd : 'desktop'}...`)
     const t0 = Date.now()
     snapshotStartRef.current = t0
@@ -1618,8 +1723,8 @@ export default function App() {
       addLog(`[Preview] start failed: ${e}`)
       return
     }
-    // Auto-expand ScreenshotPanel if collapsed
-    if (!screenshotExpanded) setScreenshotExpanded(true)
+    // Auto-expand ScreenshotPanel if collapsed (safe setter: no-op if pinned collapsed)
+    if (!screenshotExpanded) setSsExpanded(true)
   }, [selWindow.hwnd, selWindow?.title, streamMethod, winState, renderMethod, screenshotExpanded])
 
   const togglePreview = useCallback(async () => {
@@ -1679,9 +1784,9 @@ export default function App() {
               setSelWindow({ title: ' Entire Desktop', category: 'desktop', hwnd: 0 })
               setExpectedCaptureState('desktop')
               addLog('[Connection] disconnected, back to desktop')
-            }} snapMethod={snapMethod} setSnapMethod={setSnapMethod} streamMethod={streamMethod} setStreamMethod={setStreamMethod} selWin={selWindow} winState={winState} expectedCaptureState={expectedCaptureState} setExpectedCaptureState={setExpectedCaptureState} expanded={connectionExpanded} onToggle={() => setConnectionExpanded(v => !v)} /></div>
-            <div className="shrink-0 overflow-hidden"><ScreenshotPanel selWin={selWindow} screenRatio={screenRatio} snapMethod={snapMethod} streamMethod={streamMethod} renderMethod={renderMethod} winState={winState} expanded={screenshotExpanded} onToggle={() => setScreenshotExpanded(v => !v)} previewing={previewing} previewingRef={previewingRef} snapshotRef={snapshotRef} snapshotStartRef={snapshotStartRef} capMethod={capMethod} onTakeSnapshot={takeSnapshot} onTogglePreview={togglePreview} /></div>
-            <div className="shrink-0"><LogPanel compact expanded={logExpanded} onToggle={() => setLogExpanded(v => !v)} /></div>
+            }} snapMethod={snapMethod} setSnapMethod={setSnapMethod} streamMethod={streamMethod} setStreamMethod={setStreamMethod} selWin={selWindow} winState={winState} expectedCaptureState={expectedCaptureState} setExpectedCaptureState={setExpectedCaptureState} expanded={connectionExpanded} onToggle={() => setConnExpanded(!connectionExpandedRef.current)} pinned={connectionPinned} onTogglePin={toggleConnPin} /></div>
+            <div className="shrink-0 overflow-hidden"><ScreenshotPanel selWin={selWindow} screenRatio={screenRatio} snapMethod={snapMethod} streamMethod={streamMethod} renderMethod={renderMethod} winState={winState} expanded={screenshotExpanded} onToggle={() => setSsExpanded(!screenshotExpandedRef.current)} previewing={previewing} previewingRef={previewingRef} snapshotRef={snapshotRef} snapshotStartRef={snapshotStartRef} capMethod={capMethod} onTakeSnapshot={takeSnapshot} onTogglePreview={togglePreview} pinned={screenshotPinned} onTogglePin={toggleSsPin} hasContentRef={ssHasContentRef} /></div>
+            <div className="shrink-0"><LogPanel compact expanded={logExpanded} onToggle={() => setLogPanelExpanded(!logExpandedRef.current)} pinned={logPinned} onTogglePin={toggleLogPin} /></div>
             <div className="flex-1" />
           </div>
         )}
