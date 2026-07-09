@@ -210,6 +210,33 @@ export function SettingsView({
     }
   }, [recording, commitRecording])
 
+  // ── Hotkey test indicator: flash when the configured combo is pressed ──
+  const [triggerFlash, setTriggerFlash] = useState(false)
+  const testSeqRef = useRef<string[]>([])
+  useEffect(() => {
+    if (recording) return // don't test while recording
+    const onDown = (e: KeyboardEvent) => {
+      if (e.repeat) return
+      if (!testSeqRef.current.includes(e.code)) {
+        testSeqRef.current.push(e.code)
+      }
+      if (testSeqRef.current.map(codeToName).join('+') === mappingHotkey) {
+        setTriggerFlash(true)
+        setTimeout(() => setTriggerFlash(false), 400)
+      }
+    }
+    const onUp = (e: KeyboardEvent) => {
+      const idx = testSeqRef.current.indexOf(e.code)
+      if (idx >= 0) testSeqRef.current.splice(idx, 1)
+    }
+    window.addEventListener('keydown', onDown, true)
+    window.addEventListener('keyup', onUp, true)
+    return () => {
+      window.removeEventListener('keydown', onDown, true)
+      window.removeEventListener('keyup', onUp, true)
+    }
+  }, [mappingHotkey, recording])
+
   useEffect(() => {
     hostCall('screen_info')
       .then((si: any) => setScreenRes(`${si.w}×${si.h}`))
@@ -723,9 +750,11 @@ export function SettingsView({
             <label className="text-sm text-text-secondary w-24 shrink-0">Mapping key</label>
             {recording ? (
               <>
-                <span className={`h-7 px-3 rounded-lg border border-accent bg-accent/10 text-accent text-sm font-mono flex items-center gap-1.5 ${displayCombo && displayCombo !== '...' ? '' : 'animate-pulse'}`}>
+                <span className={`h-7 px-3 rounded-lg border border-accent bg-accent/10 text-accent text-sm font-mono flex items-center ${displayCombo ? '' : 'animate-pulse'}`}>
                   {displayCombo || 'Press keys...'}
                 </span>
+                <span className="flex-1" />
+                <span className={`w-2.5 h-2.5 rounded-full shrink-0 transition-colors duration-100 ${triggerFlash ? 'bg-accent shadow-[0_0_6px_var(--color-accent)]' : 'bg-border'}`} />
                 <button
                   onClick={cancelRecording}
                   className="px-2.5 h-7 rounded-md text-xs font-medium border border-border text-text-secondary hover:bg-bg-hover transition-colors"
@@ -738,6 +767,8 @@ export function SettingsView({
                 <span className="h-7 px-3 rounded-lg border border-border bg-bg-primary text-sm font-mono text-text-primary flex items-center min-w-[80px]">
                   {mappingHotkey}
                 </span>
+                <span className="flex-1" />
+                <span className={`w-2.5 h-2.5 rounded-full shrink-0 transition-colors duration-100 ${triggerFlash ? 'bg-accent shadow-[0_0_6px_var(--color-accent)]' : 'bg-border'}`} />
                 <button
                   onClick={startRecording}
                   className="px-2.5 h-7 rounded-md text-xs font-medium border border-border text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors"

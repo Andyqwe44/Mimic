@@ -614,6 +614,8 @@ of method names (e.g. `e.additionalData` not `e.getAdditionalData()`).
 - Sequence-based: `pressedSeqRef` (ordered array of `e.code`) — `Ctrl+K` ≠ `K+Ctrl`, `A+B` ≠ `B+A`
 - `codeToName()` in `constants.ts` converts physical codes (KeyA/ControlLeft/Digit1) to display names (A/Ctrl/1)
 - MonitorView hotkey listener tracks `pressedHotkeyRef` (ordered codes), matches via `seqMatches()` on each keydown
+- Mapping key row: indicator dot (right of display, left of Change) flashes green with glow when hotkey triggered
+- Hotkey test listener always active (unless recording), independent of Monitor tab — flashes indicator for instant feedback
 - Canvas cursor/focus ring/hint text conditional on `mappingEnabled` — preview without accidental input
 - Global window keydown listener in MonitorView for hotkey toggle (skips input/textarea focus)
 - CSS `--color-accent-dev` default updated from `#0EA5E9` to `#F97316` (new Ocean c2)
