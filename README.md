@@ -40,6 +40,7 @@ Desktop monitor for visual game AI — **pixels in, actions out**.
 # 1. Build C++ static libs (first time only, re-run after C++ changes)
 cd logger   && build_logger_lib.cmd
 cd capture  && build_capture_lib.cmd
+cd input    && build_input_lib.cmd
 
 # 2. Dev build (Vite HMR, debug symbols)
 cd monitor_web && npm install && npm run dev   # terminal 1: Vite :1420
@@ -69,6 +70,10 @@ built-in). No HTTP server, no external files.
 tictactoe/
 ├── logger/               C++ logging engine (capture_log_write_msg)
 ├── capture/              C++ screen capture (per-method .lib)
+├── input/                C++ input forwarding (per-method .lib)
+│   ├── include/          input_methods.h + input_common.h
+│   ├── src/              input_common + sendinput/winapi/postmessage/driver
+│   └── build/            output .lib files
 ├── monitor_app/          C++ WebView2 host (main window + commands + single-instance)
 │   ├── build.cmd         Production build (optimized)
 │   ├── build_dev.cmd     Dev build (debug symbols, no opt)

@@ -1,129 +1,143 @@
 /**
- * SendInput Input Backend (Fallback)
- *
- * Uses Win32 SendInput() API. Simple and works for most single-player games.
- * Detectable by anti-cheat (LLMHF_INJECTED flag).
+ * input_sendinput.cpp — SendInput method (application-level synthesized input).
  */
-#include "input.hpp"
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include "input_common.h"
+#include "input_methods.h"
+#include "../../logger/logger.h"
 #include <windows.h>
-#include <cstdio>
+#include <vector>
 
-class SendInputBackend : public IInputBackend {
-public:
-    const char* name() const override { return "SendInput (Win32)"; }
-    bool init() override { return true; }
+std::string input_sendinput(HWND hWnd, const InputArgs& a) {
+    DWORD absX = 0, absY = 0;
+    int clientX = 0, clientY = 0;
+    bool coordsOk = true;
+    if (!norm_to_screen(hWnd, a.x_norm, a.y_norm, absX, absY)) coordsOk = false;
+    if (!norm_to_client(hWnd, a.x_norm, a.y_norm, clientX, clientY)) coordsOk = false;
+    bool isMouse = (a.type == "click" || a.type == "dblclick" || a.type == "move" || a.type == "drag" || a.type == "wheel");
+    if (!coordsOk && isMouse)
+        return "{\"ok\":false,\"error\":\"failed to get target window client rect\"}";
 
-    bool send_action(const GameAction& a) override {
-        switch (a.type) {
-        case GameAction::KeyDown:       return key_event(a.vk_code, 0);
-        case GameAction::KeyUp:         return key_event(a.vk_code, KEYEVENTF_KEYUP);
-        case GameAction::KeyTap:
-            return key_event(a.vk_code, 0) &&
-                   wait_ms(a.wait_ms) &&
-                   key_event(a.vk_code, KEYEVENTF_KEYUP);
-        case GameAction::MouseMove:     return mouse_to(a.x, a.y);
-        case GameAction::MouseMoveRelative: return mouse_delta(a.dx, a.dy);
-        case GameAction::MouseDown:     return mouse_button(btn_flag(a.btn, true));
-        case GameAction::MouseUp:       return mouse_button(btn_flag(a.btn, false));
-        case GameAction::MouseClick:
-            return mouse_to(a.x, a.y) && wait_ms(10) && mouse_click(a.btn);
-        case GameAction::Wait:          return wait_ms(a.wait_ms);
+    if (a.type == "click" || a.type == "dblclick") {
+        DWORD downFlag = (a.button == "right") ? MOUSEEVENTF_RIGHTDOWN :
+                        (a.button == "middle") ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_LEFTDOWN;
+        DWORD upFlag   = (a.button == "right") ? MOUSEEVENTF_RIGHTUP :
+                        (a.button == "middle") ? MOUSEEVENTF_MIDDLEUP : MOUSEEVENTF_LEFTUP;
+        auto doClick = [&]() -> bool {
+            INPUT inputs[2] = {};
+            inputs[0].type = INPUT_MOUSE;
+            inputs[0].mi.dx = absX; inputs[0].mi.dy = absY;
+            inputs[0].mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE | downFlag;
+            inputs[1].type = INPUT_MOUSE;
+            inputs[1].mi.dx = absX; inputs[1].mi.dy = absY;
+            inputs[1].mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE | upFlag;
+            UINT sent = SendInput(2, inputs, sizeof(INPUT));
+            if (sent != 2) { LOG("input","SendInput click sent=%u",sent); return false; }
+            return true;
+        };
+        if (!doClick()) return "{\"ok\":false,\"error\":\"SendInput failed (UIPI may block)\"}";
+        if (a.type == "dblclick") { Sleep(GetDoubleClickTime()/2); if (!doClick()) return "{\"ok\":false,\"error\":\"dblclick second click failed\"}"; }
+        LOG("input","sendinput: %s at (%.3f,%.3f)",a.type.c_str(),a.x_norm,a.y_norm);
+    }
+    else if (a.type == "move") {
+        INPUT i = {}; i.type = INPUT_MOUSE;
+        i.mi.dx = absX; i.mi.dy = absY;
+        i.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE;
+        SendInput(1, &i, sizeof(INPUT));
+    }
+    else if (a.type == "drag") {
+        if (a.dragPath.empty()) return "{\"ok\":false,\"error\":\"drag requires at least one point\"}";
+        DWORD dF = (a.button=="right")?MOUSEEVENTF_RIGHTDOWN:(a.button=="middle")?MOUSEEVENTF_MIDDLEDOWN:MOUSEEVENTF_LEFTDOWN;
+        DWORD uF = (a.button=="right")?MOUSEEVENTF_RIGHTUP:(a.button=="middle")?MOUSEEVENTF_MIDDLEUP:MOUSEEVENTF_LEFTUP;
+        { DWORD ax,ay; norm_to_screen(hWnd,a.dragPath[0].first,a.dragPath[0].second,ax,ay);
+          INPUT ins[2]={}; ins[0].type=INPUT_MOUSE; ins[0].mi.dx=ax; ins[0].mi.dy=ay;
+          ins[0].mi.dwFlags=MOUSEEVENTF_ABSOLUTE|MOUSEEVENTF_MOVE;
+          ins[1].type=INPUT_MOUSE; ins[1].mi.dx=ax; ins[1].mi.dy=ay;
+          ins[1].mi.dwFlags=MOUSEEVENTF_ABSOLUTE|MOUSEEVENTF_MOVE|dF; SendInput(2,ins,sizeof(INPUT)); }
+        for (size_t i = 1; i < a.dragPath.size(); i++) {
+            DWORD ax,ay; norm_to_screen(hWnd,a.dragPath[i].first,a.dragPath[i].second,ax,ay);
+            INPUT in={}; in.type=INPUT_MOUSE; in.mi.dx=ax; in.mi.dy=ay;
+            in.mi.dwFlags=MOUSEEVENTF_ABSOLUTE|MOUSEEVENTF_MOVE; SendInput(1,&in,sizeof(INPUT)); Sleep(5); }
+        { DWORD ax,ay; norm_to_screen(hWnd,a.dragPath.back().first,a.dragPath.back().second,ax,ay);
+          INPUT in={}; in.type=INPUT_MOUSE; in.mi.dx=ax; in.mi.dy=ay;
+          in.mi.dwFlags=MOUSEEVENTF_ABSOLUTE|MOUSEEVENTF_MOVE|uF; SendInput(1,&in,sizeof(INPUT)); }
+        LOG("input","sendinput: drag %zu pts",a.dragPath.size());
+    }
+    else if (a.type == "wheel") {
+        int delta = -a.delta;
+        INPUT i={}; i.type=INPUT_MOUSE; i.mi.dx=absX; i.mi.dy=absY;
+        i.mi.dwFlags=MOUSEEVENTF_ABSOLUTE|MOUSEEVENTF_MOVE|MOUSEEVENTF_WHEEL;
+        i.mi.mouseData=(DWORD)delta; SendInput(1,&i,sizeof(INPUT));
+        LOG("input","sendinput: wheel delta=%d",delta);
+    }
+    else if (a.type == "keydown" || a.type == "keyup" || a.type == "keypress") {
+        if (a.vk == 0) return "{\"ok\":false,\"error\":\"key requires valid vk\"}";
+        WORD s = scan_from_vk((WORD)a.vk);
+        DWORD x = is_extended_key((WORD)a.vk) ? KEYEVENTF_EXTENDEDKEY : 0;
+        if (a.type == "keypress") {
+            INPUT ins[2] = {};
+            ins[0].type = INPUT_KEYBOARD; ins[0].ki.wVk = (WORD)a.vk;
+            ins[0].ki.wScan = s; ins[0].ki.dwFlags = x;
+            ins[1].type = INPUT_KEYBOARD; ins[1].ki.wVk = (WORD)a.vk;
+            ins[1].ki.wScan = s; ins[1].ki.dwFlags = KEYEVENTF_KEYUP | x;
+            SendInput(2, ins, sizeof(INPUT)); Sleep(5);
+        } else {
+            INPUT in = {};
+            in.type = INPUT_KEYBOARD; in.ki.wVk = (WORD)a.vk;
+            in.ki.wScan = s;
+            in.ki.dwFlags = (a.type == "keyup") ? (KEYEVENTF_KEYUP | x) : x;
+            SendInput(1, &in, sizeof(INPUT));
         }
-        return false;
+        LOG("input","sendinput: %s vk=%d",a.type.c_str(),a.vk);
     }
-
-    bool move_mouse(int x, int y) override { return mouse_to(x, y); }
-    bool click(MouseButton btn) override    { return mouse_click(btn); }
-    bool key_press(uint16_t vk) override    { return key_event(vk, 0); }
-    bool key_release(uint16_t vk) override  { return key_event(vk, KEYEVENTF_KEYUP); }
-    bool key_tap(uint16_t vk, int ms) override {
-        return key_event(vk, 0) && wait_ms(ms > 0 ? ms : 50) && key_event(vk, KEYEVENTF_KEYUP);
+    else if (a.type == "combo") {
+        if (a.vk == 0) return "{\"ok\":false,\"error\":\"combo requires valid vk\"}";
+        struct { bool ac; WORD vk; } m[] = {
+            {a.ctrlKey, VK_CONTROL}, {a.shiftKey, VK_SHIFT},
+            {a.altKey, VK_MENU}, {a.metaKey, VK_LWIN}
+        };
+        std::vector<INPUT> b;
+        for (auto& md : m) {
+            if (!md.ac) continue;
+            INPUT in = {}; in.type = INPUT_KEYBOARD;
+            in.ki.wVk = md.vk; in.ki.wScan = scan_from_vk(md.vk);
+            in.ki.dwFlags = is_extended_key(md.vk) ? KEYEVENTF_EXTENDEDKEY : 0;
+            b.push_back(in);
+        }
+        DWORD mx = is_extended_key((WORD)a.vk) ? KEYEVENTF_EXTENDEDKEY : 0;
+        INPUT kd = {}; kd.type = INPUT_KEYBOARD;
+        kd.ki.wVk = (WORD)a.vk; kd.ki.wScan = scan_from_vk((WORD)a.vk);
+        kd.ki.dwFlags = mx; b.push_back(kd);
+        { INPUT ku = {}; ku.type = INPUT_KEYBOARD;
+          ku.ki.wVk = (WORD)a.vk; ku.ki.wScan = scan_from_vk((WORD)a.vk);
+          ku.ki.dwFlags = KEYEVENTF_KEYUP | mx; b.push_back(ku); }
+        for (int i = 3; i >= 0; i--) {
+            if (!m[i].ac) continue;
+            INPUT in = {}; in.type = INPUT_KEYBOARD;
+            in.ki.wVk = m[i].vk; in.ki.wScan = scan_from_vk(m[i].vk);
+            in.ki.dwFlags = KEYEVENTF_KEYUP | (is_extended_key(m[i].vk) ? KEYEVENTF_EXTENDEDKEY : 0);
+            b.push_back(in);
+        }
+        SendInput((UINT)b.size(), b.data(), sizeof(INPUT)); Sleep(5);
+        LOG("input","sendinput: combo vk=%d",a.vk);
     }
-    void shutdown() override {}
-
-private:
-    bool wait_ms(int ms) { if (ms > 0) Sleep((DWORD)ms); return true; }
-
-    bool key_event(uint16_t vk, DWORD flags) {
-        INPUT input = {};
-        input.type = INPUT_KEYBOARD;
-        input.ki.wVk = vk;
-        input.ki.dwFlags = flags;
-        return SendInput(1, &input, sizeof(INPUT)) > 0;
+    else if (a.type == "text") {
+        if (a.text.empty()) return "{\"ok\":false,\"error\":\"text requires 'text' field\"}";
+        int wl = MultiByteToWideChar(CP_UTF8, 0, a.text.c_str(), (int)a.text.size(), nullptr, 0);
+        if (wl <= 0) return "{\"ok\":false,\"error\":\"UTF8->UTF16 failed\"}";
+        std::vector<wchar_t> wb(wl + 1);
+        MultiByteToWideChar(CP_UTF8, 0, a.text.c_str(), (int)a.text.size(), wb.data(), wl);
+        for (int i = 0; i < wl; i++) {
+            INPUT is[2] = {};
+            is[0].type = INPUT_KEYBOARD; is[0].ki.wScan = wb[i];
+            is[0].ki.dwFlags = KEYEVENTF_UNICODE;
+            is[1].type = INPUT_KEYBOARD; is[1].ki.wScan = wb[i];
+            is[1].ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
+            SendInput(2, is, sizeof(INPUT)); Sleep(5);
+        }
+        LOG("input","sendinput: text %d chars",wl);
     }
-
-    bool mouse_to(int x, int y) {
-        int sw = GetSystemMetrics(SM_CXSCREEN);
-        int sh = GetSystemMetrics(SM_CYSCREEN);
-        INPUT input = {};
-        input.type = INPUT_MOUSE;
-        input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
-        input.mi.dx = (LONG)((double)x / sw * 65535);
-        input.mi.dy = (LONG)((double)y / sh * 65535);
-        return SendInput(1, &input, sizeof(INPUT)) > 0;
-    }
-
-    bool mouse_delta(int dx, int dy) {
-        INPUT input = {};
-        input.type = INPUT_MOUSE;
-        input.mi.dwFlags = MOUSEEVENTF_MOVE;
-        input.mi.dx = dx;
-        input.mi.dy = dy;
-        return SendInput(1, &input, sizeof(INPUT)) > 0;
-    }
-
-    bool mouse_click(MouseButton btn) {
-        DWORD d = btn_flag(btn, true);
-        DWORD u = btn_flag(btn, false);
-        return mouse_button(d) && wait_ms(30) && mouse_button(u) && wait_ms(20);
-    }
-
-    bool mouse_button(DWORD flags) {
-        INPUT input = {};
-        input.type = INPUT_MOUSE;
-        input.mi.dwFlags = flags;
-        return SendInput(1, &input, sizeof(INPUT)) > 0;
-    }
-
-    static DWORD btn_flag(MouseButton btn, bool down) {
-        if (btn == MouseButton::Left)
-            return down ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP;
-        if (btn == MouseButton::Right)
-            return down ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP;
-        return down ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP;
-    }
-};
-
-// ==================== Factory ====================
-
-std::unique_ptr<IInputBackend> create_input_backend() {
-    // Try Interception first (dynamic load)
-    // The InterceptionBackend class is in input_interception.cpp
-    // For now, default to SendInput
-    auto si = std::make_unique<SendInputBackend>();
-    si->init();
-    return si;
-}
-
-// ==================== VK Name Lookup ====================
-
-const char* vk_name(uint16_t vk) {
-    switch (vk) {
-    case VK_RETURN:  return "Enter";
-    case VK_SPACE:   return "Space";
-    case VK_ESCAPE:  return "Escape";
-    case VK_TAB:     return "Tab";
-    case VK_SHIFT:   return "Shift";
-    case VK_CONTROL: return "Ctrl";
-    case VK_MENU:    return "Alt";
-    case VK_LEFT:    return "Left";
-    case VK_RIGHT:   return "Right";
-    case VK_UP:      return "Up";
-    case VK_DOWN:    return "Down";
-    case 'W': case 'w': return "W";
-    case 'A': case 'a': return "A";
-    case 'S': case 's': return "S";
-    case 'D': case 'd': return "D";
-    default:         return "?";
-    }
+    else { return "{\"ok\":false,\"error\":\"unknown type: " + a.type + "\"}"; }
+    return "{\"ok\":true}";
 }

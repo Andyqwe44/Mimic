@@ -30,6 +30,11 @@ cl.exe %CFLAGS% /Fo"build\\" /Fe:build\monitor_app.exe ^
   "%ROOT%\capture\build\pw.lib" ^
   "%ROOT%\capture\build\screen.lib" ^
   "%ROOT%\capture\build\desktop.lib" ^
+  "%ROOT%\input\build\input_common.lib" ^
+  "%ROOT%\input\build\input_sendinput.lib" ^
+  "%ROOT%\input\build\input_winapi.lib" ^
+  "%ROOT%\input\build\input_postmessage.lib" ^
+  "%ROOT%\input\build\input_driver.lib" ^
   %LFLAGS% /link %LINKFLAGS%
 
 if %ERRORLEVEL% EQU 0 (

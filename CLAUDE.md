@@ -215,6 +215,17 @@ tictactoe/
 │   ├── include/                  Public headers
 │   ├── build.cmd                 Standalone exes
 │   └── build_capture_lib.cmd     Per-method .lib: common/wgc/gdi/pw/screen/desktop
+├── input/                         # C++ input forwarding (per-method static libs — mirrors capture/)
+│   ├── include/
+│   │   ├── input_methods.h        InputArgs struct + 4 method signatures
+│   │   └── input_common.h         Shared helpers (vk/scan/coords/parse_drag_path)
+│   ├── src/
+│   │   ├── input_common.cpp       JSON→InputArgs parser + all shared helpers
+│   │   ├── input_sendinput.cpp    SendInput method (应用层)
+│   │   ├── input_winapi.cpp       WinAPI method (OS层: AttachThreadInput+SendMessage)
+│   │   ├── input_postmessage.cpp  PostMessage method (窗口消息层)
+│   │   └── input_driver.cpp       Driver placeholder (驱动层)
+│   └── build_input_lib.cmd        MSVC → input_common + sendinput/winapi/postmessage/driver .lib
 ├── monitor_app/                  # C++ WebView2 host (window + commands + MJPEG + TCP)
 │   ├── src/
 │   │   ├── main.cpp              Win32 window + WebView2 + message loop
@@ -261,6 +272,7 @@ Dev/prod mode set at build time via `/DDEV_MODE` preprocessor define. No runtime
 # 1. Build C++ static libs (once, or when C++ changes)
 cd logger   && build_logger_lib.cmd
 cd capture  && build_capture_lib.cmd
+cd input    && build_input_lib.cmd
 
 # 2a. Dev build (Vite HMR, debug symbols, no optimization)
 cd monitor_web && npm run dev        # Vite on :1420 (keep running)
