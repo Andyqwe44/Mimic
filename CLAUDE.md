@@ -219,8 +219,37 @@ cd monitor_app && build.cmd          # → build\monitor_app.exe
 
 ### Single-instance guard
 
-Named mutex (`Global\GameAgentMonitor_8A3F2D`) in `WinMain`. If another instance
-is running, activates its window (restore + foreground) and exits silently.
+Named mutex in `WinMain`, **dev/prod split** (each build is single-instance within
+its own kind; the two can coexist on one machine):
+
+| Build | Mutex | Window class | Title |
+|-------|-------|--------------|-------|
+| Prod  | `Global\GameAgentMonitor_8A3F2D`     | `GameAgentMonitor`     | `Game Agent Monitor`       |
+| Dev   | `Global\GameAgentMonitor_8A3F2D_Dev` | `GameAgentMonitor_Dev` | `Game Agent Monitor (Dev)` |
+
+If another instance is running, activates its window (restore + foreground) and exits.
+
+**Exit code = the only signal (no log, no console).** The guard runs BEFORE
+`capture_log_init` on purpose — a short-lived second process must NOT spawn a new
+log session file (would pollute the front-end's history list), and there's no
+attached console. So it communicates purely via return code:
+
+| Exit code | Meaning |
+|-----------|---------|
+| `2` | Instance already running — raised the existing window, then exited |
+| other | Normal run (0 on clean exit; window stayed open until closed) |
+
+**Launching the app from a terminal (Claude): check `$?`.** A GUI exe blocks bash
+until it exits. Probe first, then decide:
+
+```bash
+build_dev/monitor_app.exe; echo "exit=$?"
+# exit=2  → already running, existing window was raised (do NOT relaunch)
+# blocks  → fresh instance is alive; Ctrl-C and relaunch with run_in_background
+```
+
+Practical flow: run once to read `$?`. If `2`, it's already up — nothing to do.
+Otherwise it's a fresh launch that stays open → run it backgrounded instead.
 
 ### Developer Mode
 

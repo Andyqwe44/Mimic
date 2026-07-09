@@ -97,7 +97,16 @@ static DWORD g_git_wv17_cookie = 0;
 
 static constexpr int  DEFAULT_W  = 1280;
 static constexpr int  DEFAULT_H  = 720;
-static constexpr PCWSTR TITLE   = L"Game Agent Monitor";
+// Dev/prod split: separate title, window class, and mutex so a dev build
+// and a prod build can coexist on the same machine (each single-instance
+// within its own kind). Dispatch ships prod only — this guards local debug.
+#ifdef DEV_MODE
+static constexpr PCWSTR TITLE        = L"Game Agent Monitor (Dev)";
+static constexpr PCWSTR WINDOW_CLASS = L"GameAgentMonitor_Dev";
+#else
+static constexpr PCWSTR TITLE        = L"Game Agent Monitor";
+static constexpr PCWSTR WINDOW_CLASS = L"GameAgentMonitor";
+#endif
 static constexpr int  DEV_PORT  = 1420;
 static constexpr UINT WM_STREAM_FRAME = WM_USER + 100;
 
@@ -112,24 +121,31 @@ static std::atomic<bool> g_bridge_has_frame{false};
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 HRESULT InitWebView2(HWND hwnd);
 
+#ifdef DEV_MODE
+static constexpr PCWSTR SINGLE_INSTANCE_MUTEX = L"Global\\GameAgentMonitor_8A3F2D_Dev";
+#else
 static constexpr PCWSTR SINGLE_INSTANCE_MUTEX = L"Global\\GameAgentMonitor_8A3F2D";
+#endif
 
 // ── WinMain ─────────────────────────────────────────────────
 int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR lpCmdLine, _In_ int nCmdShow)
 {
     // ── Single-instance guard ──
     // Named mutex prevents multiple instances of the same app.
-    // If another instance is already running, activate its window
-    // and exit silently — no annoying "App already running" popup.
+    // If another instance is already running, activate its window and exit.
+    // Runs BEFORE capture_log_init on purpose: this path must NOT touch the
+    // logging system — a short-lived second process must not spawn a new log
+    // session file (would pollute the front-end's history list). Signal via
+    // exit code only: 2 = instance already running (raised existing window).
     HANDLE hMutex = CreateMutexW(NULL, TRUE, SINGLE_INSTANCE_MUTEX);
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
         if (hMutex) CloseHandle(hMutex);
-        HWND hExisting = FindWindowW(L"GameAgentMonitor", TITLE);
+        HWND hExisting = FindWindowW(WINDOW_CLASS, TITLE);
         if (hExisting) {
             if (IsIconic(hExisting)) ShowWindow(hExisting, SW_RESTORE);
             SetForegroundWindow(hExisting);
         }
-        return 0;
+        return 2;  // already running — caller inspects $? to distinguish from fresh launch
     }
 
     bool auto_stream = (std::string(lpCmdLine).find("--auto-stream") != std::string::npos);
@@ -142,11 +158,11 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR lpCm
     wc.lpfnWndProc   = WndProc;
     wc.hInstance     = hInstance;
     wc.hCursor       = LoadCursor(nullptr, MAKEINTRESOURCE(32512)); // IDC_ARROW
-    wc.lpszClassName = L"GameAgentMonitor";
+    wc.lpszClassName = WINDOW_CLASS;
     RegisterClassExW(&wc);
 
     g_hwnd = CreateWindowExW(
-        0, L"GameAgentMonitor", TITLE,
+        0, WINDOW_CLASS, TITLE,
         WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT, CW_USEDEFAULT, DEFAULT_W, DEFAULT_H,
         nullptr, nullptr, hInstance, nullptr);
