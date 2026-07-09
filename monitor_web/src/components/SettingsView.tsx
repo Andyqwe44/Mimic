@@ -682,6 +682,7 @@ export function SettingsView({
               label="Check Update"
               title="检查新版本"
               variant="outline"
+              size="md"
               onClick={() => addLog('[Action] check update')}
             />
           </div>

@@ -163,7 +163,6 @@ export function ConnectionPanel({
                   setPickerOpen(true)
                   addLog('[Window] opening picker')
                 }}
-                className="h-8"
               />
             </div>
             <div className="flex justify-between">

@@ -1,7 +1,7 @@
 // ═══ Monitor View — main workspace with large preview + input forwarding ═══
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { Camera, Play, Square, MousePointer2 } from 'lucide-react'
-import { Tooltip } from './Toolkit'
+import { ActionBtn } from './Toolkit'
 import { STATE_LABEL } from '../lib/constants'
 import { addLog, hostCall } from '../lib/bridge'
 import type { WindowInfo } from '../lib/types'
@@ -435,37 +435,31 @@ export function MonitorView({
         </div>
         {/* Middle: spacer */}
         <span className="flex-1" />
-        {/* Right: Preview/Stop → Snapshot (right-aligned, rightmost=Stop) */}
+        {/* Right: Snapshot → Preview/Stop (right-aligned) */}
+        <ActionBtn
+          icon={<Camera className="w-3.5 h-3.5" />}
+          label="Snapshot"
+          title="单帧截图"
+          variant="primary"
+          onClick={onTakeSnapshot}
+        />
         {previewing ? (
-          <Tooltip text="停止实时预览">
-            <button
-              onClick={onTogglePreview}
-              className="inline-flex items-center justify-center gap-1.5 rounded-md w-[76px] h-7 text-xs font-medium bg-error/20 text-error hover:bg-error/30 transition-colors"
-            >
-              <Square className="w-3.5 h-3.5" />
-              Stop
-            </button>
-          </Tooltip>
+          <ActionBtn
+            icon={<Square className="w-3.5 h-3.5" />}
+            label="Stop"
+            title="停止实时预览"
+            variant="danger"
+            onClick={onTogglePreview}
+          />
         ) : (
-          <Tooltip text="开始实时预览">
-            <button
-              onClick={onTogglePreview}
-              className="inline-flex items-center justify-center gap-1.5 rounded-md w-[76px] h-7 text-xs font-medium border border-border text-text-secondary hover:bg-bg-hover transition-colors"
-            >
-              <Play className="w-3.5 h-3.5" />
-              Preview
-            </button>
-          </Tooltip>
+          <ActionBtn
+            icon={<Play className="w-3.5 h-3.5" />}
+            label="Preview"
+            title="开始实时预览"
+            variant="outline-accent"
+            onClick={onTogglePreview}
+          />
         )}
-        <Tooltip text="单帧截图">
-          <button
-            onClick={onTakeSnapshot}
-            className="inline-flex items-center justify-center gap-1.5 rounded-md w-[88px] h-7 text-xs font-medium bg-accent text-white hover:bg-accent-hover transition-colors"
-          >
-            <Camera className="w-3.5 h-3.5" />
-            Snapshot
-          </button>
-        </Tooltip>
       </div>
 
       {/* Preview canvas area */}

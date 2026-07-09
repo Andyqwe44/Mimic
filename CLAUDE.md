@@ -595,6 +595,17 @@ of method names (e.g. `e.additionalData` not `e.getAdditionalData()`).
 
 ## Recent Fixes (2026-07-09)
 
+### ActionBtn size standardization + className override audit (major)
+Button component refactored with explicit `size` prop (`sm`=w-20 h-7, `md`=w-[100px] h-7`)
+replacing auto-detect from label length. New `outline-accent` variant (white bg, accent border + text).
+ConnectionPanel Select button had rogue `className="h-8"` silently overriding default `h-7` — removed.
+Monitor toolbar buttons swapped: Snapshot (primary, left) → Preview/Stop (outline-accent/danger, right).
+**monitor_web/CLAUDE.md** created: "禁止 className 静默覆盖组件内部样式" — Tailwind
+global atomic CSS means class name conflicts resolve by CSS declaration order (unpredictable
+across builds), not HTML attribute order. All `className`-accepting components must expose
+semantic props (`size`, `variant`, `spacing`) for customization; `className` only for layout
+positioning (flex-1, shrink-0, etc.).
+
 ### MonitorView remote-control mode — continuous input forwarding (major)
 Monitor tab preview now works like remote desktop (RDP/VNC). Mouse movement
 continuously forwarded at 60fps, clicks are immediate, keyboard engaged on canvas

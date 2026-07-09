@@ -76,35 +76,40 @@ export function Tooltip({
   )
 }
 
-// ── ActionBtn: reusable button with required title ──
+// ── ActionBtn: two standard sizes ──
+//   sm (default): w-20 h-7 (80×28) — Select, Snapshot, Preview, Stop
+//   md:           w-[100px] h-7     — ~25% wider
 export function ActionBtn({
   icon,
   label,
   title,
   variant,
+  size = 'sm',
   onClick,
   className,
 }: {
   icon: ReactNode
   label: string
   title: string
-  variant: 'primary' | 'danger' | 'outline'
+  variant: 'primary' | 'danger' | 'outline' | 'outline-accent'
+  size?: 'sm' | 'md'
   onClick?: () => void
   className?: string
 }) {
-  const wide = label.length > 10
   return (
     <Tooltip text={title}>
       <button
         onClick={onClick}
         className={`inline-flex items-center justify-center gap-1.5 rounded-md px-2.5 h-7 text-xs font-medium transition-all duration-150 ${
-          wide ? 'min-w-[120px]' : 'w-20'
+          size === 'md' ? 'w-[100px]' : 'w-20'
         } ${className ?? ''} ${
           variant === 'primary'
             ? 'bg-accent text-white hover:bg-accent-hover'
             : variant === 'danger'
               ? 'bg-error/20 text-error hover:bg-error/30'
-              : 'border border-border text-text-secondary hover:bg-bg-hover'
+              : variant === 'outline-accent'
+                ? 'border border-accent text-accent hover:bg-accent/10'
+                : 'border border-border text-text-secondary hover:bg-bg-hover'
         }`}
       >
         {icon}
