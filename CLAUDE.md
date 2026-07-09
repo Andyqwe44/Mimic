@@ -171,7 +171,9 @@ tictactoe/
 │   │   ├── gen_assets.mjs        Node: monitor_web/dist/** → src/embedded_assets.h
 │   │   └── gen_icon.py           One-time: favicon.svg → app.ico (svglib, PIL fallback)
 │   ├── app.rc                    Icon (IDI_APPICON) + VERSIONINFO (prod exe resources)
-│   ├── app.ico                   Committed exe/taskbar icon
+│   ├── app.ico                   Committed exe/taskbar icon (PIL placeholder — see assets/icon/)
+│   ├── assets/icon/              Icon design workflow (reserved; design deferred)
+│   │   └── ICON_PROMPT.md        ChatGPT/DALL·E prompt + drop icon_source.png here → regen
 │   ├── dep/                      WebView2 SDK (header + static lib)
 │   │   ├── WebView2.h
 │   │   ├── WebView2EnvironmentOptions.h
