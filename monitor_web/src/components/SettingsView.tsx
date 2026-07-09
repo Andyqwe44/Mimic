@@ -9,6 +9,7 @@ import { ConnectionPanel } from './ConnectionPanel'
 import { hostCall, addLog } from '../lib/bridge'
 import {
   COLLAPSIBLE_HEADER, SELECTABLE_BTN, CAPTURE_METHODS, RENDER_METHODS, INPUT_METHODS,
+  codeToName,
 } from '../lib/constants'
 import type { WindowInfo } from '../lib/types'
 
@@ -146,46 +147,15 @@ export function SettingsView({
   const [logDir, setLogDir] = useState('...')
   const [connExpanded, setConnExpanded] = useState(true)
 
-  // ── Key recording ──
+  // ── Key recording (sequence-based: press order matters) ──
   const [recording, setRecording] = useState(false)
   const [displayCombo, setDisplayCombo] = useState('')
-  const pressedRef = useRef(new Set<string>())
-  const lastComboRef = useRef('')       // most recent valid combo (ref — no re-render)
-  const savedComboRef = useRef(mappingHotkey) // value before recording started
-
-  function normalizeKey(key: string, code: string): string {
-    if (code.startsWith('F') && /^F\d+$/.test(code)) return code
-    const m: Record<string, string> = {
-      ' ': 'Space', 'Space': 'Space', 'Escape': 'Esc',
-      'ArrowUp': '↑', 'ArrowDown': '↓', 'ArrowLeft': '←', 'ArrowRight': '→',
-      'Backspace': 'Backspace', 'Delete': 'Del', 'Insert': 'Ins',
-      'Home': 'Home', 'End': 'End', 'PageUp': 'PgUp', 'PageDown': 'PgDn',
-      'Tab': 'Tab', 'CapsLock': 'CapsLock', 'Enter': 'Enter',
-      'PrintScreen': 'PrtSc', 'ScrollLock': 'ScrlLk', 'Pause': 'Pause',
-      'NumLock': 'NumLk', 'ContextMenu': 'Menu',
-    }
-    if (m[key]) return m[key]
-    if (key.length === 1) return key.toUpperCase()
-    return key
-  }
-
-  function buildCombo(e: KeyboardEvent): string {
-    const parts: string[] = []
-    if (e.ctrlKey) parts.push('Ctrl')
-    if (e.altKey) parts.push('Alt')
-    if (e.shiftKey) parts.push('Shift')
-    if (e.metaKey) parts.push('Win')
-    const key = e.key
-    if (key !== 'Control' && key !== 'Alt' && key !== 'Shift' && key !== 'Meta') {
-      parts.push(normalizeKey(key, e.code))
-    }
-    return parts.join('+') || '...'
-  }
+  const pressedSeqRef = useRef<string[]>([])             // ordered e.code values in press order
+  const savedComboRef = useRef(mappingHotkey)             // pre-recording value for cancel
 
   const startRecording = useCallback(() => {
     savedComboRef.current = mappingHotkey
-    lastComboRef.current = ''
-    pressedRef.current = new Set()
+    pressedSeqRef.current = []
     setDisplayCombo('')
     setRecording(true)
   }, [mappingHotkey])
@@ -193,22 +163,21 @@ export function SettingsView({
   // Stable — uses refs, no state deps (safe in useEffect)
   const commitRecording = useCallback(() => {
     setRecording(false)
-    const combo = lastComboRef.current
-    if (combo && combo !== '...') {
+    const combo = pressedSeqRef.current.map(codeToName).join('+')
+    if (combo) {
       setMappingHotkey(combo)
       savedComboRef.current = combo
       addLog(`[Setting] mapping hotkey = ${combo}`)
     } else {
-      // No valid keys pressed — revert
       setDisplayCombo(savedComboRef.current)
     }
-    pressedRef.current = new Set()
+    pressedSeqRef.current = []
   }, [setMappingHotkey])
 
   const cancelRecording = useCallback(() => {
     setRecording(false)
     setDisplayCombo(savedComboRef.current)
-    pressedRef.current = new Set()
+    pressedSeqRef.current = []
   }, [])
 
   // Keyboard listeners during recording
@@ -217,15 +186,18 @@ export function SettingsView({
     const onDown = (e: KeyboardEvent) => {
       e.preventDefault()
       e.stopPropagation()
-      pressedRef.current.add(e.code)
-      const combo = buildCombo(e)
-      lastComboRef.current = combo
-      setDisplayCombo(combo)
+      if (e.repeat) return // ignore auto-repeat
+      // Add code if not already present (handles L/R Ctrl both → different codes)
+      if (!pressedSeqRef.current.includes(e.code)) {
+        pressedSeqRef.current.push(e.code)
+      }
+      setDisplayCombo(pressedSeqRef.current.map(codeToName).join('+'))
     }
     const onUp = (e: KeyboardEvent) => {
-      pressedRef.current.delete(e.code)
+      const idx = pressedSeqRef.current.indexOf(e.code)
+      if (idx >= 0) pressedSeqRef.current.splice(idx, 1)
       requestAnimationFrame(() => {
-        if (pressedRef.current.size === 0) {
+        if (pressedSeqRef.current.length === 0) {
           commitRecording()
         }
       })

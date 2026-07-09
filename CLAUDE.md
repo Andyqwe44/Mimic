@@ -610,9 +610,10 @@ of method names (e.g. `e.additionalData` not `e.getAdditionalData()`).
 - Dev pair changed from red/yellow to red `#EF4444` + hacker green `#22C55E` (danger + terminal aesthetic)
 - CSS `--color-accent-dev` default updated from `#0EA5E9` to `#F97316` (new Ocean c2)
 - Monitor toolbar input mapping toggle: Power button left of Snapshot, F10 default hotkey, guards all mouse/keyboard handlers
-- Settings → General → Mapping key: click "Change" → capture keys until all released (supports combos: Ctrl+Shift+K, Alt+F4, etc.)
-- Key capture: `keydown` adds to Set, `keyup` removes; rAF check when Set empty → commit combo
-- `matchesCombo()` in MonitorView parses "Ctrl+K" strings and checks modifier state + main key against KeyboardEvent
+- Settings → General → Mapping key: click "Change" → capture keys in press order until all released
+- Sequence-based: `pressedSeqRef` (ordered array of `e.code`) — `Ctrl+K` ≠ `K+Ctrl`, `A+B` ≠ `B+A`
+- `codeToName()` in `constants.ts` converts physical codes (KeyA/ControlLeft/Digit1) to display names (A/Ctrl/1)
+- MonitorView hotkey listener tracks `pressedHotkeyRef` (ordered codes), matches via `seqMatches()` on each keydown
 - Canvas cursor/focus ring/hint text conditional on `mappingEnabled` — preview without accidental input
 - Global window keydown listener in MonitorView for hotkey toggle (skips input/textarea focus)
 - CSS `--color-accent-dev` default updated from `#0EA5E9` to `#F97316` (new Ocean c2)

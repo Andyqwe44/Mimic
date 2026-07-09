@@ -2,7 +2,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { Camera, Play, Square, MousePointer2, Power } from 'lucide-react'
 import { ActionBtn, Tooltip } from './Toolkit'
-import { STATE_LABEL } from '../lib/constants'
+import { STATE_LABEL, codeToName } from '../lib/constants'
 import { addLog, hostCall } from '../lib/bridge'
 import type { WindowInfo } from '../lib/types'
 
@@ -50,27 +50,11 @@ function getImageCoords(
   }
 }
 
-// ── Combo matching for hotkey ──
-// Parses "Ctrl+Shift+K" and checks against a KeyboardEvent
-function matchesCombo(e: KeyboardEvent, combo: string): boolean {
-  const parts = combo.split('+')
-  const mainKey = parts[parts.length - 1]
-  const mods = new Set(parts.slice(0, -1))
-
-  // Check modifier keys match exactly
-  if (e.ctrlKey !== mods.has('Ctrl')) return false
-  if (e.altKey !== mods.has('Alt')) return false
-  if (e.shiftKey !== mods.has('Shift')) return false
-  if (e.metaKey !== mods.has('Win')) return false
-
-  // Check main key
-  if (e.key === mainKey || e.code === mainKey) return true
-  // Normalize: F-keys, special chars
-  if (e.code === mainKey) return true
-  // Single char keys: 'K'.code vs 'KeyK'.code
-  if (mainKey.length === 1 && e.key.toUpperCase() === mainKey.toUpperCase()) return true
-
-  return false
+// ── Sequence-based combo matching ──
+// Compares ordered pressed-key sequence (display names) against stored hotkey
+// "Ctrl+K" ≠ "K+Ctrl" — press order matters
+function seqMatches(pressedCodes: string[], hotkey: string): boolean {
+  return pressedCodes.map(codeToName).join('+') === hotkey
 }
 
 export function MonitorView({
@@ -146,20 +130,35 @@ export function MonitorView({
     return () => clearTimeout(timer)
   }, [keyToast])
 
-  // ── Global hotkey listener for mapping toggle ──
+  // ── Global hotkey listener for mapping toggle (sequence-based) ──
+  const pressedHotkeyRef = useRef<string[]>([])
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
+    const onDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
-      if (!matchesCombo(e, mappingHotkey)) return
-      e.preventDefault()
-      setMappingEnabled((prev: boolean) => {
-        const next = !prev
-        addLog(`[Input] mapping ${next ? 'ON' : 'OFF'} (${mappingHotkey})`)
-        return next
-      })
+      if (e.repeat) return
+      if (!pressedHotkeyRef.current.includes(e.code)) {
+        pressedHotkeyRef.current.push(e.code)
+      }
+      if (seqMatches(pressedHotkeyRef.current, mappingHotkey)) {
+        e.preventDefault()
+        e.stopPropagation()
+        setMappingEnabled((prev: boolean) => {
+          const next = !prev
+          addLog(`[Input] mapping ${next ? 'ON' : 'OFF'} (${mappingHotkey})`)
+          return next
+        })
+      }
     }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
+    const onUp = (e: KeyboardEvent) => {
+      const idx = pressedHotkeyRef.current.indexOf(e.code)
+      if (idx >= 0) pressedHotkeyRef.current.splice(idx, 1)
+    }
+    window.addEventListener('keydown', onDown, true)
+    window.addEventListener('keyup', onUp, true)
+    return () => {
+      window.removeEventListener('keydown', onDown, true)
+      window.removeEventListener('keyup', onUp, true)
+    }
   }, [mappingHotkey, setMappingEnabled])
 
   // No cleanup needed — immediate clicks have no pending state

@@ -55,3 +55,28 @@ export const INPUT_METHODS = [
   { v: 'postmessage', name: 'PostMessage', eng: '窗口消息层', rec: '备选', desc: '直接向目标窗口队列投递 WM_* 消息，异步非阻塞。部分应用依赖实时输入状态可能无响应。' },
   { v: 'driver',      name: 'Driver',     eng: '驱动层', rec: '未实现', desc: 'Interception/虚拟HID内核级注入。系统视为真实硬件，完全绕过UIPI。需安装驱动，后期迭代。' },
 ]
+
+// ── Key code → display name (shared: SettingsView recording + MonitorView matching) ──
+export function codeToName(code: string): string {
+  if (code.startsWith('Key')) return code.slice(3)          // KeyA → A
+  if (code.startsWith('Digit')) return code.slice(5)         // Digit1 → 1
+  if (code === 'Space') return 'Space'
+  if (code.startsWith('F') && /^F\d+$/.test(code)) return code
+  const m: Record<string, string> = {
+    'ControlLeft': 'Ctrl', 'ControlRight': 'Ctrl',
+    'AltLeft': 'Alt', 'AltRight': 'Alt',
+    'ShiftLeft': 'Shift', 'ShiftRight': 'Shift',
+    'MetaLeft': 'Win', 'MetaRight': 'Win',
+    'Escape': 'Esc', 'Backspace': 'Backspace', 'Delete': 'Del',
+    'Insert': 'Ins', 'Home': 'Home', 'End': 'End',
+    'PageUp': 'PgUp', 'PageDown': 'PgDn',
+    'Tab': 'Tab', 'CapsLock': 'CapsLock', 'Enter': 'Enter',
+    'ArrowUp': '↑', 'ArrowDown': '↓', 'ArrowLeft': '←', 'ArrowRight': '→',
+    'PrintScreen': 'PrtSc', 'ScrollLock': 'ScrlLk', 'Pause': 'Pause',
+    'NumLock': 'NumLk', 'ContextMenu': 'Menu',
+    'Minus': '-', 'Equal': '=', 'BracketLeft': '[', 'BracketRight': ']',
+    'Backslash': '\\', 'Semicolon': ';', 'Quote': "'",
+    'Comma': ',', 'Period': '.', 'Slash': '/', 'Backquote': '`',
+  }
+  return m[code] || code
+}
