@@ -164,13 +164,19 @@ tictactoe/
 │   │   ├── commands.h/cpp        Command dispatch (list_windows, capture, log, stream)
 │   │   ├── mjpeg_server.h/cpp    MJPEG HTTP server (Winsock2 + WIC)
 │   │   ├── json_helper.h         Minimal JSON parser for WebMessage
-│   │   ├── version.h             Single canonical APP_VERSION for entire project
+│   │   ├── version.h             Single canonical APP_VERSION (+ APP_VERSION_RC for VERSIONINFO)
 │   │   ├── virtual_desktop.h/cpp Virtual desktop enumeration + switch (undocumented COM)
+│   │   └── embedded_assets.h     GENERATED: dist/** as byte arrays (gitignored, prod only)
+│   ├── tools/
+│   │   ├── gen_assets.mjs        Node: monitor_web/dist/** → src/embedded_assets.h
+│   │   └── gen_icon.py           One-time: favicon.svg → app.ico (svglib, PIL fallback)
+│   ├── app.rc                    Icon (IDI_APPICON) + VERSIONINFO (prod exe resources)
+│   ├── app.ico                   Committed exe/taskbar icon
 │   ├── dep/                      WebView2 SDK (header + static lib)
 │   │   ├── WebView2.h
 │   │   ├── WebView2EnvironmentOptions.h
 │   │   └── WebView2LoaderStatic.lib
-│   ├── build.cmd                 MSVC → build\monitor_app.exe (prod)
+│   ├── build.cmd                 MSVC → build\monitor_app.exe (prod, self-contained: dist embedded + rc)
 │   └── build_dev.cmd             MSVC → build_dev\monitor_app.exe (dev)
 ├── monitor_web/                  # React frontend (KEEP — shared by C++ host)
 │   ├── src/
@@ -205,7 +211,7 @@ cd monitor_app && build_dev.cmd      # → build_dev\monitor_app.exe
 # 2b. Prod build (optimized, no debug)
 cd monitor_web && npm run build      # Vite → dist/
 cd monitor_app && build.cmd          # → build\monitor_app.exe
-# Launch: build\monitor_app.exe      → https://gam.local/index.html (WebView2 virtual host → dist/, no HTTP port)
+# Launch: build\monitor_app.exe      → https://gam.local/index.html (dist embedded in exe, served from memory)
 ```
 
 | | Dev (`build_dev.cmd`) | Prod (`build.cmd`) |
@@ -216,6 +222,23 @@ cd monitor_app && build.cmd          # → build\monitor_app.exe
 | CRT | `/MT` | `/MT` |
 | Macro | `DEV_MODE` | `NDEBUG` |
 | Binary | ~2.4 MB | ~451 KB |
+
+### Prod asset serving (self-contained exe)
+
+Prod embeds the built frontend into the exe — no external `dist/` folder, no HTTP
+port. `build.cmd` runs `node tools/gen_assets.mjs` to compile `monitor_web/dist/**`
+into `src/embedded_assets.h` (byte arrays + `g_embedded_assets[]` table), then
+`rc.exe` compiles `app.rc` (icon + VERSIONINFO) into `build/app.res`.
+
+At runtime (prod only, `#ifndef DEV_MODE`), `main.cpp`'s `WebResourceRequestedHandler`
+intercepts every `https://gam.local/*` request via `AddWebResourceRequestedFilter` +
+`add_WebResourceRequested`, looks the path up in `g_embedded_assets`, and answers from
+memory (`SHCreateMemStream` → `CreateWebResourceResponse`). `"/"` maps to `/index.html`.
+Replaces the old `SetVirtualHostNameToFolderMapping` (which needed dist/ on disk).
+
+Result: shipping = copy the single `build\monitor_app.exe`. Only external prerequisite
+is the WebView2 Runtime (system-level, Win11 built-in). Dev is unchanged (Vite :1420);
+`embedded_assets.h` is `#ifndef DEV_MODE`-excluded, so dev never regenerates it.
 
 ### Single-instance guard
 
@@ -263,7 +286,8 @@ Frames saved as `snap_YYYYMMDD_HHMMSS_ms.png` or `stream_YYYYMMDD_HHMMSS_ms.png`
 
 # 4. Prod mode
 cd monitor_web && npm run build      # Vite → dist/
-cd monitor_app && build\monitor_app.exe         # WebView2 → https://gam.local (virtual host → dist/)
+cd monitor_app && build.cmd          # embeds dist + compiles rc → self-contained build\monitor_app.exe
+build\monitor_app.exe                # → https://gam.local (dist served from memory, no external files)
 ```
 
 ## Internal Architecture (C++ host)

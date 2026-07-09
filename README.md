@@ -50,15 +50,18 @@ cd monitor_app && build_dev.cmd                # terminal 2: -> build_dev\monito
 ### Production
 
 ```bash
-# 3. Prod build (optimized)
+# 3. Prod build (optimized, self-contained)
 cd monitor_web && npm run build          # Vite -> dist/
-cd monitor_app && build.cmd              # -> build\monitor_app.exe
-# Navigates to https://gam.local/index.html (WebView2 virtual host -> dist/, no HTTP port)
+cd monitor_app && build.cmd              # embeds dist + compiles icon/version -> build\monitor_app.exe
+# Navigates to https://gam.local/index.html (dist embedded in exe, served from memory)
 ```
 
 Mode set at build time via `/DDEV_MODE` preprocessor define. No runtime `--dev` flag.
 
-Distribute `monitor_app.exe` + `monitor_web/dist/` together. No HTTP server — WebView2 uses `SetVirtualHostNameToFolderMapping` to load from disk.
+Distribute the **single** `monitor_app.exe` — the frontend `dist/` is compiled into the
+exe (byte arrays served from memory via WebResourceRequested), and the WebView2 loader is
+statically linked. Only external prerequisite is the WebView2 Runtime (system-level, Win11
+built-in). No HTTP server, no external files.
 
 ## Project Structure
 

@@ -9,6 +9,9 @@
 *.pdb
 *.ilk
 
+# Generated: frontend dist embedded into the prod exe (tools/gen_assets.mjs)
+monitor_app/src/embedded_assets.h
+
 # Rust / Tauri
 **/target/
 **/node_modules/
