@@ -98,7 +98,6 @@ export function MonitorView({
   // ═══ Interaction state ═══
   const [focused, setFocused] = useState(false)    // canvas has keyboard focus
   const [mouseOn, setMouseOn] = useState(false)
-  const [lastClick, setLastClick] = useState<{ x: number; y: number } | null>(null)
   const [dragging, setDragging] = useState(false)
   const dragPathRef = useRef<{ x: number; y: number }[]>([])
   const dragButtonRef = useRef<string>('left')     // button held during drag
@@ -291,7 +290,6 @@ export function MonitorView({
 
       if (!movedPoints) {
         // Immediate click — no defer for remote-control feel
-        setLastClick({ x: Math.round(rx * 100), y: Math.round(ry * 100) })
         const rippleId = nextId()
         setRipples((prev) => [...prev, { id: rippleId, x: rx * 100, y: ry * 100 }])
 
@@ -574,7 +572,7 @@ export function MonitorView({
           onFocus={() => setFocused(true)}
           onBlur={handleBlur}
         >
-          {children}
+          {previewing && children}
 
           {/* Drag selection overlay */}
           {dragOverlay}
@@ -612,7 +610,7 @@ export function MonitorView({
           )}
 
           {/* Empty state */}
-          {!previewing && lastClick === null && (
+          {!previewing && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div className="text-center space-y-1">
                 <div className="text-sm text-text-muted">No preview active</div>

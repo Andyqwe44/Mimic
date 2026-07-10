@@ -136,12 +136,12 @@ export function SettingsView({
     const v = document.documentElement.style.getPropertyValue('--color-accent').trim()
     return v || '#3B82F6'
   })
-  const [devAccent, setDevAccent] = useState(() => {
-    const v = document.documentElement.style.getPropertyValue('--color-accent-dev').trim()
+  const [secondaryAccent, setSecondaryAccent] = useState(() => {
+    const v = document.documentElement.style.getPropertyValue('--color-accent-secondary').trim()
     return v || '#F97316'
   })
   const [normalAccent, setNormalAccent] = useState(accent)
-  const [normalDevAccent, setNormalDevAccent] = useState(devAccent)
+  const [normalSecondaryAccent, setNormalSecondaryAccent] = useState(secondaryAccent)
   const DEV_PAIR = themePairs[7] // ['#EF4444', '#EAB308']
   const [screenRes, setScreenRes] = useState('?×?')
   const [logDir, setLogDir] = useState('...')
@@ -264,16 +264,16 @@ export function SettingsView({
   useEffect(() => {
     if (devMode) {
       setNormalAccent(accent)
-      setNormalDevAccent(devAccent)
+      setNormalSecondaryAccent(secondaryAccent)
       setAccent(DEV_PAIR[0])
-      setDevAccent(DEV_PAIR[1])
+      setSecondaryAccent(DEV_PAIR[1])
       document.documentElement.style.setProperty('--color-accent', DEV_PAIR[0])
-      document.documentElement.style.setProperty('--color-accent-dev', DEV_PAIR[1])
+      document.documentElement.style.setProperty('--color-accent-secondary', DEV_PAIR[1])
     } else {
       setAccent(normalAccent)
-      setDevAccent(normalDevAccent)
+      setSecondaryAccent(normalSecondaryAccent)
       document.documentElement.style.setProperty('--color-accent', normalAccent)
-      document.documentElement.style.setProperty('--color-accent-dev', normalDevAccent)
+      document.documentElement.style.setProperty('--color-accent-secondary', normalSecondaryAccent)
     }
   }, [devMode])
 
@@ -319,7 +319,7 @@ export function SettingsView({
                       }
                       addLog(`[Setting] auto snap = ${next}`)
                     }}
-                    className={`relative w-10 h-5 rounded-full transition-colors ${autoSnap ? 'bg-accent' : 'bg-bg-tertiary'}`}
+                    className={`relative w-10 h-5 rounded-full transition-colors ${autoSnap ? 'bg-accent-secondary' : 'bg-bg-tertiary'}`}
                   >
                     <span
                       className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${autoSnap ? 'translate-x-5' : ''}`}
@@ -334,15 +334,16 @@ export function SettingsView({
                   const ringClass = !autoSnap && isActive
                     ? 'border-accent bg-accent/10 cursor-pointer'
                     : autoSnap && isActive
-                      ? 'cursor-not-allowed'
+                      ? 'border-accent-secondary bg-accent-secondary/10'
                       : autoSnap
                         ? 'border-border bg-bg-primary opacity-50 cursor-not-allowed'
                         : 'border-border bg-bg-primary hover:bg-bg-hover cursor-pointer'
+                  const tagClass = autoSnap && isActive
+                    ? 'text-accent-secondary bg-accent-secondary/10'
+                    : 'text-accent bg-accent/10'
                   return (
                     <Tooltip key={m.v} text={m.desc}>
-                      <label
-                        className={`${SELECTABLE_BTN} ${ringClass} ${autoSnap && isActive ? 'border-accent bg-accent/10' : ''}`}
-                      >
+                      <label className={`${SELECTABLE_BTN} ${ringClass}`}>
                         <input
                           type="radio" name="snapMethod" value={m.v}
                           checked={isActive} disabled={autoSnap}
@@ -361,7 +362,7 @@ export function SettingsView({
                           {m.rec.split('/').map((t: string) => (
                             <span
                               key={t}
-                              className="text-[11px] font-medium text-accent bg-accent/10 px-1.5 py-0.5 rounded"
+                              className={`text-[11px] font-medium px-1.5 py-0.5 rounded ${tagClass}`}
                             >
                               {t}
                             </span>
@@ -390,7 +391,7 @@ export function SettingsView({
                       if (next) setStreamMethod('wgc')
                       addLog(`[Setting] auto stream = ${next}`)
                     }}
-                    className={`relative w-10 h-5 rounded-full transition-colors ${autoStream ? 'bg-accent' : 'bg-bg-tertiary'}`}
+                    className={`relative w-10 h-5 rounded-full transition-colors ${autoStream ? 'bg-accent-secondary' : 'bg-bg-tertiary'}`}
                   >
                     <span
                       className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${autoStream ? 'translate-x-5' : ''}`}
@@ -403,14 +404,19 @@ export function SettingsView({
                 {CAPTURE_METHODS.map((m) => {
                   const unsupported = m.v === 'dxgi'
                   const isActive = streamMethod === m.v
+                  const locked = autoStream || unsupported
                   const ringClass =
                     !autoStream && isActive && !unsupported
                       ? 'border-accent bg-accent/10 cursor-pointer'
                       : autoStream && isActive
-                        ? 'cursor-not-allowed'
-                        : autoStream || unsupported
+                        ? 'border-accent-secondary bg-accent-secondary/10'
+                        : locked
                           ? 'border-border bg-bg-primary opacity-50 cursor-not-allowed'
                           : 'border-border bg-bg-primary hover:bg-bg-hover cursor-pointer'
+                  const tagClass =
+                    autoStream && isActive
+                      ? 'text-accent-secondary bg-accent-secondary/10'
+                      : 'text-accent bg-accent/10'
                   return (
                     <Tooltip
                       key={m.v}
@@ -420,15 +426,13 @@ export function SettingsView({
                           : m.desc
                       }
                     >
-                      <label
-                        className={`${SELECTABLE_BTN} ${ringClass} ${autoStream && isActive ? 'border-accent bg-accent/10' : ''}`}
-                      >
+                      <label className={`${SELECTABLE_BTN} ${ringClass}`}>
                         <input
                           type="radio" name="streamMethod" value={m.v}
                           checked={isActive}
-                          disabled={autoStream || unsupported}
+                          disabled={locked}
                           onChange={(e) => {
-                            if (!autoStream && !unsupported) {
+                            if (!locked) {
                               setStreamMethod(e.target.value)
                               addLog(`[Setting] stream method = ${e.target.value}`)
                             }
@@ -447,7 +451,7 @@ export function SettingsView({
                             m.rec.split('/').map((t: string) => (
                               <span
                                 key={t}
-                                className="text-[11px] font-medium text-accent bg-accent/10 px-1.5 py-0.5 rounded"
+                                className={`text-[11px] font-medium px-1.5 py-0.5 rounded ${tagClass}`}
                               >
                                 {t}
                               </span>
@@ -635,7 +639,7 @@ export function SettingsView({
               {themePairs.map(([c1, c2], i) => {
                 const isDev = i === themePairs.length - 1
                 const disabled = isDev ? !devMode : devMode
-                const selected = accent === c1 && devAccent === c2
+                const selected = accent === c1 && secondaryAccent === c2
                 const name = themeNames[i]
                 return (
                   <Tooltip key={`${c1}-${c2}`} text={name} className={isDev ? 'ml-3' : ''}>
@@ -658,11 +662,11 @@ export function SettingsView({
                       onClick={() => {
                         if (disabled) return
                         setAccent(c1)
-                        setDevAccent(c2)
+                        setSecondaryAccent(c2)
                         setNormalAccent(c1)
-                        setNormalDevAccent(c2)
+                        setNormalSecondaryAccent(c2)
                         document.documentElement.style.setProperty('--color-accent', c1)
-                        document.documentElement.style.setProperty('--color-accent-dev', c2)
+                        document.documentElement.style.setProperty('--color-accent-secondary', c2)
                         addLog(`[Theme] accent = ${c1} / ${c2}`)
                       }}
                       className={`relative w-5 h-5 rounded-md overflow-hidden transition-all duration-150 ${disabled ? 'opacity-30 cursor-not-allowed' : ''}`}
@@ -755,7 +759,7 @@ export function SettingsView({
                 setDevMode(!devMode)
                 addLog(`[Dev] ${!devMode ? 'ON' : 'OFF'}`)
               }}
-              className={`relative w-10 h-5 rounded-full transition-colors ${devMode ? 'bg-accent-dev' : 'bg-bg-tertiary'}`}
+              className={`relative w-10 h-5 rounded-full transition-colors ${devMode ? 'bg-accent-secondary' : 'bg-bg-tertiary'}`}
             >
               <span
                 className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${devMode ? 'translate-x-5' : ''}`}
@@ -793,7 +797,7 @@ export function SettingsView({
                 {/* ── Modifier-only warning badge ── */}
                 {isModifierOnly && (
                   <Tooltip text="快捷键仅含修饰键（Ctrl/Alt/Shift/Win），可能与系统快捷键冲突。建议加入至少一个非修饰键，如字母、数字或 F1-F12。">
-                  <span className="h-7 px-2 rounded-md text-xs font-medium text-accent-dev bg-accent-dev/10 border border-accent-dev/30 flex items-center shrink-0 whitespace-nowrap">
+                  <span className="h-7 px-2 rounded-md text-xs font-medium text-accent-secondary bg-accent-secondary/10 border border-accent-secondary/30 flex items-center shrink-0 whitespace-nowrap">
                     ⚠ 纯修饰键
                   </span>
                   </Tooltip>
@@ -818,7 +822,7 @@ export function SettingsView({
 
       {devMode && (
         <SettingsCard
-          icon={<Cpu className="w-4 h-4 text-accent-dev" />}
+          icon={<Cpu className="w-4 h-4 text-accent-secondary" />}
           title="Developer Mode"
           defaultExpanded={true}
         >
