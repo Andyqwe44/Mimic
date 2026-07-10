@@ -184,9 +184,11 @@ export default function App() {
           latest: info.latest,
           name: info.name || '',
           body: info.body || '',
-          url: info.url || '',
-        })
-        addLog(`[update] v${info.latest} available`)
+          url: '', // Phase 2: multi-file diff replaces single URL
+          diff: info.diff || [],
+        } as any)
+        const fileCount = info.diff?.length || 0
+        addLog(`[update] v${info.latest} available (${fileCount} files)`)
       } else {
         addLog(info?.ok === false
           ? `[update] check failed: ${info?.error || 'unknown'}`
@@ -198,12 +200,17 @@ export default function App() {
   }, [])
 
   const downloadUpdate = useCallback(async () => {
-    if (!updateInfo?.url) return
+    if (!updateInfo) return
+    const diff = (updateInfo as any).diff
+    if (!diff?.length) {
+      addLog('[update] no files to download')
+      return
+    }
     setUpdateDownloading(true)
-    addLog('[update] downloading...')
+    addLog(`[update] downloading ${diff.length} files...`)
     try {
-      await hostCall('download_update', { url: updateInfo.url })
-      // C++ launches swap.bat and exits — we may not reach here
+      await hostCall('download_update', { diff: JSON.stringify(diff) })
+      // C++ launches updater.exe and exits — we may not reach here
     } catch (e: any) {
       addLog(`[update] download error: ${e?.message || e}`)
       setUpdateDownloading(false)
@@ -213,6 +220,52 @@ export default function App() {
   useEffect(() => {
     logMgr.initSync()
   }, [])
+
+  // Load saved settings on startup
+  useEffect(() => {
+    hostCall('get_settings').then((res: any) => {
+      const s = res?.settings
+      if (!s || typeof s !== 'object') return
+      if (s.theme) setTheme(s.theme)
+      if (s.mouseMode) setMouseMode(s.mouseMode)
+      if (s.keyMode) setKeyMode(s.keyMode)
+      if (s.mappingHotkey) setMappingHotkey(s.mappingHotkey)
+      if (typeof s.devMode === 'boolean') setDevMode(s.devMode)
+      if (s.selfTargetMode) setSelfTargetMode(s.selfTargetMode)
+      if (typeof s.keepFiles === 'number') setKeepFiles(s.keepFiles)
+      if (typeof s.autoSnap === 'boolean') setAutoSnap(s.autoSnap)
+      if (typeof s.autoStream === 'boolean') setAutoStream(s.autoStream)
+      if (s.snapMethod) setSnapMethod(s.snapMethod)
+      if (s.streamMethod) setStreamMethod(s.streamMethod)
+      if (s.renderMethod) setRenderMethod(s.renderMethod)
+      addLog('[settings] loaded')
+    }).catch(() => {})
+  }, [])
+
+  // Auto-save settings on change (debounced)
+  const saveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const saveSetting = useCallback((key: string, value: any) => {
+    hostCall('set_setting', { key, value: typeof value === 'boolean' ? `"${value}"` : value }).catch(() => {})
+  }, [])
+  useEffect(() => {
+    if (saveTimeout.current) clearTimeout(saveTimeout.current)
+    saveTimeout.current = setTimeout(() => {
+      saveSetting('theme', theme)
+      saveSetting('mouseMode', mouseMode)
+      saveSetting('keyMode', keyMode)
+      saveSetting('mappingHotkey', mappingHotkey)
+      saveSetting('devMode', devMode)
+      saveSetting('selfTargetMode', selfTargetMode)
+      saveSetting('keepFiles', keepFiles)
+      saveSetting('autoSnap', autoSnap)
+      saveSetting('autoStream', autoStream)
+      saveSetting('snapMethod', snapMethod)
+      saveSetting('streamMethod', streamMethod)
+      saveSetting('renderMethod', renderMethod)
+    }, 1000)
+    return () => { if (saveTimeout.current) clearTimeout(saveTimeout.current) }
+  }, [theme, mouseMode, keyMode, mappingHotkey, devMode, selfTargetMode,
+      keepFiles, autoSnap, autoStream, snapMethod, streamMethod, renderMethod])
 
   // ── Initial layout check — auto-collapse if panels overflow container ──
   useEffect(() => {

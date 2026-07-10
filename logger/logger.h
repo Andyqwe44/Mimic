@@ -18,40 +18,54 @@
 #pragma once
 #include <cstdio>
 
+#ifdef GAM_BUILD_DLL
+  #ifdef _WIN32
+    #define GAM_API __declspec(dllexport)
+  #else
+    #define GAM_API
+  #endif
+#else
+  #ifdef _WIN32
+    #define GAM_API __declspec(dllimport)
+  #else
+    #define GAM_API
+  #endif
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 /// Initialize logger: create log file, ring buffer, clean old files.
-void capture_log_init(const char* app_name, const char* app_version,
+GAM_API void capture_log_init(const char* app_name, const char* app_version,
                       const char* log_dir, int max_files, int ring_size);
 
 /// Shutdown: flush and close log file, free ring buffer.
-void capture_log_shutdown(void);
+GAM_API void capture_log_shutdown(void);
 
 /// ═══ THE ONE ═══
 /// Write a pre-formatted message. Timestamp auto-added: [HH:MM:SS.mmm]
 /// Thread-safe. ALL log paths converge here — C++ LOG() macro, Rust dlog!() macro.
-void capture_log_write_msg(const char* tag, const char* msg);
+GAM_API void capture_log_write_msg(const char* tag, const char* msg);
 
 /// Read in-memory ring buffer as newline-separated lines.
 /// Returns malloc'd string; caller must free with capture_log_free().
-char* capture_log_read_memory(void);
+GAM_API char* capture_log_read_memory(void);
 
 /// List log files (newest first) as JSON array.
 /// [{"name":"agent_20260707_133408.log","size":1234}]
-char* capture_log_list_files(int max_files);
+GAM_API char* capture_log_list_files(int max_files);
 
 /// Read a historical log file by name (relative to log_dir).
 /// Returns malloc'd string with file contents (lines separated by \n).
 /// Caller must free with capture_log_free().
-char* capture_log_read_file(const char* filename);
+GAM_API char* capture_log_read_file(const char* filename);
 
 /// Free a string returned by the logger.
-void capture_log_free(char* s);
+GAM_API void capture_log_free(char* s);
 
 /// Flush the log file to disk.
-void capture_log_flush(void);
+GAM_API void capture_log_flush(void);
 
 /// ── JSON notify callback (push C++ LOG entries to TS) ──
 /// Called every time capture_log_write_msg() writes an entry.
@@ -61,16 +75,16 @@ void capture_log_flush(void);
 typedef void (*capture_log_notify_json_cb)(const char* json);
 
 /// Register a callback for real-time log push (C++ → TS).
-void capture_log_set_notify(capture_log_notify_json_cb cb);
+GAM_API void capture_log_set_notify(capture_log_notify_json_cb cb);
 
 /// Write a UI-side log entry with [ui] tag.
 /// Same as LOG("ui", msg) but does NOT trigger notify callback
 /// (avoids pushing back to TS what TS just sent).
-void capture_log_write_ui(const char* msg);
+GAM_API void capture_log_write_ui(const char* msg);
 
 /// Return the absolute log directory path (set at init).
 /// Returns "" if logger not initialized.
-const char* capture_log_get_dir(void);
+GAM_API const char* capture_log_get_dir(void);
 
 #ifdef __cplusplus
 }

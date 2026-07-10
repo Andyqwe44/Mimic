@@ -9,12 +9,14 @@
 #include <ws2tcpip.h>
 #include "commands.h"
 #include "json_helper.h"
+#include "paths.h"
 #include "version.h"
 #include "../../logger/logger.h"
 #include "../../capture/include/capture_methods.h"
 #include "../../capture/include/capture_wgc_ffi.h"
 #include "../dep/WebView2.h"  // IID_PPV_ARGS for ICoreWebView2Environment12/17
 #include <shobjidl.h>  // IVirtualDesktopManager
+#include <shlobj.h>    // SHGetFolderPathW, CSIDL_LOCAL_APPDATA
 #include "virtual_desktop.h"  // vd_list_desktops, vd_switch_desktop
 #include <shellapi.h>  // ShellExecuteA
 #include <windows.h>
@@ -1061,7 +1063,10 @@ static std::string winhttp_get_str(const std::string& urlStr, const char* tag) {
     return winhttp_get(wurl.c_str(), tag);
 }
 
-// check_update — query Gitee for latest release
+// Forward declarations
+static std::string read_file(const char* path);
+
+// check_update — query Gitee for latest release + version.json diff
 static std::string cmd_check_update() {
     LOG("cmd", "check_update: querying Gitee API...");
     std::string body = winhttp_get(
@@ -1076,11 +1081,6 @@ static std::string cmd_check_update() {
     std::string name   = json_val(body, "name");
     std::string changelog = json_val(body, "body");
 
-    // Extract browser_download_url from first asset
-    size_t assetsPos = body.find("\"assets\"");
-    std::string dlUrl = assetsPos != std::string::npos
-        ? json_val(body, "browser_download_url", assetsPos) : "";
-
     // Strip leading 'v' for comparison
     std::string latest = tag;
     if (!latest.empty() && (latest[0] == 'v' || latest[0] == 'V'))
@@ -1088,81 +1088,295 @@ static std::string cmd_check_update() {
     std::string current = APP_VERSION;
 
     bool hasUpdate = !latest.empty() && latest != current;
+    std::string diffJson = "[]";
 
-    LOG("cmd", "check_update: current=%s latest=%s hasUpdate=%d",
-        current.c_str(), latest.c_str(), (int)hasUpdate);
+    if (hasUpdate) {
+        // Fetch remote version.json from the release tag
+        std::string manifestUrl = "https://gitee.com/Andyqwe44/tictactoe/raw/";
+        manifestUrl += tag;
+        manifestUrl += "/version.json";
+        std::string remoteManifest = winhttp_get_str(manifestUrl, "update");
+
+        // Read local version.json
+        std::string installDir = paths_get_install_dir();
+        std::string localPath = installDir + "\\version.json";
+        std::string localManifest = read_file(localPath.c_str());
+
+        // Compare manifests: find files where remote version differs
+        if (!remoteManifest.empty()) {
+            diffJson = "[";
+            bool first = true;
+            // Parse remote files object — extract each "path": {"v":..., ...}
+            size_t filesPos = remoteManifest.find("\"files\"");
+            if (filesPos != std::string::npos) {
+                // Walk through each file entry
+                size_t pos = remoteManifest.find("{", filesPos);
+                if (pos != std::string::npos) {
+                    int depth = 0;
+                    for (size_t i = pos; i < remoteManifest.size(); i++) {
+                        if (remoteManifest[i] == '{') depth++;
+                        else if (remoteManifest[i] == '}') { depth--; if (depth == 0) break; }
+                        else if (depth == 1 && remoteManifest[i] == '"' && (i == pos+1 || remoteManifest[i-1] != '\\')) {
+                            // Start of a key (file path)
+                            size_t keyEnd = remoteManifest.find("\"", i+1);
+                            if (keyEnd == std::string::npos) break;
+                            std::string filePath = remoteManifest.substr(i+1, keyEnd - i - 1);
+                            std::string remoteVer = json_val(remoteManifest, "v", keyEnd);
+                            std::string localVer  = json_val(localManifest, "v",
+                                localManifest.find("\"" + filePath + "\""));
+                            // Also get sha256 and size for download
+                            std::string sha = json_val(remoteManifest, "sha256", keyEnd);
+                            std::string sz = json_val(remoteManifest, "size", keyEnd);
+                            if (!remoteVer.empty() && remoteVer != localVer) {
+                                if (!first) diffJson += ","; first = false;
+                                // Build download URL from raw file
+                                std::string dlUrl = "https://gitee.com/Andyqwe44/tictactoe/raw/"
+                                    + tag + "/" + filePath;
+                                diffJson += "{\"path\":\"" + filePath + "\"";
+                                diffJson += ",\"v\":\"" + remoteVer + "\"";
+                                diffJson += ",\"sha256\":\"" + sha + "\"";
+                                diffJson += ",\"size\":" + (sz.empty() ? "0" : sz);
+                                diffJson += ",\"url\":\"" + json_escape(dlUrl) + "\"}";
+                            }
+                            i = keyEnd;
+                        }
+                    }
+                }
+            }
+            diffJson += "]";
+        }
+    }
+
+    LOG("cmd", "check_update: current=%s latest=%s hasUpdate=%d diff_files=%zu",
+        current.c_str(), latest.c_str(), (int)hasUpdate,
+        (size_t)std::count(diffJson.begin(), diffJson.end(), '{'));
 
     return "{\"ok\":true"
         ",\"current\":\"" + json_escape(current) + "\""
         ",\"latest\":\"" + json_escape(latest) + "\""
         ",\"name\":\"" + json_escape(name.empty() ? tag : name) + "\""
         ",\"body\":\"" + json_escape(changelog) + "\""
-        ",\"url\":\"" + json_escape(dlUrl) + "\""
-        ",\"has_update\":" + (hasUpdate ? "true" : "false") + "}";
+        ",\"has_update\":" + (hasUpdate ? "true" : "false")
+        + ",\"diff\":" + diffJson + "}";
 }
 
-// download_update — download new EXE, write swap script, launch updater
-static std::string cmd_download_update(const std::string& url) {
-    LOG("cmd", "download_update: %s", url.c_str());
+// download_update — download changed files to staging, launch updater.exe
+static std::string cmd_download_update(const std::string& diffJsonStr) {
+    LOG("cmd", "download_update: diff=%s", diffJsonStr.c_str());
 
-    // Get directory of current EXE
-    char exePath[MAX_PATH];
-    GetModuleFileNameA(nullptr, exePath, MAX_PATH);
-    char* lastSlash = strrchr(exePath, '\\');
-    if (!lastSlash) return R"({"ok":false,"error":"cannot resolve exe path"})";
-    *lastSlash = '\0';
-    std::string exeDir = exePath;
-
-    // Download to new file
-    std::string newPath = exeDir + "\\monitor_app_new.exe";
-    std::string body = winhttp_get_str(url, "update");
-    if (body.empty()) return R"({"ok":false,"error":"download failed"})";
-
-    // Write new EXE
-    FILE* f = fopen(newPath.c_str(), "wb");
-    if (!f) { LOG("cmd", "download_update: fopen failed"); return R"({"ok":false,"error":"write failed"})"; }
-    size_t written = fwrite(body.data(), 1, body.size(), f);
-    fclose(f);
-    LOG("cmd", "download_update: wrote %zu bytes to %s", written, newPath.c_str());
-    if (written != body.size()) {
-        DeleteFileA(newPath.c_str());
-        return R"({"ok":false,"error":"write incomplete"})";
+    // Get staging directory
+    wchar_t localAppData[MAX_PATH];
+    std::string stagingDir;
+    if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, localAppData))) {
+        int len = WideCharToMultiByte(CP_UTF8, 0, localAppData, -1, nullptr, 0, nullptr, nullptr);
+        std::string base(len - 1, '\0');
+        WideCharToMultiByte(CP_UTF8, 0, localAppData, -1, &base[0], len, nullptr, nullptr);
+        stagingDir = base + "\\GameAgentMonitor\\staging";
+        CreateDirectoryA((base + "\\GameAgentMonitor").c_str(), nullptr);
+        CreateDirectoryA(stagingDir.c_str(), nullptr);
+    } else {
+        return R"({"ok":false,"error":"cannot resolve appdata"})";
     }
 
-    // Write swap batch script
-    std::string batPath = exeDir + "\\update_swap.bat";
-    std::string bat =
-        "@echo off\r\n"
-        "set \"DIR=%~dp0\"\r\n"
-        "set \"NEW=%DIR%monitor_app_new.exe\"\r\n"
-        "set \"TARGET=%DIR%monitor_app.exe\"\r\n"
-        ":wait\r\n"
-        "timeout /t 1 /nobreak >nul\r\n"
-        "del /f \"%TARGET%\" 2>nul\r\n"
-        "if exist \"%TARGET%\" goto wait\r\n"
-        "move /y \"%NEW%\" \"%TARGET%\"\r\n"
-        "start \"\" \"%TARGET%\"\r\n"
-        "del \"%~f0\"\r\n";
+    // Parse the diff JSON array: [{path, sha256, url}, ...]
+    size_t downloaded = 0;
+    size_t pos = 0;
+    while ((pos = diffJsonStr.find("\"path\"", pos)) != std::string::npos) {
+        std::string filePath = json_val(diffJsonStr, "path", pos);
+        std::string sha256   = json_val(diffJsonStr, "sha256", pos);
+        std::string dlUrl    = json_val(diffJsonStr, "url", pos);
 
-    f = fopen(batPath.c_str(), "wb");  // binary to avoid LF→CRLF transform
-    if (!f) { LOG("cmd", "download_update: bat fopen failed"); return R"({"ok":false,"error":"bat write failed"})"; }
-    fwrite(bat.data(), 1, bat.size(), f);
-    fclose(f);
+        if (filePath.empty() || dlUrl.empty()) { pos++; continue; }
 
-    // Launch swap script detached
-    SHELLEXECUTEINFOA sei = {};
-    sei.cbSize = sizeof(sei);
-    sei.lpFile = batPath.c_str();
-    sei.nShow = SW_HIDE;
-    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
-    if (!ShellExecuteExA(&sei) || (INT_PTR)sei.hInstApp <= 32) {
+        // Download
+        LOG("cmd", "download_update: getting %s", filePath.c_str());
+        std::string data = winhttp_get_str(dlUrl, "update");
+        if (data.empty()) {
+            LOG("cmd", "download_update: FAILED %s", filePath.c_str());
+            pos++; continue;
+        }
+
+        // Write to staging, preserving subdirectory structure
+        std::string outPath = stagingDir + "\\" + filePath;
+        // Ensure parent directories exist
+        for (size_t i = stagingDir.size() + 1; i < outPath.size(); i++) {
+            if (outPath[i] == '\\' || outPath[i] == '/') {
+                std::string part = outPath.substr(0, i);
+                CreateDirectoryA(part.c_str(), nullptr);
+            }
+        }
+        // Also ensure the immediate parent
+        size_t lastSlash = outPath.rfind('\\');
+        if (lastSlash != std::string::npos)
+            CreateDirectoryA(outPath.substr(0, lastSlash).c_str(), nullptr);
+
+        FILE* f = fopen(outPath.c_str(), "wb");
+        if (f) {
+            fwrite(data.data(), 1, data.size(), f);
+            fclose(f);
+            downloaded++;
+            LOG("cmd", "download_update: wrote %s (%zu bytes)", filePath.c_str(), data.size());
+        }
+        pos++;
+    }
+
+    if (downloaded == 0) return R"({"ok":false,"error":"no files downloaded"})";
+
+    // Launch updater.exe
+    std::string installDir = paths_get_install_dir();
+    std::string updaterPath = installDir + "\\bin\\updater.exe";
+
+    // Get current PID
+    DWORD pid = GetCurrentProcessId();
+    char cmdLine[512];
+    snprintf(cmdLine, sizeof(cmdLine), "\"%s\" \"%s\" %lu",
+        updaterPath.c_str(), stagingDir.c_str(), (unsigned long)pid);
+
+    STARTUPINFOA si = {};
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi = {};
+    if (!CreateProcessA(nullptr, cmdLine, nullptr, nullptr, FALSE,
+        CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
         DWORD err = GetLastError();
-        LOG("cmd", "download_update: ShellExecuteEx failed err=%lu", (unsigned long)err);
-        return R"({"ok":false,"error":"launch swap failed"})";
+        LOG("cmd", "download_update: CreateProcess failed err=%lu", (unsigned long)err);
+        return R"({"ok":false,"error":"launch updater failed"})";
     }
-    // Don't wait — the batch will wait for US to exit
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
 
-    LOG("cmd", "download_update: swap launched, ready to exit");
+    LOG("cmd", "download_update: %zu files, updater launched, exiting", downloaded);
+    return "{\"ok\":true,\"files\":" + std::to_string(downloaded) + "}";
+}
+
+// ── Settings persistence ──────────────────────────────────
+// Forward declaration of paths functions (defined in main.cpp via paths.cpp)
+// We duplicate the path logic here to keep commands.cpp self-contained.
+static std::string g_settings_path;
+
+static const char* get_settings_path() {
+    if (!g_settings_path.empty()) return g_settings_path.c_str();
+
+    // Use %LOCALAPPDATA%\GameAgentMonitor\config\settings.json
+    wchar_t localAppData[MAX_PATH];
+    if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, localAppData))) {
+        int len = WideCharToMultiByte(CP_UTF8, 0, localAppData, -1, nullptr, 0, nullptr, nullptr);
+        std::string base(len - 1, '\0');
+        WideCharToMultiByte(CP_UTF8, 0, localAppData, -1, &base[0], len, nullptr, nullptr);
+        g_settings_path = base + "\\GameAgentMonitor\\config\\settings.json";
+    } else {
+        // Fallback: next to EXE
+        char exeDir[MAX_PATH];
+        GetModuleFileNameA(nullptr, exeDir, MAX_PATH);
+        char* slash = strrchr(exeDir, '\\');
+        if (slash) *slash = '\0';
+        g_settings_path = std::string(exeDir) + "\\config\\settings.json";
+    }
+
+    // Ensure parent directory exists
+    std::string dir = g_settings_path;
+    size_t lastSlash = dir.rfind('\\');
+    if (lastSlash != std::string::npos) {
+        std::string parent = dir.substr(0, lastSlash);
+        CreateDirectoryA(parent.c_str(), nullptr);
+        // Also create parent's parent in case config/ doesn't exist yet
+        size_t prevSlash = parent.rfind('\\');
+        if (prevSlash != std::string::npos)
+            CreateDirectoryA(parent.substr(0, prevSlash).c_str(), nullptr);
+    }
+
+    return g_settings_path.c_str();
+}
+
+static std::string read_file(const char* path) {
+    FILE* f = fopen(path, "rb");
+    if (!f) return "";
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (sz <= 0) { fclose(f); return "{}"; }
+    std::string content(sz, '\0');
+    fread(&content[0], 1, sz, f);
+    fclose(f);
+    return content;
+}
+
+static std::string cmd_get_settings() {
+    const char* path = get_settings_path();
+    std::string json = read_file(path);
+    if (json.empty() || json.size() < 3) json = "{}";
+    LOG("cmd", "get_settings: %s -> %zub", path, json.size());
+    return "{\"ok\":true,\"settings\":" + json + "}";
+}
+
+static std::string cmd_set_setting(const std::string& key, const std::string& value) {
+    if (key.empty()) return R"({"ok":false,"error":"key required"})";
+
+    const char* path = get_settings_path();
+    std::string json = read_file(path);
+    if (json.empty() || json.size() < 3) json = "{}";
+
+    // Simple JSON key-value update: add/overwrite key in the object
+    // Strip outer braces
+    std::string inner = json;
+    if (!inner.empty() && inner.front() == '{') inner = inner.substr(1);
+    if (!inner.empty() && inner.back() == '}') inner.pop_back();
+
+    // Remove whitespace from ends
+    while (!inner.empty() && (inner.front() == ' ' || inner.front() == '\n' || inner.front() == '\r')) inner = inner.substr(1);
+    while (!inner.empty() && (inner.back() == ' ' || inner.back() == '\n' || inner.back() == '\r')) inner.pop_back();
+
+    // Check if key already exists — remove old value
+    std::string search = "\"" + key + "\":";
+    size_t pos = inner.find(search);
+    if (pos != std::string::npos) {
+        // Find end of value (comma or end of string)
+        size_t end = pos + search.length();
+        int depth = 0;
+        bool inStr = false;
+        while (end < inner.size()) {
+            char c = inner[end];
+            if (inStr) {
+                if (c == '"' && inner[end-1] != '\\') inStr = false;
+            } else {
+                if (c == '"') inStr = true;
+                else if (c == '{' || c == '[') depth++;
+                else if (c == '}' || c == ']') { if (depth > 0) depth--; else break; }
+                else if (c == ',' && depth == 0) { end++; break; } // include comma
+            }
+            end++;
+        }
+        inner.erase(pos, end - pos);
+        // Remove trailing comma at end
+        while (!inner.empty() && inner.back() == ',') inner.pop_back();
+    }
+
+    // Append new key-value
+    if (!inner.empty() && inner.back() != ',' && inner.front() != '\0') inner += ",";
+    // JSON-escape the value string
+    std::string escaped;
+    for (char c : value) {
+        if (c == '"') escaped += "\\\"";
+        else if (c == '\\') escaped += "\\\\";
+        else if (c == '\n') escaped += "\\n";
+        else escaped += c;
+    }
+    inner += "\"" + key + "\":" + escaped;
+
+    json = "{" + inner + "}";
+
+    // Write back
+    const char* dir = get_settings_path();
+    std::string dirStr(dir);
+    size_t lastSlash = dirStr.rfind('\\');
+    if (lastSlash != std::string::npos)
+        CreateDirectoryA(dirStr.substr(0, lastSlash).c_str(), nullptr);
+
+    FILE* f = fopen(dir, "wb");
+    if (!f) return R"({"ok":false,"error":"write failed"})";
+    fwrite(json.data(), 1, json.size(), f);
+    fclose(f);
+
+    LOG("cmd", "set_setting: %s=%s", key.c_str(), value.c_str());
     return R"({"ok":true})";
 }
 
@@ -1367,7 +1581,30 @@ std::string dispatch_command(const std::string& json) {
         result = cmd_check_update();
     }
     else if (cmd == "download_update") {
-        result = cmd_download_update(json_get_str(args, "url"));
+        // Extract diff array from args JSON directly
+        // args looks like: {"diff": "[...]"}
+        size_t p = args.find("\"diff\"");
+        std::string diffArr = "[]";
+        if (p != std::string::npos) {
+            p = args.find("[", p);
+            if (p != std::string::npos) {
+                int depth = 0;
+                size_t e = p;
+                while (e < args.size()) {
+                    if (args[e] == '[') depth++;
+                    else if (args[e] == ']') { depth--; if (depth == 0) { e++; break; } }
+                    e++;
+                }
+                diffArr = args.substr(p, e - p);
+            }
+        }
+        result = cmd_download_update(diffArr);
+    }
+    else if (cmd == "get_settings") {
+        result = cmd_get_settings();
+    }
+    else if (cmd == "set_setting") {
+        result = cmd_set_setting(json_get_str(args, "key"), json_get_str(args, "value"));
     }
 
     if (id <= 0) return result; // fire-and-forget (no id field)

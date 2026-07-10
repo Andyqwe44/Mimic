@@ -10,6 +10,7 @@
 #include <utility>
 #include <cstdint>
 #include <windows.h>
+#include "../../common/include/export.h"
 
 // ── Parsed input arguments (one-time parse from JSON) ──
 struct InputArgs {
@@ -32,13 +33,13 @@ struct InputArgs {
 };
 
 // ── Parse JSON args string → InputArgs struct ──
-InputArgs parse_input_args(const std::string& argsJson);
+GAM_API InputArgs parse_input_args(const std::string& argsJson);
 
 // ── Per-method entry points ──
 // Each receives a validated hWnd and pre-parsed InputArgs.
 // Returns JSON string: {"ok":true} or {"ok":false,"error":"..."}
 
-std::string input_sendinput(HWND hWnd, const InputArgs& args);
-std::string input_winapi(HWND hWnd, const InputArgs& args);
-std::string input_postmessage(HWND hWnd, const InputArgs& args);
-std::string input_driver(HWND hWnd, const InputArgs& args);
+GAM_API std::string input_sendinput(HWND hWnd, const InputArgs& args);
+GAM_API std::string input_winapi(HWND hWnd, const InputArgs& args);
+GAM_API std::string input_postmessage(HWND hWnd, const InputArgs& args);
+GAM_API std::string input_driver(HWND hWnd, const InputArgs& args);

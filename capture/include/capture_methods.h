@@ -5,6 +5,7 @@
 #pragma once
 #include <windows.h>
 #include <cstdint>
+#include "../../common/include/export.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -14,28 +15,28 @@ extern "C" {
 /// buf must be pre-allocated; buf_size is the max capacity.
 /// w/h are filled with actual dimensions. Pixels are BGRA (4 channels).
 
-int capture_gdi_getwindowdc(HWND hwnd, uint8_t* buf, int buf_size, int* w, int* h);
-int capture_printwindow(HWND hwnd, uint8_t* buf, int buf_size, int* w, int* h);
-int capture_screen_bitblt(HWND hwnd, uint8_t* buf, int buf_size, int* w, int* h);
-int capture_desktop_bitblt(uint8_t* buf, int buf_size, int* w, int* h);
+GAM_API int capture_gdi_getwindowdc(HWND hwnd, uint8_t* buf, int buf_size, int* w, int* h);
+GAM_API int capture_printwindow(HWND hwnd, uint8_t* buf, int buf_size, int* w, int* h);
+GAM_API int capture_screen_bitblt(HWND hwnd, uint8_t* buf, int buf_size, int* w, int* h);
+GAM_API int capture_desktop_bitblt(uint8_t* buf, int buf_size, int* w, int* h);
 
 /// Auto-detect with 3-method fallback chain (GetWindowDC→PrintWindow→ScreenBitBlt).
 /// method_out receives the name of the successful method.
 /// Caller must free with capture_free_string().
-int capture_auto_detect(HWND hwnd, uint8_t* buf, int buf_size,
+GAM_API int capture_auto_detect(HWND hwnd, uint8_t* buf, int buf_size,
                         int* w, int* h, const char** method_out);
-void capture_free_string(const char* s);
+GAM_API void capture_free_string(const char* s);
 
 /// Query window capture state.
 /// Returns: "desktop"|"foreground"|"background"|"minimized"|"hidden"|"closed"
 /// Caller must free with capture_free_string().
-const char* capture_query_window_state(HWND hwnd);
+GAM_API const char* capture_query_window_state(HWND hwnd);
 
 /// Validate content: returns 1 if pixels represent a solid color (all same RGB).
-int capture_is_solid_color(const uint8_t* pixels, int len);
+GAM_API int capture_is_solid_color(const uint8_t* pixels, int len);
 
 /// Validate content: returns 1 if >5% of pixels are magenta (R=255,B=255,G=0).
-int capture_has_magenta(const uint8_t* pixels, int len);
+GAM_API int capture_has_magenta(const uint8_t* pixels, int len);
 
 #ifdef __cplusplus
 }
