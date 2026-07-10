@@ -2,7 +2,9 @@
 ; Build: "C:\Program Files\Inno Setup 6\ISCC.exe" setup.iss
 
 #define MyAppName "Game Agent Monitor"
-#define MyAppVersion "0.3.4"
+#ifndef MyAppVersion
+#define MyAppVersion "0.0.0"
+#endif
 #define MyAppPublisher "GameAgentMonitor"
 #define MyAppURL "https://gitee.com/Andyqwe44/tictactoe"
 #define MyAppExeName "monitor_app.exe"
