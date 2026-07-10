@@ -5,13 +5,19 @@ if %ERRORLEVEL% NEQ 0 (echo vcvars failed & exit /b 1)
 if not exist "build" mkdir "build"
 
 set ROOT=%~dp0..
+
+rem --- Extract version from single source (monitor_app/src/version.h) ---
+for /f "tokens=3" %%v in ('findstr /c:"#define APP_VERSION " "%ROOT%\monitor_app\src\version.h"') do set VER=%%v
+set VER=%VER:"=%
+set VER_COMMA=%VER:.=,%,0
+
 set CFLAGS=/EHsc /std:c++17 /I include /I "%ROOT%\common\include" /I "%ROOT%\monitor_app\src" /I "%ROOT%\capture\include" /DGAM_BUILD_DLL /MT /c
 set SYSLIBS=user32.lib "%ROOT%\logger\build\logger.lib"
 set LFLAGS=/DLL /NXCOMPAT /DYNAMICBASE
 
 rem --- input_common.dll ---
-echo #define GAM_RC_COMMA 0,3,4,0 > build\_ver_module.h
-echo #define GAM_RC_STR "0.3.4" >> build\_ver_module.h
+echo #define GAM_RC_COMMA %VER_COMMA% > build\_ver_module.h
+echo #define GAM_RC_STR "%VER%" >> build\_ver_module.h
 echo #define GAM_MODULE_DESC "Input Common Utilities" >> build\_ver_module.h
 echo #define GAM_FILETYPE VFT_DLL >> build\_ver_module.h
 echo === Building input_common.dll ===
@@ -20,8 +26,8 @@ rc.exe /nologo /I build /fo build\input_common.res "%ROOT%\common\version.rc" ||
 link.exe %LFLAGS% /OUT:build\input_common.dll build\input_common.obj build\input_common.res %SYSLIBS% /IMPLIB:build\input_common.lib || exit /b 1
 
 rem --- input_sendinput.dll ---
-echo #define GAM_RC_COMMA 0,3,4,0 > build\_ver_module.h
-echo #define GAM_RC_STR "0.3.4" >> build\_ver_module.h
+echo #define GAM_RC_COMMA %VER_COMMA% > build\_ver_module.h
+echo #define GAM_RC_STR "%VER%" >> build\_ver_module.h
 echo #define GAM_MODULE_DESC "SendInput Module" >> build\_ver_module.h
 echo #define GAM_FILETYPE VFT_DLL >> build\_ver_module.h
 echo === Building input_sendinput.dll ===
@@ -30,8 +36,8 @@ rc.exe /nologo /I build /fo build\input_sendinput.res "%ROOT%\common\version.rc"
 link.exe %LFLAGS% /OUT:build\input_sendinput.dll build\input_sendinput.obj build\input_sendinput.res %SYSLIBS% "%ROOT%\input\build\input_common.lib" /IMPLIB:build\input_sendinput.lib || exit /b 1
 
 rem --- input_winapi.dll ---
-echo #define GAM_RC_COMMA 0,3,4,0 > build\_ver_module.h
-echo #define GAM_RC_STR "0.3.4" >> build\_ver_module.h
+echo #define GAM_RC_COMMA %VER_COMMA% > build\_ver_module.h
+echo #define GAM_RC_STR "%VER%" >> build\_ver_module.h
 echo #define GAM_MODULE_DESC "WinAPI Input Module" >> build\_ver_module.h
 echo #define GAM_FILETYPE VFT_DLL >> build\_ver_module.h
 echo === Building input_winapi.dll ===
@@ -40,8 +46,8 @@ rc.exe /nologo /I build /fo build\input_winapi.res "%ROOT%\common\version.rc" ||
 link.exe %LFLAGS% /OUT:build\input_winapi.dll build\input_winapi.obj build\input_winapi.res %SYSLIBS% "%ROOT%\input\build\input_common.lib" /IMPLIB:build\input_winapi.lib || exit /b 1
 
 rem --- input_postmessage.dll ---
-echo #define GAM_RC_COMMA 0,3,4,0 > build\_ver_module.h
-echo #define GAM_RC_STR "0.3.4" >> build\_ver_module.h
+echo #define GAM_RC_COMMA %VER_COMMA% > build\_ver_module.h
+echo #define GAM_RC_STR "%VER%" >> build\_ver_module.h
 echo #define GAM_MODULE_DESC "PostMessage Input Module" >> build\_ver_module.h
 echo #define GAM_FILETYPE VFT_DLL >> build\_ver_module.h
 echo === Building input_postmessage.dll ===
@@ -50,8 +56,8 @@ rc.exe /nologo /I build /fo build\input_postmessage.res "%ROOT%\common\version.r
 link.exe %LFLAGS% /OUT:build\input_postmessage.dll build\input_postmessage.obj build\input_postmessage.res %SYSLIBS% "%ROOT%\input\build\input_common.lib" /IMPLIB:build\input_postmessage.lib || exit /b 1
 
 rem --- input_driver.dll ---
-echo #define GAM_RC_COMMA 0,3,4,0 > build\_ver_module.h
-echo #define GAM_RC_STR "0.3.4" >> build\_ver_module.h
+echo #define GAM_RC_COMMA %VER_COMMA% > build\_ver_module.h
+echo #define GAM_RC_STR "%VER%" >> build\_ver_module.h
 echo #define GAM_MODULE_DESC "Driver Input Stub" >> build\_ver_module.h
 echo #define GAM_FILETYPE VFT_DLL >> build\_ver_module.h
 echo === Building input_driver.dll ===

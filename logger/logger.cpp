@@ -17,6 +17,7 @@
 #include <io.h>
 #define NOMINMAX
 #include <windows.h>
+#include "_ver_module.h"
 
 // ── Ring buffer entry ──────────────────────────────────
 struct LogEntry {
@@ -48,7 +49,9 @@ static std::string        g_last_tag;
 static std::string        g_last_msg_body;  // raw msg body (without [tag], for comparison)
 static std::string        g_last_first_ts;  // timestamp of first occurrence in current run
 static int                g_last_count = 0; // consecutive count (0 = no active run)
+static int                g_last_level = LOG_LEVEL_INFO; // level of current collapse run
 static long               g_last_file_pos = 0;  // file position where current run starts
+static int                g_level = LOG_LEVEL_INFO; // minimum level to output
 
 // ── Local-time timestamp with milliseconds ──────────────
 static std::string _timestamp() {
@@ -63,9 +66,10 @@ static std::string _timestamp() {
 // ── Internal: write an entry to file (must hold g_mutex) ──
 // Does NOT update g_last_file_pos — caller must set it before calling
 // (for new runs: ftell before write; for collapse: unchanged from run start).
-static void _file_write_entry(const char* ts, const char* tag, const char* msg) {
+static void _file_write_entry(const char* ts, const char* level_str,
+                              const char* tag, const char* msg) {
     if (!g_file) return;
-    fprintf(g_file, "[%s] [%s] %s\n", ts, tag, msg);
+    fprintf(g_file, "[%s] [%-5s] [%s] %s\n", ts, level_str, tag, msg);
     fflush(g_file);
 }
 
@@ -82,6 +86,7 @@ static void _file_collapse(const char* firstTs, const char* lastTs,
     char buf[4096];
     int len = snprintf(buf, sizeof(buf), "[%s → %s] [%s] %s ×%d\n",
                        firstTs, lastTs, tag, msg, count);
+    // NOTE: level not shown in collapse line — same run means same level
     if (len <= 0) return;
     _lseek(fd, g_last_file_pos, SEEK_SET);
     _write(fd, buf, len);
@@ -239,7 +244,7 @@ void capture_log_init(const char* app_name,
     // Write session header to ring buffer (matches file content)
     {
         auto ts = _timestamp();
-        _write_ring(ts, "=== agent v0.3.4 ===");
+        _write_ring(ts, "=== agent v" APP_VERSION " ===");
         char info[256];
         snprintf(info, sizeof(info), "Session: %04d%02d%02d_%02d%02d%02d | PID: %lu",
                  tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
@@ -283,14 +288,27 @@ static std::string _json_escape(const std::string& s) {
     return out;
 }
 
+// ── Level → string helper ─────────────────────────────────
+static const char* _level_str(int level) {
+    switch (level) {
+        case LOG_LEVEL_DEBUG: return "DEBUG";
+        case LOG_LEVEL_INFO:  return "INFO";
+        case LOG_LEVEL_WARN:  return "WARN";
+        case LOG_LEVEL_ERROR: return "ERROR";
+        default:              return "?";
+    }
+}
+
 // ── Build notify JSON message (must NOT hold g_mutex) ─────
 static std::string _build_notify_json(const char* ts, const char* tag, const char* msg,
-                                       int count, const char* firstTs) {
+                                       int count, const char* firstTs, int level) {
     std::string json;
     json.reserve(512);
     json = "{\"type\":\"log\",\"ts\":\"" + _json_escape(ts)
          + "\",\"tag\":\"" + _json_escape(tag)
-         + "\",\"msg\":\"" + _json_escape(msg) + "\"";
+         + "\",\"msg\":\"" + _json_escape(msg) + "\""
+         + ",\"level\":\"" + std::string(_level_str(level)) + "\""
+         + ",\"lvl\":" + std::to_string(level);
     if (count > 1) {
         json += ",\"count\":" + std::to_string(count)
              +  ",\"firstTs\":\"" + _json_escape(firstTs) + "\"";
@@ -299,14 +317,17 @@ static std::string _build_notify_json(const char* ts, const char* tag, const cha
     return json;
 }
 
-// ── THE ONE write function ───────────────────────────────
+// ── THE ONE write function (level-gated) ──────────────────
 // Write-then-collapse strategy for crash safety:
 // 1. Always append the raw entry to file FIRST (durable on disk).
 // 2. If same as previous: seek back + overwrite with [first→last] msg ×N + truncate.
 // 3. If crash before step 2: file has individual entries — redundant but truthful.
 //    If crash after step 2: file has clean collapsed entry — optimal.
 // Ring buffer uses check-then-update (no temporary duplicate needed — it's in-memory).
-void capture_log_write_msg(const char* tag, const char* msg) {
+void capture_log_write_level(int level, const char* tag, const char* msg) {
+    // Fast drop if below current threshold (outside lock for speed)
+    if (level < g_level) return;
+
     auto ts = _timestamp();
 
     capture_log_notify_json_cb cb_copy = nullptr;
@@ -314,39 +335,42 @@ void capture_log_write_msg(const char* tag, const char* msg) {
     {
         std::lock_guard<std::mutex> lk(g_mutex);
 
-        bool same = (g_last_count > 0 && g_last_tag == tag && g_last_msg_body == msg);
+        // Collapse only when (tag, msg, level) all match
+        bool same = (g_last_count > 0 && g_last_tag == tag
+                     && g_last_msg_body == msg && g_last_level == level);
 
         // Record file position BEFORE writing only when starting a new run.
-        // For collapse: g_last_file_pos stays at run's first entry position.
-        // Guard: g_file may be nullptr before capture_log_init (early LOG calls).
         if (!same && g_file) {
             g_last_file_pos = ftell(g_file);
         }
-        _file_write_entry(ts.c_str(), tag, msg);
+
+        _file_write_entry(ts.c_str(), _level_str(level), tag, msg);
 
         if (same) {
             // ── Step 2: collapse — overwrite from run start ──
             g_last_count++;
             _file_collapse(g_last_first_ts.c_str(), ts.c_str(),
                            tag, msg, g_last_count);
-            // Ring: update last entry in-place (no duplicate added)
             _update_last_ring(ts, g_last_count, g_last_first_ts);
         } else {
             // ── Different message: start new run ──
             g_last_tag = tag;
             g_last_msg_body = msg;
+            g_last_level = level;
             g_last_first_ts = ts;
             g_last_count = 1;
-            // Ring: push new entry
-            char formatted[4096];
-            snprintf(formatted, sizeof(formatted), "[%s] %s", tag, msg);
+            // Ring: push new entry with level
+            char formatted[4224];
+            snprintf(formatted, sizeof(formatted), "[%s] [%s] %s",
+                     _level_str(level), tag, msg);
             _write_ring(ts, formatted);
         }
 
-        // Build notify JSON inside lock (uses g_last_count, g_last_first_ts)
+        // Build notify JSON inside lock (includes level)
         notify_json = _build_notify_json(ts.c_str(), tag, msg,
                                           g_last_count,
-                                          g_last_count > 1 ? g_last_first_ts.c_str() : "");
+                                          g_last_count > 1 ? g_last_first_ts.c_str() : "",
+                                          level);
         cb_copy = g_notify_cb;
     }
     // Notify TS outside lock to avoid re-entrancy deadlock.
@@ -355,8 +379,32 @@ void capture_log_write_msg(const char* tag, const char* msg) {
     }
 }
 
+// ── Backward-compat: write at INFO level ──────────────────
+void capture_log_write_msg(const char* tag, const char* msg) {
+    capture_log_write_level(LOG_LEVEL_INFO, tag, msg);
+}
+
+// ── Level control ─────────────────────────────────────────
+void capture_log_set_level(int level) {
+    std::lock_guard<std::mutex> lk(g_mutex);
+    g_level = level;
+}
+
+int capture_log_get_level(void) {
+    return g_level;
+}
+
 void capture_log_set_notify(capture_log_notify_json_cb cb) {
     g_notify_cb = cb;
+}
+
+// ── Deprecated: debug toggle → wraps set_level ─────────────
+void capture_log_set_debug(int enabled) {
+    capture_log_set_level(enabled ? LOG_LEVEL_DEBUG : LOG_LEVEL_INFO);
+}
+
+void capture_log_write_debug(const char* tag, const char* msg) {
+    capture_log_write_level(LOG_LEVEL_DEBUG, tag, msg);
 }
 
 // ── UI-side log (TS → C++, no echo back) ─────────────────
@@ -374,7 +422,7 @@ void capture_log_write_ui(const char* msg) {
         if (!same && g_file) {
             g_last_file_pos = ftell(g_file);
         }
-        _file_write_entry(ts.c_str(), "ui", msg);
+        _file_write_entry(ts.c_str(), "INFO", "ui", msg);
 
         if (same) {
             // Step 2: collapse — overwrite from run start
@@ -385,10 +433,11 @@ void capture_log_write_ui(const char* msg) {
         } else {
             g_last_tag = "ui";
             g_last_msg_body = msg;
+            g_last_level = LOG_LEVEL_INFO;
             g_last_first_ts = ts;
             g_last_count = 1;
             char formatted[4096];
-            snprintf(formatted, sizeof(formatted), "[ui] %s", msg);
+            snprintf(formatted, sizeof(formatted), "[INFO] [ui] %s", msg);
             _write_ring(ts, formatted);
         }
     }

@@ -1645,6 +1645,11 @@ void backend_init() {
     std::string log_dir = std::string(exe_dir) + "\\log";
     capture_log_init("agent", APP_VERSION, log_dir.c_str(), 5, 5000);
     capture_log_set_notify(on_log_notify);  // C++ LOG() → push to TS in real-time
+#ifdef DEV_MODE
+    capture_log_set_level(LOG_LEVEL_DEBUG);  // show all levels in dev
+#else
+    capture_log_set_level(LOG_LEVEL_INFO);   // hide DEBUG in prod
+#endif
     init_wic();
     tcp_server_start();
 
