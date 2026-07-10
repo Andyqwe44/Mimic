@@ -1,104 +1,104 @@
 {
-  "app": "0.3.3",
-  "released": "2026-07-10T16:26:58.860Z",
+  "app": "0.3.4",
+  "released": "2026-07-10T16:45:05.096Z",
   "files": {
     "bin/capture_common.dll": {
-      "v": "0.3.3",
+      "v": "0.3.4",
       "sha256": "4bdeb12f873e0339e929184452e0e1f1efe7740f5b58bf8b16e3876531bb6773",
       "size": 105984
     },
     "bin/capture_desktop.dll": {
-      "v": "0.3.3",
+      "v": "0.3.4",
       "sha256": "08513f2b2708c065b7c8023f07de3455aebe8c40ace395689da05823026cfab6",
       "size": 125440
     },
     "bin/capture_gdi.dll": {
-      "v": "0.3.3",
+      "v": "0.3.4",
       "sha256": "2a476f5aaeb41538391e28e8b89800fc2a4943cb9f6c3100d6bdc3f5767dcc6a",
       "size": 126464
     },
     "bin/capture_pw.dll": {
-      "v": "0.3.3",
+      "v": "0.3.4",
       "sha256": "66b88c64ade322e12b66d93fbd07cfd03f219b29bc6214c372d2e3e0a8cf92ae",
       "size": 124928
     },
     "bin/capture_screen.dll": {
-      "v": "0.3.3",
+      "v": "0.3.4",
       "sha256": "6f1901e937ec8e534e290a5fa5c2442274d94e5532f9ede7172633e80e8e89f9",
       "size": 126976
     },
     "bin/capture_wgc.dll": {
-      "v": "0.3.3",
+      "v": "0.3.4",
       "sha256": "f74e5d737f1b80dfaf509bfeb77e54d09e267d6dd288c711e51370258eba12fa",
       "size": 272384
     },
     "bin/input_common.dll": {
-      "v": "0.3.3",
+      "v": "0.3.4",
       "sha256": "378b7c1fd61b7ed34f7963ec9cfc22fa289bfb4beca1414ab07f9c7f83570d4c",
       "size": 201728
     },
     "bin/input_driver.dll": {
-      "v": "0.3.3",
+      "v": "0.3.4",
       "sha256": "d65b544ee94b36ac09c8fe23a7a92e91b3574c505c4c4f2d2a8b39ec3827271a",
       "size": 122368
     },
     "bin/input_postmessage.dll": {
-      "v": "0.3.3",
+      "v": "0.3.4",
       "sha256": "2915584ad7f0b10f4e3155c3a042cb9d0f913eb03418cfba2ab9bcbffac46fd7",
       "size": 166400
     },
     "bin/input_sendinput.dll": {
-      "v": "0.3.3",
+      "v": "0.3.4",
       "sha256": "a0fd236911e2e154346d3910ef25a41f0564662722720cee75f3c1b039ec34c2",
       "size": 171520
     },
     "bin/input_winapi.dll": {
-      "v": "0.3.3",
+      "v": "0.3.4",
       "sha256": "18b69c7bbedc10db326f39aa5c7eb272e6b59168a5634bbd1afe2b2d9f632fd9",
       "size": 166400
     },
     "bin/logger.dll": {
-      "v": "0.3.3",
+      "v": "0.3.4",
       "sha256": "68454d7e7ff8707fd33ecddb550301050aa744cd997bf56250e856f9592df77c",
       "size": 280576
     },
     "bin/monitor_app.exe": {
-      "v": "0.3.3",
-      "sha256": "0efa977a966aa285f279a2b712a2c442acdff804a4f4e22a67c0e83bde851d24",
+      "v": "0.3.4",
+      "sha256": "d6a0716e1448b24f387810ab1f3171b5afcdb5a8306762faf67c8b5987969683",
       "size": 419840
     },
     "bin/updater.exe": {
-      "v": "0.3.3",
+      "v": "0.3.4",
       "sha256": "be0c28960fedf55eee76992644fcf3fd3d6c63b61f53a97615a39f23fa1fef9d",
       "size": 138240
     },
     "config/settings.default.json": {
-      "v": "0.3.3",
+      "v": "0.3.4",
       "sha256": "182fdb09c54e338725495471ed6e3a93774349263a147cc16eb1e8e9818efa08",
       "size": 294
     },
     "frontend/assets/index-CUocvQOE.css": {
-      "v": "0.3.3",
+      "v": "0.3.4",
       "sha256": "ba61352c298a7ad944b0e332e62b747b1e39ad34bbd991d8420729613e8049bf",
       "size": 35496
     },
     "frontend/assets/index-QSqcMQEN.js": {
-      "v": "0.3.3",
+      "v": "0.3.4",
       "sha256": "7497d222fa629b6397538aae0edab962093dfb4c1fc132462df49773d7052d11",
       "size": 309686
     },
     "frontend/favicon.svg": {
-      "v": "0.3.3",
+      "v": "0.3.4",
       "sha256": "61bc9a161de58248288e6905425d7180f0624c2865007b97d763fdac12043a66",
       "size": 9522
     },
     "frontend/icons.svg": {
-      "v": "0.3.3",
+      "v": "0.3.4",
       "sha256": "b45fa506195cfcdef406ba9f0c77b36ddc1a7c224040926ec70abc2fdea7b93a",
       "size": 5031
     },
     "frontend/index.html": {
-      "v": "0.3.3",
+      "v": "0.3.4",
       "sha256": "1734dd03eb36bab85ff7e2e384ad317d9b2e4ec80db07ffef01f54f3c6eed2a6",
       "size": 461
     }

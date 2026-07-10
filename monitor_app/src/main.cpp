@@ -275,7 +275,7 @@ HRESULT InitWebView2(HWND hwnd)
                         // Prod: map virtual host to frontend folder on disk.
                         // SetVirtualHostNameToFolderMapping lets gam.local/* serve from
                         // the install dir's frontend/ folder with proper CORS behavior.
-                        std::string frontendDir = paths_get_install_dir() + "\\frontend";
+                        std::string frontendDir = paths_get_install_dir() + "\\frontend\\";
                         int wlen = MultiByteToWideChar(CP_UTF8, 0, frontendDir.c_str(),
                             (int)frontendDir.size(), nullptr, 0);
                         std::wstring wdir(wlen, L'\0');
