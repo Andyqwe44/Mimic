@@ -24,7 +24,10 @@ WriteConsole    OutputDebugString
 **唯一合法方式**：
 ```cpp
 #include "logger/logger.h"
-LOG("tag", "format_string", args...);
+LOG_ERROR("tag", "format", args...);  // 错误 — operation failed, must fix
+LOG_WARN("tag", "format", args...);   // 警告 — fallback used, retryable
+LOG("tag", "format", args...);        // INFO — status change, user action
+LOG_DEBUG("tag", "format", args...);  // DEBUG — frame detail, param dump (dev only)
 ```
 
 | 标签 | 用途 |
@@ -35,6 +38,19 @@ LOG("tag", "format_string", args...);
 | `mjpeg` | MJPEG 服务器 |
 | `ui` | 前端事件 |
 | `agent` | AI Agent |
+
+**日志等级规范（四级）：**
+
+| 等级 | 值 | 宏 | 场景 | Dev | Prod |
+|------|----|-----|------|:--:|:----:|
+| DEBUG | 0 | `LOG_DEBUG()` | 帧级细节、参数dump、性能计时 | ✅ | ❌ |
+| INFO | 1 | `LOG()` / `LOG_INFO()` | 状态变更、用户操作、正常流程 | ✅ | ✅ |
+| WARN | 2 | `LOG_WARN()` | 可恢复问题、fallback、retry | ✅ | ✅ |
+| ERROR | 3 | `LOG_ERROR()` | 硬错误、操作失败 | ✅ | ✅ |
+
+Dev 启动时自动 `capture_log_set_level(LOG_LEVEL_DEBUG)`，prod 设 `LOG_LEVEL_INFO`。
+文件格式: `[12:34:56.789] [INFO ] [tag] message`（`%-5s` 列对齐）。
+JSON notify 含 `"level":"INFO","lvl":1` 字段供前端颜色区分。
 
 ### 铁律 3: 存档 = 更新 README + 更新 CLAUDE.md + commit
 
@@ -157,6 +173,104 @@ cd monitor_app && build.cmd          # embed dist → build\monitor_app.exe
 | Dev   | `Global\GameAgentMonitor_8A3F2D_Dev` | `GameAgentMonitor_Dev` | `Game Agent Monitor (Dev)` |
 
 Exit code `2` = already running (existing window raised).
+
+## Release Workflow — Dev → Prod → Gitee → One-Click Update
+
+完整发布链：dev 验证 → prod 构建 → 打包 installer → Gitee Release → 用户点"Check Update"即可更新。
+
+### Step 1: Dev 验证
+
+```bash
+# 1. 改版本号（只需改这一个文件! 铁律 8）
+#    编辑 monitor_app/src/version.h → APP_VERSION + APP_VERSION_RC
+
+# 2. 构建所有 lib + dev app
+cd logger   && build_logger_lib.cmd
+cd capture  && build_capture_lib.cmd
+cd input    && build_input_lib.cmd
+cd monitor_app && build_dev.cmd
+
+# 3. 启动前端 + 测试
+cd monitor_web && npm run dev      # 终端 1: Vite :1420
+cd monitor_app && build_dev\monitor_app.exe  # 终端 2: Dev app
+
+# 4. 验证: GUI 正常渲染, 版本号正确, 功能无回归
+```
+
+### Step 2: Prod 构建 + 打包
+
+```bash
+# 1. Prod 编译
+cd monitor_app && build.cmd        # → build\monitor_app.exe (O2, 无调试信息)
+cd updater    && build.cmd         # → build\updater.exe
+cd monitor_web && npm run build    # → dist/ (Vite production)
+
+# 2. 组装 release 目录
+rm -rf release/GameAgentMonitor
+mkdir -p release/GameAgentMonitor/{bin,frontend,config}
+cp monitor_app/build/monitor_app.exe release/GameAgentMonitor/bin/
+cp monitor_app/build/*.dll          release/GameAgentMonitor/bin/
+cp updater/build/updater.exe        release/GameAgentMonitor/bin/
+cp -r monitor_web/dist/*            release/GameAgentMonitor/frontend/
+cp config/settings.default.json     release/GameAgentMonitor/config/
+
+# 3. 生成文件清单 (给 auto-update 用)
+node tools/gen_version.mjs release/GameAgentMonitor 0.3.4
+
+# 4. 打包 installer
+cd installer && "C:\Program Files\Inno Setup 6\ISCC.exe" setup.iss
+# → release\GameAgentMonitor_Setup_v0.3.4.exe
+```
+
+### Step 3: Gitee 发布
+
+```bash
+# 1. Commit + tag + push
+V=0.3.4
+git add release/GameAgentMonitor/ monitor_app/src/version.h installer/setup.iss
+git commit -m "release: v$V"
+git tag "v$V"
+git push origin main
+git push origin "refs/tags/v$V:refs/tags/v$V"
+
+# 2. 在 Gitee 创建 Release (或 API)
+#    Tag: v0.3.4, 上传 GameAgentMonitor_Setup_v0.3.4.exe 作为 attachment
+#    API: POST /api/v5/repos/Andyqwe44/tictactoe/releases
+#         {tag_name, name, body, target_commitish, prerelease:false}
+#    Upload asset: POST /repos/.../releases/{id}/attach_files
+
+# 3. 验证: 浏览器打开 raw URL
+#    https://gitee.com/Andyqwe44/tictactoe/raw/v0.3.4/release/GameAgentMonitor/version.json
+#    确认返回 200 + 版本号正确
+```
+
+### Step 4: 用户一键更新
+
+```
+用户操作: Settings → Check Update 按钮
+↓
+check_update:
+  1. GET Gitee API /releases/latest → 获取 latest tag_name
+  2. 对比本地版本号 (从 version.json 或注册表读取)
+  3. 如果 remote > local → GET raw/<tag>/release/GameAgentMonitor/version.json
+  4. 逐文件比对 SHA256 → 生成 diff 列表
+  5. 返回 {has_update:true, diff:[...], new_version:"0.3.4"}
+↓
+用户点 "Download & Install":
+  1. 逐个下载 diff 文件 → %LOCALAPPDATA%\GameAgentMonitor\staging\
+  2. SHA256 校验每个文件
+  3. 全部下载完 → 启动 updater.exe <staging_dir> <pid>
+  4. monitor_app 退出
+  5. updater 覆盖文件 → 重启 monitor_app → 版本号已更新 ✓
+```
+
+### Gitee 注意事项
+
+| 问题 | 解决方案 |
+|------|----------|
+| **Gitee 不允许替换 Release asset** | 必须 DELETE 整个 Release → DELETE remote tag → 重建。上传同名文件只是追加第二个 asset |
+| **raw URL 的文件来自 git 仓库** | `raw/<tag>/path` 读取的是 git tag 下提交的文件，不是 Release asset。所以 release 文件必须 commit 到 git |
+| **China 网络** | Gitee 在国内访问稳定；raw URL 无需认证即可下载 |
 
 ## Internal Architecture
 
@@ -344,6 +458,29 @@ lib/: bridge.ts, types.ts, constants.ts
 
 ### 铁律 7: CLAUDE.md 保持精简，详细内容写入 CLAUDE.old.md
 
+### 铁律 8: 版本号单一真相源 — `version.h`
+
+**只改一个文件：`monitor_app/src/version.h`。** 其余全部自动继承：
+
+| 消费者 | 继承方式 |
+|--------|----------|
+| `monitor_app/app.rc` | `#include "src/version.h"` → `APP_VERSION` / `APP_VERSION_RC` |
+| `logger/logger.cpp` | 构建脚本解析 version.h → 写入 `build/_ver_module.h` → `#include "_ver_module.h"` |
+| 所有 DLL 构建脚本 | `findstr` 解析 `APP_VERSION` → 生成 `_ver_module.h`（给 RC 文件用） |
+| `installer/setup.iss` | 构建脚本解析 version.h → `iscc /DMyAppVersion=...`（或手动同步） |
+| 前端 `App.tsx` | 运行时 `hostCall('get_version')` → 返回 `APP_VERSION` |
+| `tools/gen_version.mjs` | CLI 参数传入 → 与 version.h 保持一致 |
+
+**改版本号步骤：**
+1. 编辑 `monitor_app/src/version.h`：修改 `APP_VERSION` 和 `APP_VERSION_RC`
+2. 重建所有 lib + app（构建脚本自动读取新版本）
+3. 前端 `npm run build`（JS hash 自动更新）
+4. 组装 release 目录 + 生成 `version.json` + ISCC 打包
+
+**严禁：** `sed` 批量替换版本号。之前 12 个硬编码位点已全部消除。
+
+### 铁律 7: CLAUDE.md 保持精简，详细内容写入 CLAUDE.old.md
+
 CLAUDE.md 只放核心规则、架构概览、构建命令。以下内容**必须写入 CLAUDE.old.md**：
 - 开发日志 / Recent Fixes 详细描述
 - 指令的详细说明和背景故事
@@ -356,7 +493,8 @@ CLAUDE.md 只保留摘要和指向 CLAUDE.old.md 的引用。
 ## Changelog
 
 Full development history preserved in `CLAUDE.old.md`. Major milestones:
-- **2026-07-10 (Phase 2)**: Modular DLL build (12 DLLs with VERSIONINFO), InnoSetup installer, settings persistence (get/set_setting), multi-file incremental update (version.json manifest + updater.exe + Gitee raw file download), paths system (install dir + appdata), settings auto-save/load
+- **2026-07-10 (version unification)**: 铁律 8 — 版本号单一真相源 `version.h`。消除 12 个硬编码版本位点，构建脚本自动从 version.h 解析版本，logger.cpp 用 APP_VERSION 宏，App.tsx 运行时 get_version，setup.iss 从 version.h 同步。建立标准化发布流程（dev验证→prod构建→Gitee发布→一键更新）。
+- **2026-07-10 (Phase 2)**: Modular DLL build (12 DLLs with VERSIONINFO), InnoSetup installer, settings persistence, multi-file incremental update, paths system, settings auto-save/load
 - **2026-07-10 (auto-update)**: Phase 1 full-EXE update — WinHTTP `check_update` (Gitee API) + `download_update` (download + swap.bat + self-replace); UpdateModal + BottomBar indicator; fix GitHub→Gitee link in SettingsView
 - **2026-07-10 (gitignore)**: Rewrite `.gitignore` — cover `build_dev/`, WebView2 runtime cache (`*.exe.WebView2/`), nested log dirs, `*.res`, `tmp/`; remove stale Rust `target/` rule
 - **2026-07-10 (self-test)**: test_target 判定区缩小(inner hit-margin) + 真实 IME 输入框(EDIT child); TCP self-test 通道(:9998 JSON-lines) — DEV 面板一键映射校准, 复用真实点击回调 sendMappedClick, predict vs 实收 → 命中率热力图/偏移向量/像素误差; 新组件 SelfTestModal + lib/selftest.ts (13 组件)
