@@ -1094,7 +1094,7 @@ static std::string cmd_check_update() {
         // Fetch remote version.json from the release tag
         std::string manifestUrl = "https://gitee.com/Andyqwe44/tictactoe/raw/";
         manifestUrl += tag;
-        manifestUrl += "/version.json";
+        manifestUrl += "/release/GameAgentMonitor/version.json";
         std::string remoteManifest = winhttp_get_str(manifestUrl, "update");
 
         // Read local version.json
@@ -1131,7 +1131,7 @@ static std::string cmd_check_update() {
                                 if (!first) diffJson += ","; first = false;
                                 // Build download URL from raw file
                                 std::string dlUrl = "https://gitee.com/Andyqwe44/tictactoe/raw/"
-                                    + tag + "/" + filePath;
+                                    + tag + "/release/GameAgentMonitor/" + filePath;
                                 diffJson += "{\"path\":\"" + filePath + "\"";
                                 diffJson += ",\"v\":\"" + remoteVer + "\"";
                                 diffJson += ",\"sha256\":\"" + sha + "\"";
