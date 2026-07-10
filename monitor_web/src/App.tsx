@@ -25,7 +25,7 @@ export default function App() {
   // ═══ UI state ═══
   const [tab, setTab] = useState<'Monitor' | 'Log' | 'Settings'>('Settings')
   const [running, setRunning] = useState(false)
-  const [appVersion, setAppVersion] = useState('v0.3.2')
+  const [appVersion, setAppVersion] = useState('v0.3.3')
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
   const [updateDownloading, setUpdateDownloading] = useState(false)
   const [rightWidth, setRightWidth] = useState(DEFAULT_RIGHT_WIDTH)

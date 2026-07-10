@@ -1,6 +1,7 @@
 # === Build outputs ===
 **/build/
 **/build_dev/
+release/*.exe
 *.exe
 *.obj
 *.o

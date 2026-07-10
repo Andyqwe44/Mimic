@@ -1,0 +1,14 @@
+{
+  "theme": "light",
+  "mouseMode": "background",
+  "keyMode": "postmsg",
+  "mappingHotkey": "F10",
+  "devMode": false,
+  "selfTargetMode": "warn",
+  "keepFiles": 5,
+  "autoSnap": false,
+  "autoStream": false,
+  "snapMethod": "wgc",
+  "streamMethod": "wgc",
+  "renderMethod": "sharedbuffer"
+}

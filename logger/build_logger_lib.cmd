@@ -7,8 +7,8 @@ if not exist "build" mkdir "build"
 set ROOT=%~dp0..
 
 rem --- Generate per-module version header (avoids rc.exe quoting hell) ---
-echo #define GAM_RC_COMMA 0,3,2,0 > build\_ver_module.h
-echo #define GAM_RC_STR "0.3.2" >> build\_ver_module.h
+echo #define GAM_RC_COMMA 0,3,3,0 > build\_ver_module.h
+echo #define GAM_RC_STR "0.3.3" >> build\_ver_module.h
 echo #define GAM_MODULE_DESC "Unified Logging Engine" >> build\_ver_module.h
 echo #define GAM_FILETYPE VFT_DLL >> build\_ver_module.h
 
