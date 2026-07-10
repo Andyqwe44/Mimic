@@ -467,7 +467,7 @@ lib/: bridge.ts, types.ts, constants.ts
 | `monitor_app/app.rc` | `#include "src/version.h"` → `APP_VERSION` / `APP_VERSION_RC` |
 | `logger/logger.cpp` | 构建脚本解析 version.h → 写入 `build/_ver_module.h` → `#include "_ver_module.h"` |
 | 所有 DLL 构建脚本 | `findstr` 解析 `APP_VERSION` → 生成 `_ver_module.h`（给 RC 文件用） |
-| `installer/setup.iss` | 构建脚本解析 version.h → `iscc /DMyAppVersion=...`（或手动同步） |
+| `installer/setup.iss` | `build_release.cmd` 解析 version.h → `iscc -DMyAppVersion=%VER%`，setup.iss 条件 define |
 | 前端 `App.tsx` | 运行时 `hostCall('get_version')` → 返回 `APP_VERSION` |
 | `tools/gen_version.mjs` | CLI 参数传入 → 与 version.h 保持一致 |
 
@@ -493,6 +493,7 @@ CLAUDE.md 只保留摘要和指向 CLAUDE.old.md 的引用。
 ## Changelog
 
 Full development history preserved in `CLAUDE.old.md`. Major milestones:
+- **2026-07-11 (release automation)**: 消除 setup.iss 版本号手动同步（条件 define + ISCC `/D` 传参）。修复 prod-only 白屏双 bug：WinHTTP 302 重定向 + `SetVirtualHostNameToFolderMapping` 路径缺尾 `\`。建立 prod 本地验证步骤（`build_release.cmd` 后先 `release\...\monitor_app.exe` 实测再发布）。发布 v0.3.3/v0.3.4。
 - **2026-07-10 (version unification)**: 铁律 8 — 版本号单一真相源 `version.h`。消除 12 个硬编码版本位点，构建脚本自动从 version.h 解析版本，logger.cpp 用 APP_VERSION 宏，App.tsx 运行时 get_version，setup.iss 从 version.h 同步。建立标准化发布流程（dev验证→prod构建→Gitee发布→一键更新）。
 - **2026-07-10 (Phase 2)**: Modular DLL build (12 DLLs with VERSIONINFO), InnoSetup installer, settings persistence, multi-file incremental update, paths system, settings auto-save/load
 - **2026-07-10 (auto-update)**: Phase 1 full-EXE update — WinHTTP `check_update` (Gitee API) + `download_update` (download + swap.bat + self-replace); UpdateModal + BottomBar indicator; fix GitHub→Gitee link in SettingsView
