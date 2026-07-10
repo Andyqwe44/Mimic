@@ -1022,6 +1022,10 @@ static std::string winhttp_get(const wchar_t* url, const char* tag) {
         return "";
     }
 
+    // Follow HTTP redirects (Gitee raw URLs 302 -> raw.giteeusercontent.com)
+    DWORD redirectPolicy = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
+    WinHttpSetOption(hReq, WINHTTP_OPTION_REDIRECT_POLICY, &redirectPolicy, sizeof(redirectPolicy));
+
     BOOL ok = WinHttpSendRequest(hReq, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
         WINHTTP_NO_REQUEST_DATA, 0, 0, 0);
     if (!ok) {
