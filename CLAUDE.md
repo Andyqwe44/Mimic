@@ -346,7 +346,7 @@ CLAUDE.md 只保留摘要和指向 CLAUDE.old.md 的引用。
 ## Changelog
 
 Full development history preserved in `CLAUDE.old.md`. Major milestones:
-- **2026-07-10**: Log collapse (write-then-collapse crash safety), CSS rename accent-dev→accent-secondary (副色 C2), Auto mode uses C2/Manual uses CE, MonitorView clear canvas on stop, virtual cursor overlay + self-target detection + 3-mode input (mouse Seize/Semi/Background, keyboard Seize/PostMsg/SendMsg) + WDA_EXCLUDEFROMCAPTURE
+- **2026-07-10**: Log collapse (write-then-collapse crash safety), CSS rename accent-dev→accent-secondary (副色 C2), Auto mode uses C2/Manual uses CE, MonitorView clear canvas on stop, virtual cursor overlay + real-screen circle indicator (C++ WS_EX_LAYERED UpdateLayeredWindow) + self-target detection + 3-mode input (mouse Seize/Semi/Background, keyboard Seize/PostMsg/SendMsg) + WDA_EXCLUDEFROMCAPTURE
 - **2026-07-09**: Two-color theme + Dev mode, MonitorView remote-control, component decomposition (1→11 files), input mapping
 - **2026-07-08**: Method routing 铁律 5 enforcement, stream bridge, SharedBuffer pipeline, log UX
 - Earlier: Rust→C++ migration complete, WGC/DXGI capture, MJPEG server, TCP protocol

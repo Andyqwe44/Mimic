@@ -19,11 +19,11 @@ function getImageCoords(
   clientX: number, clientY: number,
   containerRect: DOMRect,
   imageW: number, imageH: number,
-): { rx: number; ry: number; inImage: boolean } {
+): { rx: number; ry: number; inImage: boolean; px: number; py: number } {
   const cw = containerRect.width
   const ch = containerRect.height
   if (cw <= 0 || ch <= 0 || imageW <= 0 || imageH <= 0) {
-    return { rx: 0, ry: 0, inImage: false }
+    return { rx: 0, ry: 0, inImage: false, px: 0, py: 0 }
   }
   const imgAspect = imageW / imageH
   const containerAspect = cw / ch
@@ -45,10 +45,17 @@ function getImageCoords(
 
   const rx = (clientX - containerRect.left - ox) / iw
   const ry = (clientY - containerRect.top - oy) / ih
-  return {
+  const clamped = {
     rx: Math.max(0, Math.min(1, rx)),
     ry: Math.max(0, Math.min(1, ry)),
+  }
+  return {
+    rx: clamped.rx,
+    ry: clamped.ry,
     inImage: rx >= 0 && rx <= 1 && ry >= 0 && ry <= 1,
+    // Pixel position within container (accounts for letterbox offset)
+    px: ox + clamped.rx * iw,
+    py: oy + clamped.ry * ih,
   }
 }
 
@@ -132,7 +139,7 @@ export function MonitorView({
   const lastCursorRef = useRef(0)            // throttle cursor overlay update at 30fps
 
   // ── Cursor overlay state (follows mouse on canvas) ──
-  const [cursorPos, setCursorPos] = useState<{ rx: number; ry: number } | null>(null)
+  const [cursorPos, setCursorPos] = useState<{ rx: number; ry: number; px: number; py: number } | null>(null)
 
   // ── Self-target detection: is the mapped screen position inside GAM window? ──
   // Only meaningful for desktop capture (hwnd=0) where GAM is visible in the frame.
@@ -154,7 +161,12 @@ export function MonitorView({
   })()
 
   // ── Clear cursor overlay when mapping or preview toggles off ──
-  useEffect(() => { if (!mappingEnabled || !previewing) setCursorPos(null) }, [mappingEnabled, previewing])
+  useEffect(() => {
+    if (!mappingEnabled || !previewing) {
+      setCursorPos(null)
+      hostCall('cursor_overlay', { show: 0 }).catch(() => {})
+    }
+  }, [mappingEnabled, previewing])
 
   // ── Cleanup expired ripples ──
   useEffect(() => {
@@ -280,23 +292,35 @@ export function MonitorView({
         // Drag path sampling at 50ms
         if (now - lastSampleRef.current < 50) return
         const rect = e.currentTarget.getBoundingClientRect()
-        const { rx, ry, inImage } = getImageCoords(e.clientX, e.clientY, rect, dims.w, dims.h)
-        if (!inImage) return
-        dragPathRef.current.push({ x: rx, y: ry })
-        dragCurrentRef.current = { rx, ry }
+        const coords = getImageCoords(e.clientX, e.clientY, rect, dims.w, dims.h)
+        if (!coords.inImage) return
+        dragPathRef.current.push({ x: coords.rx, y: coords.ry })
+        dragCurrentRef.current = { rx: coords.rx, ry: coords.ry }
         lastSampleRef.current = now
-        // Update cursor overlay during drag too
+        // Update cursor overlay during drag too (canvas dot + real-window circle)
         if (now - lastCursorRef.current > 33) {
           lastCursorRef.current = now
-          setCursorPos({ rx, ry })
+          setCursorPos({ rx: coords.rx, ry: coords.ry, px: coords.px, py: coords.py })
+          hostCall('cursor_overlay', {
+            hwnd: selWin.hwnd, x_norm: coords.rx, y_norm: coords.ry, show: 1,
+          }).catch(() => {})
         }
       } else {
-        // Update cursor overlay at ~30fps
+        // Update cursor overlay at ~30fps (canvas dot + real-window circle via C++)
         if (now - lastCursorRef.current > 33) {
           lastCursorRef.current = now
           const rect = e.currentTarget.getBoundingClientRect()
-          const { rx, ry, inImage } = getImageCoords(e.clientX, e.clientY, rect, dims.w, dims.h)
-          setCursorPos(inImage ? { rx, ry } : null)
+          const coords = getImageCoords(e.clientX, e.clientY, rect, dims.w, dims.h)
+          if (coords.inImage) {
+            setCursorPos({ rx: coords.rx, ry: coords.ry, px: coords.px, py: coords.py })
+            // Send to C++ → real-screen circle overlay at absolute screen position
+            hostCall('cursor_overlay', {
+              hwnd: selWin.hwnd, x_norm: coords.rx, y_norm: coords.ry, show: 1,
+            }).catch(() => {})
+          } else {
+            setCursorPos(null)
+            hostCall('cursor_overlay', { show: 0 }).catch(() => {})
+          }
         }
         // Mouse move forwarding: ONLY in seize mode (grabs system cursor).
         // Semi + Background: virtual indicator only, no cursor movement.
@@ -605,7 +629,8 @@ export function MonitorView({
           onMouseEnter={() => setMouseOn(true)}
           onMouseLeave={() => {
             setMouseOn(false)
-            setCursorPos(null)  // hide cursor overlay when mouse leaves canvas
+            setCursorPos(null)
+            hostCall('cursor_overlay', { show: 0 }).catch(() => {})
             // Cancel drag on mouse leave — release button in target
             if (dragging) {
               setDragging(false)
@@ -633,29 +658,6 @@ export function MonitorView({
 
           {/* Drag selection overlay */}
           {dragOverlay}
-
-          {/* ── Cursor overlay: OBS-style dot + ring showing mapped position ── */}
-          {cursorPos && mouseOn && mappingEnabled && (
-            <div
-              className="absolute pointer-events-none z-10"
-              style={{ left: `${cursorPos.rx * 100}%`, top: `${cursorPos.ry * 100}%` }}
-            >
-              {/* Outer ring: 20px, red only when warn mode + self-target */}
-              <div
-                className={`absolute -translate-x-1/2 -translate-y-1/2 w-5 h-5 rounded-full border-2 transition-colors duration-150 ${
-                  isSelfTarget && selfTargetMode === 'warn'
-                    ? 'border-error/70 shadow-[0_0_8px_rgba(239,68,68,0.4)]'
-                    : 'border-accent/70 shadow-[0_0_8px_rgba(59,130,246,0.3)]'
-                }`}
-              />
-              {/* Inner dot: 10px filled */}
-              <div
-                className={`absolute -translate-x-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full transition-colors duration-150 ${
-                  isSelfTarget && selfTargetMode === 'warn' ? 'bg-error/60' : 'bg-accent/60'
-                }`}
-              />
-            </div>
-          )}
 
           {/* Click ripples */}
           {ripples.map((r) => (

@@ -771,6 +771,109 @@ void dump_frame_if_enabled(const uint8_t* bgra, int w, int h, bool is_stream) {
 }
 
 
+// ── Cursor overlay: transparent circular window shown on real screen ──
+// Pre-rendered 32x32 BGRA bitmap with per-pixel alpha → UpdateLayeredWindow.
+static HWND g_overlay_hwnd = nullptr;
+static HBITMAP g_overlay_bmp = nullptr;
+static int g_overlay_size = 32;
+static int g_overlay_half = 16;
+
+static void cursor_overlay_init() {
+    WNDCLASSEXW wc = {};
+    wc.cbSize = sizeof(wc);
+    wc.hInstance = GetModuleHandle(nullptr);
+    wc.lpszClassName = L"GAM_CursorOverlay";
+    wc.lpfnWndProc = DefWindowProcW;
+    RegisterClassExW(&wc);
+
+    int SZ = g_overlay_size, H = g_overlay_half;
+
+    g_overlay_hwnd = CreateWindowExW(
+        WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED,
+        L"GAM_CursorOverlay", L"",
+        WS_POPUP,
+        0, 0, SZ, SZ,
+        nullptr, nullptr, GetModuleHandle(nullptr), nullptr);
+
+    // Pre-render 32×32 BGRA bitmap with anti-aliased circle
+    // Channels: B G R A (little-endian BGRA as DWORD)
+    BITMAPV5HEADER bi = {};
+    bi.bV5Size = sizeof(BITMAPV5HEADER);
+    bi.bV5Width = SZ;
+    bi.bV5Height = -SZ; // top-down
+    bi.bV5Planes = 1;
+    bi.bV5BitCount = 32;
+    bi.bV5Compression = BI_RGB;
+
+    DWORD* pixels = nullptr;
+    HDC hdcScreen = GetDC(nullptr);
+    g_overlay_bmp = CreateDIBSection(hdcScreen, (BITMAPINFO*)&bi, DIB_RGB_COLORS,
+                                      (void**)&pixels, nullptr, 0);
+    ReleaseDC(nullptr, hdcScreen);
+
+    if (!pixels || !g_overlay_bmp) return;
+
+    float cx = (float)H, cy = (float)H;
+    float outerR = (float)H - 2.0f;   // outer ring radius
+    float innerR = (float)(H - 4);     // inner hole radius (ring thickness)
+    float dotR = (float)H * 0.38f;     // center dot radius
+
+    for (int y = 0; y < SZ; y++) {
+        for (int x = 0; x < SZ; x++) {
+            float dx = (float)x - cx + 0.5f;
+            float dy = (float)y - cy + 0.5f;
+            float dist = sqrtf(dx * dx + dy * dy);
+
+            // Anti-aliased ring
+            float outerAlpha = fmaxf(0.0f, fminf(1.0f, outerR - dist + 0.5f));
+            float innerAlpha = fmaxf(0.0f, fminf(1.0f, dist - innerR + 0.5f));
+            float ringAlpha = outerAlpha * innerAlpha;
+
+            // Anti-aliased center dot
+            float dotAlpha = fmaxf(0.0f, fminf(1.0f, dotR - dist + 0.5f));
+
+            float alpha = fmaxf(ringAlpha, dotAlpha);
+            BYTE a = (BYTE)(alpha * 220.0f);  // overall opacity
+
+            // Accent blue #3B82F6 → RGB(59, 130, 246)
+            BYTE b = 59, g = 130, r = 246;
+
+            // Premultiplied alpha for UpdateLayeredWindow
+            pixels[y * SZ + x] = ((DWORD)a << 24) | ((DWORD)(r * a / 255) << 16) |
+                                 ((DWORD)(g * a / 255) << 8) | (DWORD)(b * a / 255);
+        }
+    }
+
+    ShowWindow(g_overlay_hwnd, SW_HIDE);
+}
+
+static void cursor_overlay_show(int screenX, int screenY) {
+    if (!g_overlay_hwnd) cursor_overlay_init();
+    if (!g_overlay_hwnd || !g_overlay_bmp) return;
+
+    HDC hdcScreen = GetDC(nullptr);
+    HDC hdcMem = CreateCompatibleDC(hdcScreen);
+    HBITMAP oldBmp = (HBITMAP)SelectObject(hdcMem, g_overlay_bmp);
+
+    POINT ptDst = { screenX - g_overlay_half, screenY - g_overlay_half };
+    POINT ptSrc = { 0, 0 };
+    SIZE sz = { g_overlay_size, g_overlay_size };
+    BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+
+    UpdateLayeredWindow(g_overlay_hwnd, hdcScreen, &ptDst, &sz, hdcMem, &ptSrc, 0, &bf, ULW_ALPHA);
+
+    SelectObject(hdcMem, oldBmp);
+    DeleteDC(hdcMem);
+    ReleaseDC(nullptr, hdcScreen);
+
+    SetWindowPos(g_overlay_hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                 SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+}
+
+static void cursor_overlay_hide() {
+    if (g_overlay_hwnd) ShowWindow(g_overlay_hwnd, SW_HIDE);
+}
+
 // ── Input forwarding (delegated to per-method libs) ──────────
 #include "../../input/include/input_methods.h"
 
@@ -903,6 +1006,31 @@ std::string dispatch_command(const std::string& json) {
             }
         } else {
             result = R"({"ok":false,"error":"no main window"})";
+        }
+    }
+    else if (cmd == "cursor_overlay") {
+        int show = json_get_int(args, "show");
+        if (!show) {
+            cursor_overlay_hide();
+            result = R"({"ok":true})";
+        } else {
+            uint64_t hwnd = json_get_uint64(args, "hwnd");
+            double x_norm = json_get_double(args, "x_norm");
+            double y_norm = json_get_double(args, "y_norm");
+            HWND h = (HWND)(uintptr_t)hwnd;
+            int sx = 0, sy = 0;
+            if (h) {
+                RECT wr;
+                if (GetWindowRect(h, &wr)) {
+                    sx = wr.left + (int)(x_norm * (double)(wr.right - wr.left));
+                    sy = wr.top  + (int)(y_norm * (double)(wr.bottom - wr.top));
+                }
+            } else {
+                sx = GetSystemMetrics(SM_XVIRTUALSCREEN) + (int)(x_norm * (double)GetSystemMetrics(SM_CXVIRTUALSCREEN));
+                sy = GetSystemMetrics(SM_YVIRTUALSCREEN) + (int)(y_norm * (double)GetSystemMetrics(SM_CYVIRTUALSCREEN));
+            }
+            cursor_overlay_show(sx, sy);
+            result = R"({"ok":true})";
         }
     }
     else if (cmd == "screen_info") {

@@ -2,6 +2,24 @@
 
 ## Recent Changes (2026-07-10)
 
+### Real-screen cursor indicator via C++ layered window (major)
+Cursor indicator moved from canvas overlay to a real transparent window on the actual screen.
+C++ creates a 32×32 WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_NOACTIVATE window with per-pixel
+alpha bitmap rendered via UpdateLayeredWindow (ULW_ALPHA + AC_SRC_ALPHA). Circle rendered
+with anti-aliased edges using radial alpha falloff: outer ring (30px diameter, 2px thick) +
+center dot (12px). Color: accent blue #3B82F6 at 220/255 opacity with premultiplied alpha.
+
+`getImageCoords` extended to return `px/py` (pixel position within container accounting for
+letterbox). These feed the cursor overlay's CSS position. Normalized `rx/ry` sent to C++
+via `hostCall('cursor_overlay', {hwnd, x_norm, y_norm, show})` — C++ maps to absolute
+screen coords using GetWindowRect (window capture) or virtual screen metrics (desktop capture).
+
+New `cursor_overlay` command:
+- `{show:1, hwnd, x_norm, y_norm}` → compute abs screen pos → UpdateLayeredWindow
+- `{show:0}` → hide overlay
+
+Canvas dot removed — indicator lives entirely on the real target window now.
+
 ### Virtual cursor overlay + self-target detection (major)
 MonitorView canvas now shows OBS-style virtual cursor indicator (10px dot + 20px ring)
 that follows mouse position via `getImageCoords()` at ~30fps. The indicator is pure CSS
