@@ -1,5 +1,6 @@
-# Build outputs (per-module)
+# === Build outputs ===
 **/build/
+**/build_dev/
 *.exe
 *.obj
 *.o
@@ -8,45 +9,47 @@
 *.exp
 *.pdb
 *.ilk
+*.res
 
-# Generated: frontend dist embedded into the prod exe (tools/gen_assets.mjs)
+# WebView2 runtime cache (auto-generated next to .exe)
+**/*.exe.WebView2/
+
+# Generated code
 monitor_app/src/embedded_assets.h
 
-# Rust / Tauri
-**/target/
+# === Dependencies ===
 **/node_modules/
 
-# Python
+# === Python ===
 __pycache__/
 *.py[cod]
 *.pkl
 
-# IDE
+# === IDE / Editor ===
 .vscode/
 .idea/
 *.sln
 *.vcxproj
 *.vcxproj.filters
 *.user
+*.suo
 
-# OS
+# === OS ===
 .DS_Store
 Thumbs.db
 desktop.ini
 
-# Training logs
+# === Logs ===
+log/
+**/log/
 ai/logs/
 
-# Log files
-log/
-
-# Test artifacts
-test/frames/*.bgra
-test/video.mp4
-
-# Caveman compress backup
-*.original.md
-
-# Misc
+# === Temp / Scratch ===
+tmp/
 *.tmp
 *.bak
+*.original.md
+
+# === Test artifacts ===
+test/frames/*.bgra
+test/video.mp4

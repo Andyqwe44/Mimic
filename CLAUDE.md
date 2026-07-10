@@ -356,6 +356,7 @@ CLAUDE.md 只保留摘要和指向 CLAUDE.old.md 的引用。
 ## Changelog
 
 Full development history preserved in `CLAUDE.old.md`. Major milestones:
+- **2026-07-10 (gitignore)**: Rewrite `.gitignore` — cover `build_dev/`, WebView2 runtime cache (`*.exe.WebView2/`), nested log dirs, `*.res`, `tmp/`; remove stale Rust `target/` rule
 - **2026-07-10 (self-test)**: test_target 判定区缩小(inner hit-margin) + 真实 IME 输入框(EDIT child); TCP self-test 通道(:9998 JSON-lines) — DEV 面板一键映射校准, 复用真实点击回调 sendMappedClick, predict vs 实收 → 命中率热力图/偏移向量/像素误差; 新组件 SelfTestModal + lib/selftest.ts (13 组件)
 - **2026-07-10**: Log collapse, CSS rename accent-dev→accent-secondary, MonitorView clear canvas on stop, real-screen cursor overlay (C++ WS_EX_LAYERED UpdateLayeredWindow), self-target detection + exclude toggle, 3-mode input (mouse/keyboard Seize/Semi/Background), WDA_EXCLUDEFROMCAPTURE, desktop input support, test_target EXE, WGC crash fixes (out_ch nullptr, timing)
 - **2026-07-09**: Two-color theme + Dev mode, MonitorView remote-control, component decomposition (1→11 files), input mapping
