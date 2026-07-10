@@ -90,15 +90,4 @@ Filename: "{app}\bin\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringC
 function InitializeSetup: Boolean;
 begin
   Result := True;
-  // Check WebView2 Runtime (Edge Chromium) — check both 32-bit and 64-bit registry
-  if not RegKeyExists(HKLM32, 'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}') and
-     not RegKeyExists(HKLM64, 'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}') then
-  begin
-    if MsgBox('Microsoft Edge WebView2 Runtime is required but not detected.' + #13#10 +
-              'Please install it from https://go.microsoft.com/fwlink/p/?LinkId=2124703' + #13#10 +
-              'Continue installation anyway?', mbConfirmation, MB_YESNO) = IDNO then
-    begin
-      Result := False;
-    end;
-  end;
 end;
