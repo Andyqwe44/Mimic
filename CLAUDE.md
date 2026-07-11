@@ -197,26 +197,34 @@ cd monitor_app && build_dev\monitor_app.exe  # 终端 2: Dev app
 # 4. 验证: GUI 正常渲染, 版本号正确, 功能无回归
 ```
 
-### Step 2: Prod 构建 + 打包 + 隔离验证
+### Step 2 → 4: 一键发布 `release.sh`（推荐）
 
-**一键 `build_release.cmd`** 完成编译→组装→隔离验证→git，无需手动 copy。
-构建产物结构 = 发布包结构（dev/prod/包三者一致，消除相对路径假通过）：
+**改完 `version.h` 后只需一条命令**（git-bash）——版本号是唯一手改点：
+
+```bash
+bash release.sh 0.3.5   # 校验 version.h → build_release → publish → 验 raw URL
+```
+
+`release.sh` 串起全流程，任一步失败即中止（不推不发）：
+1. `build_release.cmd`：编译 libs+app → 组装 `release\GameAgentMonitor\{bin,frontend,config}`
+   → `verify_isolated.cmd --auto`（拷包到 `%TEMP%\GAM_verify`，**轮询 90s 抓 `prod: frontend served`**，
+   拷前 kill 旧实例+webview2）→ 通过才 `git commit+tag+push`。
+2. `publish_release.sh`：建 Gitee Release + 传 installer。
+3. 验 `raw/<tag>/.../version.json` 302→200 + 版本号。
+
+git-bash 环境已在脚本内处理（清 `NoDefaultCurrentDirectoryInExePath`、干净 PATH、`cmd /c` 隔离防 vcvars 撑爆 PATH），下次升 0.3.5/0.3.6 无需改这些。构建产物结构 = 发布包结构（dev==prod==包，消除相对路径假通过）：
 
 ```
 monitor_app/build/{bin,frontend,config}   # prod, exe 在 build\bin\
 monitor_app/build_dev/bin/                 # dev (Vite HMR, 无 frontend\)
 ```
 
-```bash
-# 全自动: 编译所有 lib+app → 组装 release → 隔离验证 → commit+tag+push
-build_release.cmd 0.3.5
-#   build.cmd 自动 stage frontend+config+updater 进 build\{bin,frontend,config}
-#   然后 assemble → release\GameAgentMonitor\{bin,frontend,config}
-#   然后 verify_isolated.cmd: 拷包到 %TEMP%\GAM_verify 启动 → 你目测 Y/N gate
-#   验证通过才 git push；失败则中止，不推不发
+**手动分步**（调试用）：
 
-# 单独跑隔离验证（不重新构建）:
-verify_isolated.cmd 0.3.5
+```bash
+build_release.cmd 0.3.5        # 只构建+隔离验证+push（顶部自清环境变量）
+verify_isolated.cmd 0.3.5      # 只隔离验证（不重新构建）
+bash publish_release.sh 0.3.5  # 只发 Gitee
 ```
 
 **隔离验证为何关键**：白屏只在真机安装复现，本地 prod 从不复现。两个掩盖因素——
@@ -224,7 +232,7 @@ verify_isolated.cmd 0.3.5
 (2) 在 repo/build 树内跑时 frontend 路径与 WebView2 数据目录恰好能解析/可写。
 把包拷到 repo 外消除这些巧合，任何打包/路径 bug 在此暴露而非流到用户机。
 
-### Step 3: Gitee 发布
+### Step 3: Gitee 发布（已由 `release.sh` 自动化 — 下为手动/API 参考）
 
 ```bash
 # 1. Commit + tag + push
