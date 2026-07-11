@@ -86,6 +86,20 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\bin\{#MyAppExeName}"; Tasks
 Root: HKLM; Subkey: "SOFTWARE\GameAgentMonitor"; ValueType: string; ValueName: "InstallPath"; ValueData: "{app}"; Flags: uninsdeletekey
 Root: HKLM; Subkey: "SOFTWARE\GameAgentMonitor"; ValueType: string; ValueName: "Version"; ValueData: "{#MyAppVersion}"; Flags: uninsdeletekey
 
+[Dirs]
+; Runtime data root — created at install so Inno owns it; monitor_app also
+; ensure_dir's it at runtime. All dynamic data (logs, settings, WebView2, staging)
+; lives under here, writable regardless of the install drive.
+Name: "{localappdata}\GameAgentMonitor"; Flags: uninsalwaysuninstall
+
+[UninstallDelete]
+; Runtime data — Inno never "installed" these files (app/updater wrote them at
+; runtime), so this recursive delete is what actually wipes the folder on uninstall.
+Type: filesandordirs; Name: "{localappdata}\GameAgentMonitor"
+; Install tree — updater increments additively drop new DLLs / updater.exe.old into
+; {app}\bin that aren't in Inno's install manifest; nuke the whole tree to leave nothing.
+Type: filesandordirs; Name: "{app}"
+
 [Run]
 Filename: "{app}\bin\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 

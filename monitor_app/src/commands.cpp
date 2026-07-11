@@ -1760,12 +1760,21 @@ static void mta_daemon() {
 
 void backend_init() {
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED); // STA for WebView2/WIC
-    // Compute absolute log path from exe directory (not CWD — avoid scattered logs)
+#ifdef DEV_MODE
+    // Dev: keep logs next to the exe (self-contained build_dev\bin\, read by devprobe;
+    // the dev dir is always writable, no need to reach into appdata).
     char exe_dir[MAX_PATH];
     GetModuleFileNameA(nullptr, exe_dir, MAX_PATH);
     char* last_slash = strrchr(exe_dir, '\\');
     if (last_slash) *last_slash = '\0';
     std::string log_dir = std::string(exe_dir) + "\\log";
+#else
+    // Prod: logs under %LOCALAPPDATA%\GameAgentMonitor\log — writable regardless of the
+    // install drive (Program Files\bin is not user-writable, same root cause as the
+    // white-screen bug) and cleaned by the uninstaller. paths_get_appdata_dir() has
+    // already ensure_dir'd the log\ subfolder; paths_init() ran before backend_init().
+    std::string log_dir = paths_get_appdata_dir() + "\\log";
+#endif
     capture_log_init("agent", APP_VERSION, log_dir.c_str(), 5, 5000);
     capture_log_set_notify(on_log_notify);  // C++ LOG() → push to TS in real-time
 #ifdef DEV_MODE

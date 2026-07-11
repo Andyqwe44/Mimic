@@ -539,6 +539,15 @@ CLAUDE.md 只保留摘要和指向 CLAUDE.old.md 的引用。
 ## Changelog
 
 Full development history preserved in `CLAUDE.old.md`. Major milestones:
+- **2026-07-11 (runtime data → LOCALAPPDATA + Inno 托管，未发布)**: 统一所有运行时写入到
+  `%LOCALAPPDATA%\GameAgentMonitor`，装 C:/D: 都不散落、卸载删干净。审计发现只剩一个泄漏点：prod 日志走 exe 相对
+  `{app}\bin\log`（`backend_init`，Program Files 下标准用户无写权限，白屏同源）—— WebView2/config(settings)/staging
+  早已在 appdata。修：`commands.cpp` `backend_init` 日志目录改 `#ifdef DEV_MODE` 分支（dev 保留 `exe_dir\log` 供
+  `devprobe.bat`，prod 用 `paths_get_appdata_dir()+"\\log"`）；`open_log_dir`/`clear_log`/`get_log_dir` 读
+  `capture_log_get_dir()` 自动跟随。`setup.iss` 加 `[Dirs]`（装机建 appdata 夹）+ `[UninstallDelete]`（卸载递归清
+  `{localappdata}\GameAgentMonitor` 全夹 + `{app}` 全夹，兜底 updater 增量残留 DLL/`.old`）。已知限：admin 装时
+  `{localappdata}` = 提权账户（单用户 Win11 Home 匹配）。dev+prod build 验证、prod 实测日志落 appdata 无泄漏。
+  **未升版**（仍 0.3.5），继续开发后一并发布。
 - **2026-07-11 (update system overhaul + v0.3.5)**: 自动更新三大改造 —— (1) **真增量**：`check_update` 改按
   `sha256` 比对（version.json 每文件已自动算），只下内容变的文件，零手动版本号；(2) **全量兜底**：version.json
   `full_update` 标志 / UI「完整更新」按钮（`force_full`）强制全下；(3) **进度条+活动文字**：`download_update` 移后台
