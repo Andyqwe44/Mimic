@@ -50,6 +50,7 @@ Name: "input";    Description: "Input Forwarding Modules";                  Type
 Source: "..\release\GameAgentMonitor\bin\monitor_app.exe";  DestDir: "{app}\bin"; Components: core
 Source: "..\release\GameAgentMonitor\bin\logger.dll";       DestDir: "{app}\bin"; Components: core
 Source: "..\release\GameAgentMonitor\bin\updater.exe";      DestDir: "{app}\bin"; Components: core
+Source: "..\release\GameAgentMonitor\bin\updater.new";      DestDir: "{app}\bin"; Components: core
 Source: "..\release\GameAgentMonitor\bin\capture_common.dll"; DestDir: "{app}\bin"; Components: core capture
 
 ; Capture modules
