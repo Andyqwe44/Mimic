@@ -243,7 +243,7 @@ attached console. So it communicates purely via return code:
 until it exits. Probe first, then decide:
 
 ```bash
-build_dev/monitor_app.exe; echo "exit=$?"
+build_dev/bin/monitor_app.exe; echo "exit=$?"
 # exit=2  → already running, existing window was raised (do NOT relaunch)
 # blocks  → fresh instance is alive; Ctrl-C and relaunch with run_in_background
 ```

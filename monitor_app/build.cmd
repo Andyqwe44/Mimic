@@ -2,9 +2,16 @@
 cd /d "%~dp0"
 call "C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars64.bat" >NUL 2>&1
 if %ERRORLEVEL% NEQ 0 (echo vcvars failed & exit /b 1)
-if not exist "build" mkdir "build"
-
 set ROOT=%~dp0..
+
+:: === Package layout: build\{bin,frontend,config} — identical to release dir ===
+:: This makes local prod runs resolve frontend exactly like a real install,
+:: so packaging errors surface locally instead of only on a user's machine.
+if exist "build" rmdir /s /q "build"
+mkdir "build\bin"
+mkdir "build\frontend"
+mkdir "build\config"
+
 set CFLAGS=/EHsc /std:c++17 /I src /I dep /I "%ROOT%\capture\include" /I "%ROOT%\common\include" ^
   /DNDEBUG /O2 /GS- /Gy /Gw /MT
 set LFLAGS=d3d11.lib dxgi.lib windowsapp.lib user32.lib gdi32.lib ole32.lib oleaut32.lib ws2_32.lib windowscodecs.lib dwmapi.lib shell32.lib shlwapi.lib winhttp.lib
@@ -15,7 +22,7 @@ rc.exe /nologo /fo build\app.res app.rc
 if %ERRORLEVEL% NEQ 0 (echo rc failed & exit /b 1)
 
 echo === Building monitor_app.exe (PRODUCTION) ===
-cl.exe %CFLAGS% /Fo"build\\" /Fe:build\monitor_app.exe ^
+cl.exe %CFLAGS% /Fo"build\\" /Fe:build\bin\monitor_app.exe ^
   src\main.cpp src\commands.cpp src\virtual_desktop.cpp src\paths.cpp ^
   build\app.res ^
   dep\WebView2LoaderStatic.lib ^
@@ -34,9 +41,9 @@ cl.exe %CFLAGS% /Fo"build\\" /Fe:build\monitor_app.exe ^
   %LFLAGS% /link %LINKFLAGS%
 
 if %ERRORLEVEL% EQU 0 (
-  echo Build OK: monitor_app\build\monitor_app.exe
+  echo Build OK: monitor_app\build\bin\monitor_app.exe
   echo.
-  echo ^>^> Copying DLLs to build\ ...
+  echo ^>^> Copying DLLs to build\bin\ ...
   for %%f in (
     "%ROOT%\logger\build\logger.dll"
     "%ROOT%\capture\build\capture_common.dll"
@@ -50,8 +57,14 @@ if %ERRORLEVEL% EQU 0 (
     "%ROOT%\input\build\input_winapi.dll"
     "%ROOT%\input\build\input_postmessage.dll"
     "%ROOT%\input\build\input_driver.dll"
-  ) do copy /y %%f build\ >NUL
+  ) do copy /y %%f build\bin\ >NUL
   echo All DLLs copied.
   echo.
-  echo Usage: build\monitor_app.exe   ^(production mode^)
+  echo ^>^> Staging frontend + config into package layout ...
+  if exist "%ROOT%\updater\build\updater.exe" copy /y "%ROOT%\updater\build\updater.exe" build\bin\ >NUL
+  if exist "%ROOT%\monitor_web\dist" xcopy /y /e /q "%ROOT%\monitor_web\dist\*" build\frontend\ >NUL
+  if exist "%ROOT%\config\settings.default.json" copy /y "%ROOT%\config\settings.default.json" build\config\ >NUL
+  echo Package staged: build\{bin,frontend,config}
+  echo.
+  echo Usage: build\bin\monitor_app.exe   ^(production mode^)
 )

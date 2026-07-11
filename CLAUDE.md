@@ -197,30 +197,32 @@ cd monitor_app && build_dev\monitor_app.exe  # 终端 2: Dev app
 # 4. 验证: GUI 正常渲染, 版本号正确, 功能无回归
 ```
 
-### Step 2: Prod 构建 + 打包
+### Step 2: Prod 构建 + 打包 + 隔离验证
+
+**一键 `build_release.cmd`** 完成编译→组装→隔离验证→git，无需手动 copy。
+构建产物结构 = 发布包结构（dev/prod/包三者一致，消除相对路径假通过）：
+
+```
+monitor_app/build/{bin,frontend,config}   # prod, exe 在 build\bin\
+monitor_app/build_dev/bin/                 # dev (Vite HMR, 无 frontend\)
+```
 
 ```bash
-# 1. Prod 编译
-cd monitor_app && build.cmd        # → build\monitor_app.exe (O2, 无调试信息)
-cd updater    && build.cmd         # → build\updater.exe
-cd monitor_web && npm run build    # → dist/ (Vite production)
+# 全自动: 编译所有 lib+app → 组装 release → 隔离验证 → commit+tag+push
+build_release.cmd 0.3.5
+#   build.cmd 自动 stage frontend+config+updater 进 build\{bin,frontend,config}
+#   然后 assemble → release\GameAgentMonitor\{bin,frontend,config}
+#   然后 verify_isolated.cmd: 拷包到 %TEMP%\GAM_verify 启动 → 你目测 Y/N gate
+#   验证通过才 git push；失败则中止，不推不发
 
-# 2. 组装 release 目录
-rm -rf release/GameAgentMonitor
-mkdir -p release/GameAgentMonitor/{bin,frontend,config}
-cp monitor_app/build/monitor_app.exe release/GameAgentMonitor/bin/
-cp monitor_app/build/*.dll          release/GameAgentMonitor/bin/
-cp updater/build/updater.exe        release/GameAgentMonitor/bin/
-cp -r monitor_web/dist/*            release/GameAgentMonitor/frontend/
-cp config/settings.default.json     release/GameAgentMonitor/config/
-
-# 3. 生成文件清单 (给 auto-update 用)
-node tools/gen_version.mjs release/GameAgentMonitor 0.3.4
-
-# 4. 打包 installer
-cd installer && "C:\Program Files\Inno Setup 6\ISCC.exe" setup.iss
-# → release\GameAgentMonitor_Setup_v0.3.4.exe
+# 单独跑隔离验证（不重新构建）:
+verify_isolated.cmd 0.3.5
 ```
+
+**隔离验证为何关键**：白屏只在真机安装复现，本地 prod 从不复现。两个掩盖因素——
+(1) 旧 HKLM `InstallPath` 把 exe 重定向到*上一次*安装的 frontend（已修 `paths.cpp`，改 exe 相对优先）；
+(2) 在 repo/build 树内跑时 frontend 路径与 WebView2 数据目录恰好能解析/可写。
+把包拷到 repo 外消除这些巧合，任何打包/路径 bug 在此暴露而非流到用户机。
 
 ### Step 3: Gitee 发布
 
@@ -493,6 +495,8 @@ CLAUDE.md 只保留摘要和指向 CLAUDE.old.md 的引用。
 ## Changelog
 
 Full development history preserved in `CLAUDE.old.md`. Major milestones:
+- **2026-07-11 (release pipeline fixes + v0.3.3/v0.3.4 published)**: 修 `build_release.cmd` 在 git-bash 下必挂的三个环境 bug — (1) `NoDefaultCurrentDirectoryInExePath=1` 令 cmd 不搜 cwd → 所有 `call build_x.cmd` 报"不是内部命令"（wrapper 清空该变量）；(2) 各子构建脚本无条件 `call vcvars64.bat` 逐步追加 VS 路径撑爆 PATH 8191 上限 → 第 5-6 步 cmd 静默死（5 个构建步 `call`→`cmd /c` 子进程隔离，PATH 不累积）；(3) `verify_isolated.cmd --auto` 原固定 6s 单次查日志，但 WebView2 首启建 env 耗时 0.4~36s 剧烈波动常错过 `frontend served` 标记，加单实例 mutex + msedgewebview2 文件锁掩盖 → 改：拷包前先 kill 旧实例+webview2、轮询 90s 抓标记、结束清理子进程。隔离验证实打实抓到 `prod: frontend served` + React 启动调用 = 白屏真修。发 Gitee v0.3.3/v0.3.4，raw URL 302→200 校验通过。详见 CLAUDE.old.md。
+- **2026-07-11 (white-screen root fix + isolated verify)**: 根治真机白屏 — `CreateCoreWebView2EnvironmentWithOptions` 第2参 `userDataFolder` 原为 `nullptr` → WebView2 默认在 exe 旁（`C:\Program Files\...\bin\`）建数据夹 → 标准用户无写权限 → env 创建失败 → 白屏。改为显式 `LOCALAPPDATA\GameAgentMonitor\WebView2`（恒可写）。env/controller 失败加 `LOG_ERROR`+`MessageBox`（杜绝静默）。修 `paths_get_install_dir` 注册表泄漏：旧 HKLM `InstallPath` 会把 exe 重定向到*上次*安装的 frontend，掩盖打包 bug → 改 exe 相对优先（exe 父目录，叶名==`bin`），注册表降级兜底，只读不写。统一构建产物为发布包结构（`build/{bin,frontend,config}`、`build_dev/bin/`），dev==prod==包，消除相对路径假通过。新增 `verify_isolated.cmd`：拷包到 `%TEMP%\GAM_verify`（repo 外）启动 → Y/N gate；`build_release.cmd` git push 前调用，失败即中止。
 - **2026-07-11 (release automation)**: 消除 setup.iss 版本号手动同步（条件 define + ISCC `/D` 传参）。修复 prod-only 白屏双 bug：WinHTTP 302 重定向 + `SetVirtualHostNameToFolderMapping` 路径缺尾 `\`。建立 prod 本地验证步骤（`build_release.cmd` 后先 `release\...\monitor_app.exe` 实测再发布）。发布 v0.3.3/v0.3.4。
 - **2026-07-10 (version unification)**: 铁律 8 — 版本号单一真相源 `version.h`。消除 12 个硬编码版本位点，构建脚本自动从 version.h 解析版本，logger.cpp 用 APP_VERSION 宏，App.tsx 运行时 get_version，setup.iss 从 version.h 同步。建立标准化发布流程（dev验证→prod构建→Gitee发布→一键更新）。
 - **2026-07-10 (Phase 2)**: Modular DLL build (12 DLLs with VERSIONINFO), InnoSetup installer, settings persistence, multi-file incremental update, paths system, settings auto-save/load

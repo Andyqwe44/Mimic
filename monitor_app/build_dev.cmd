@@ -2,7 +2,10 @@
 cd /d "%~dp0"
 call "C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars64.bat" >NUL 2>&1
 if %ERRORLEVEL% NEQ 0 (echo vcvars failed & exit /b 1)
-if not exist "build_dev" mkdir "build_dev"
+:: Package layout mirrors prod: build_dev\bin\ so install-dir resolution
+:: (exe's parent when leaf==bin) matches a real install. Dev uses Vite HMR,
+:: so no frontend\ folder is needed here.
+if not exist "build_dev\bin" mkdir "build_dev\bin"
 
 set ROOT=%~dp0..
 set CFLAGS=/EHsc /std:c++17 /I src /I dep /I "%ROOT%\capture\include" /I "%ROOT%\common\include" ^
@@ -11,7 +14,7 @@ set LFLAGS=d3d11.lib dxgi.lib windowsapp.lib user32.lib gdi32.lib ole32.lib olea
 set LINKFLAGS=/DEBUG:FULL
 
 echo === Building monitor_app.exe (DEV MODE) ===
-cl.exe %CFLAGS% /Fo"build_dev\\" /Fe:build_dev\monitor_app.exe ^
+cl.exe %CFLAGS% /Fo"build_dev\\" /Fe:build_dev\bin\monitor_app.exe ^
   src\main.cpp src\commands.cpp src\virtual_desktop.cpp src\paths.cpp ^
   dep\WebView2LoaderStatic.lib ^
   "%ROOT%\logger\build\logger.lib" ^
@@ -29,9 +32,9 @@ cl.exe %CFLAGS% /Fo"build_dev\\" /Fe:build_dev\monitor_app.exe ^
   %LFLAGS% /link %LINKFLAGS%
 
 if %ERRORLEVEL% EQU 0 (
-  echo Build OK: monitor_app\build_dev\monitor_app.exe
+  echo Build OK: monitor_app\build_dev\bin\monitor_app.exe
   echo.
-  echo ^>^> Copying DLLs to build_dev\ ...
+  echo ^>^> Copying DLLs to build_dev\bin\ ...
   for %%f in (
     "%ROOT%\logger\build\logger.dll"
     "%ROOT%\capture\build\capture_common.dll"
@@ -45,7 +48,7 @@ if %ERRORLEVEL% EQU 0 (
     "%ROOT%\input\build\input_winapi.dll"
     "%ROOT%\input\build\input_postmessage.dll"
     "%ROOT%\input\build\input_driver.dll"
-  ) do copy /y %%f build_dev\ >NUL
+  ) do copy /y %%f build_dev\bin\ >NUL
   echo All DLLs copied.
-  echo Usage: build_dev\monitor_app.exe   ^(dev mode -- Vite HMR at localhost:1420^)
+  echo Usage: build_dev\bin\monitor_app.exe   ^(dev mode -- Vite HMR at localhost:1420^)
 )

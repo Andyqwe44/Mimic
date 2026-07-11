@@ -233,17 +233,40 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 // ── WebView2 initialization ─────────────────────────────────
 HRESULT InitWebView2(HWND hwnd)
 {
+    // Explicit writable user-data folder. Passing nullptr makes WebView2 default
+    // the folder to next-to-the-exe (e.g. C:\Program Files\GameAgentMonitor\bin\),
+    // which a standard (non-admin) user cannot write → env creation fails → white
+    // screen. LOCALAPPDATA is always user-writable. This is the root white-screen fix.
+    std::string udf = paths_get_appdata_dir() + "\\WebView2";
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, udf.c_str(), (int)udf.size(), nullptr, 0);
+    std::wstring wudf(wlen, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, udf.c_str(), (int)udf.size(), &wudf[0], wlen);
+
     return CreateCoreWebView2EnvironmentWithOptions(
-        nullptr, nullptr, nullptr,
+        nullptr, wudf.c_str(), nullptr,
         new EnvCreatedHandler([hwnd](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
-            if (FAILED(result)) return result;
+            if (FAILED(result)) {
+                LOG_ERROR("main", "WebView2 env create failed: 0x%08lX", (unsigned long)result);
+                MessageBoxW(hwnd,
+                    L"WebView2 environment creation failed.\n"
+                    L"Ensure the WebView2 Runtime is installed and the user "
+                    L"data folder is writable.",
+                    L"Game Agent Monitor", MB_ICONERROR | MB_OK);
+                return result;
+            }
 
             // Capture SharedBuffer interfaces
             env->QueryInterface(IID_PPV_ARGS(&g_env12));
 
             return env->CreateCoreWebView2Controller(hwnd,
                 new ControllerCreatedHandler([hwnd](HRESULT result, ICoreWebView2Controller* ctrl) -> HRESULT {
-                    if (FAILED(result)) return result;
+                    if (FAILED(result)) {
+                        LOG_ERROR("main", "WebView2 controller create failed: 0x%08lX",
+                            (unsigned long)result);
+                        MessageBoxW(hwnd, L"WebView2 controller creation failed.",
+                            L"Game Agent Monitor", MB_ICONERROR | MB_OK);
+                        return result;
+                    }
 
                     g_webviewController = ctrl;
                     g_webviewController->get_CoreWebView2(&g_webview);

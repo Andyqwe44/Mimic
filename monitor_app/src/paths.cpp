@@ -55,7 +55,36 @@ std::string paths_get_exe_dir() {
 std::string paths_get_install_dir() {
     if (!g_install_dir.empty()) return g_install_dir;
 
-    // Try registry first (set by installer)
+    // Primary: exe-relative. The exe always lives in <install>\bin\, so the
+    // install root is the parent of the exe directory. This is correct for a
+    // real install, a locally-built package, AND an isolated test copy — it
+    // never depends on external state.
+    //
+    // Reading HKLM InstallPath first (old behaviour) was a bug: a stale registry
+    // entry from a previous install would redirect the running exe to the OLD
+    // install's frontend, masking packaging errors during local testing.
+    std::string exeDir = paths_get_exe_dir();
+    std::string parent = exeDir;
+    char* slash = strrchr(&parent[0], '\\');
+    if (slash) {
+        *slash = '\0';
+        parent.resize(strlen(parent.c_str()));
+    }
+
+    // Trust exe-relative when the exe sits in an <install>\bin\ folder — the
+    // canonical layout for dev build, local package, and real install alike.
+    // (dev has no frontend/ since it uses Vite HMR, so we key on the bin\ name.)
+    {
+        const char* leaf = strrchr(exeDir.c_str(), '\\');
+        leaf = leaf ? leaf + 1 : exeDir.c_str();
+        if (_stricmp(leaf, "bin") == 0) {
+            g_install_dir = parent;
+            return g_install_dir;
+        }
+    }
+
+    // Fallback: registry (set by installer) — only used if exe-relative layout
+    // isn't recognizable (e.g. exe run from an unusual location).
     HKEY hKey;
     if (RegOpenKeyExA(HKEY_LOCAL_MACHINE,
         "SOFTWARE\\GameAgentMonitor", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
@@ -71,11 +100,8 @@ std::string paths_get_install_dir() {
         RegCloseKey(hKey);
     }
 
-    // Fallback: parent of exe directory (development / portable mode)
-    std::string exeDir = paths_get_exe_dir();
-    char* slash = strrchr(&exeDir[0], '\\');
-    if (slash) *slash = '\0';
-    g_install_dir = exeDir;
+    // Last resort: parent of exe dir even without frontend/ marker.
+    g_install_dir = parent;
     return g_install_dir;
 }
 

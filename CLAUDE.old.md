@@ -1,5 +1,33 @@
 # CLAUDE.md — TicTacToe → General Visual Game AI
 
+## Recent Changes (2026-07-11) — Release pipeline fixes (git-bash environment)
+
+发布 v0.3.3/v0.3.4 时 `build_release.cmd` 在 git-bash 下反复失败。三个环境 bug，全找到根因修掉：
+
+### Bug 1 — `NoDefaultCurrentDirectoryInExePath=1`
+git-bash 把该环境变量传进 `cmd /c` 子进程 → cmd 解析命令时**不搜当前目录** → `pushd logger` + `call build_logger_lib.cmd`（相对名）报 `'build_logger_lib.cmd' 不是内部或外部命令`。首步 `[1/8] logger.dll FAILED`。
+修：build 包装脚本首行 `set "NoDefaultCurrentDirectoryInExePath="` 清空，恢复 cwd 搜索。
+
+### Bug 2 — 重复 `vcvars` 撑爆 PATH 8191 上限
+每个子构建脚本（logger/capture/input/updater/monitor_app）都无条件 `call vcvars64.bat`，VS2026 的 vcvars **不去重、每次追加** ~1400 字符 VS/SDK 路径。build_release 顶层 + 5 个子步 = 6 次追加，越过 cmd 的 8191 PATH 上限 → PATH 截断 → cl/link 或后续命令找不到 → `[5/8]`/`[6/8]` 后**静默死**（无 OK 无 FAILED，整个 cmd 树挂）。给干净小 base PATH 只把死亡点推后一步，证实是无界增长。
+修：`build_release.cmd` 把 5 个构建步 `call build_x.cmd` → `cmd /c build_x.cmd`。子进程隔离，其 vcvars 追加随子进程退出丢弃，父进程 PATH 恒定不累积。npm 步保留 `call`（不碰 vcvars）。
+
+### Bug 3 — 隔离验证 `--auto` 假失败
+三重掩盖：
+1. **单实例 mutex**：`start monitor_app.exe` 时若已有旧实例持 `Global\GameAgentMonitor_8A3F2D`，新实例走 `WinMain` line 149 `return 2`（在 `backend_init` 之前），**不写日志** → `--auto` 判 "no log produced" 假白屏。
+2. **文件锁**：残留 monitor_app.exe/msedgewebview2.exe 持 `%ISO%\bin` DLL 句柄 → 拷包前 rmdir/xcopy `拒绝访问`。
+3. **时序竞态**：日志写在 `<exe_dir>\log`（`backend_init` 里 `capture_log_init("agent", ..., exe_dir\log)`，commands.cpp:1642），路径本身对；但成功标记 `prod: frontend served`（main.cpp:312，controller 回调内）依赖 WebView2 建 env——首启耗时**实测 0.4s ~ 36s 剧烈波动**（冷/热启差异），原固定等 6s 常错过。logger `fflush` 每行（logger.cpp:73），日志可信，问题纯在等待窗口。
+
+修 `verify_isolated.cmd`：
+- 拷包**前** `taskkill /IM monitor_app.exe /F` + `taskkill /IM msedgewebview2.exe /F` + 等 2s（释放 mutex 与文件锁）。
+- `--auto` 改**轮询**：每 3s 查最新日志，见 `prod: frontend served` 立即 PASS，见 `env/controller create failed` 立即 FAIL，90s 内都无则 FAIL。robust 于 env 建立时序波动。
+- `:finish` 额外 kill msedgewebview2 子进程，防污染下次运行。
+
+### 结果
+隔离验证实打实抓到 `=== agent v0.3.3 ===` → `GIT registered` → `prod: frontend served` → React 启动调用（`set_setting: theme=light` 等）= UI 真渲染，白屏根治确认。0.3.3/0.3.4 发 Gitee（Release 740284/740287），`raw/<tag>/.../version.json` 302→200、app 版本号正确。现有 v0.3.1/v0.3.2 未动。
+
+**环境备注**：所有 `.cmd` 必须 CRLF（LF 令 cmd 误解析 `cd /d`）；Edit 改后跑 `sed -i 's/\r$//; s/$/\r/' <file>`。git-bash 跑 cmd 脚本用 `MSYS_NO_PATHCONV=1 cmd /c "$(cygpath -w bat)"`，包装 bat 里设干净 PATH（含 nodejs、Git\cmd）。
+
 ## Recent Changes (2026-07-10) — Self-Test mapping calibration
 
 ### test_target upgrade
