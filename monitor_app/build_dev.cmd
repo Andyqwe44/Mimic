@@ -10,12 +10,12 @@ if not exist "build_dev\bin" mkdir "build_dev\bin"
 set ROOT=%~dp0..
 set CFLAGS=/EHsc /std:c++17 /I src /I dep /I "%ROOT%\capture\include" /I "%ROOT%\common\include" ^
   /DDEV_MODE /Od /Zi /MT
-set LFLAGS=d3d11.lib dxgi.lib windowsapp.lib user32.lib gdi32.lib ole32.lib oleaut32.lib ws2_32.lib windowscodecs.lib dwmapi.lib shell32.lib winhttp.lib
+set LFLAGS=d3d11.lib dxgi.lib windowsapp.lib user32.lib gdi32.lib ole32.lib oleaut32.lib ws2_32.lib windowscodecs.lib dwmapi.lib shell32.lib winhttp.lib bcrypt.lib
 set LINKFLAGS=/DEBUG:FULL
 
 echo === Building monitor_app.exe (DEV MODE) ===
 cl.exe %CFLAGS% /Fo"build_dev\\" /Fe:build_dev\bin\monitor_app.exe ^
-  src\main.cpp src\commands.cpp src\virtual_desktop.cpp src\paths.cpp ^
+  src\main.cpp src\commands.cpp src\virtual_desktop.cpp src\paths.cpp src\sha256_util.cpp ^
   dep\WebView2LoaderStatic.lib ^
   "%ROOT%\logger\build\logger.lib" ^
   "%ROOT%\capture\build\capture_common.lib" ^

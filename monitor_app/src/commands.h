@@ -6,6 +6,7 @@
  */
 #pragma once
 #include <string>
+#include <windows.h>  // UINT, WM_USER
 #include <objbase.h>  // IStream
 
 // Fwd declarations (avoid pulling in full WebView2.h in header)
@@ -41,3 +42,29 @@ void backend_init();
 
 /// Shutdown backend (stop streams, flush logger).
 void backend_shutdown();
+
+// ── Auto-update download progress bridge ──────────────────────
+// The background download thread updates a shared struct and posts
+// WM_UPDATE_PROGRESS to the main window; WndProc reads it on the STA thread and
+// pushes a {"type":"update_progress",...} message to JS. (Mirrors WM_STREAM_FRAME.)
+static constexpr UINT WM_UPDATE_PROGRESS = WM_USER + 101;
+
+struct UpdateProgress {
+    bool active = false;       // download thread running
+    bool succeeded = false;    // all files done OK
+    bool failed = false;       // a file failed (download or sha256 mismatch)
+    int current_file = 0;      // 1-based index currently downloading
+    int total_files = 0;
+    std::string file_path;     // current file path
+    unsigned long long done_bytes = 0;
+    unsigned long long total_bytes = 0;
+    std::string error_file;    // first failed file
+    std::string staging_dir;   // where files were written (for updater launch)
+};
+
+/// Thread-safe snapshot of current download progress (called by WndProc, STA).
+UpdateProgress update_get_progress();
+
+/// Launch updater.exe for the just-finished (succeeded) download. Main thread only.
+/// Returns true if launched (caller should Sleep briefly then PostQuitMessage).
+bool update_launch_updater();

@@ -1,5 +1,49 @@
 # CLAUDE.md — TicTacToe → General Visual Game AI
 
+## Recent Changes (2026-07-11) — Update system overhaul (v0.3.5)
+
+「进度条」需求扩成一次更新系统改造，并根治 updater 自替换死循环。
+
+### 三大功能
+1. **真增量（sha256）**：`check_update`(commands.cpp) diff 判定从比 `v` 字段改为比 `sha256`（version.json 每文件
+   已由 gen_version.mjs 自动算）。只有内容变的文件进 diff → 真增量、零手动维护版本号。
+2. **全量兜底**：version.json 顶层加 `full_update` 布尔（gen_version.mjs 第3参，默认 false）。check_update 见 remote
+   `full_update:true` 或前端传 `force_full` → diff = 全部文件 + 结果 `mode:"full"`。UpdateModal 加「完整更新」按钮
+   （forceFullUpdate：check_update{force_full}→startDownload）。增量/全量共用同一 staging+updater 流程。
+3. **进度条 + 活动文字**：`cmd_download_update` 移后台 `std::thread`（即时返回 {ok,started,total_files,total_bytes}，
+   `g_up.active` 防双击）。`winhttp_get` 加可选 `ProgressCb`（查 Content-Length，每 read chunk 回调）。下载线程逐文件
+   下载→**sha256 校验**（不符→failed+error_file）→写 staging，节流 `PostMessage(WM_UPDATE_PROGRESS)`（GetTickCount64
+   每 ~50ms + 每文件完/终态）。main.cpp WndProc `WM_UPDATE_PROGRESS`（仿 WM_STREAM_FRAME）读 `update_get_progress()`
+   快照→拼 `{type:"update_progress",phase:download|done|error,current_file,total_files,file,done_bytes,total_bytes}`
+   →PostJsonToWebView；phase=done 主线程 `update_launch_updater()`+Sleep(200)+PostQuitMessage。前端 bridge.ts
+   `onUpdateProgress`（仿 onSelfTest）+ message 分支；App.tsx `updateProgress` state + 订阅；UpdateModal 复用
+   `SelfTestModal.tsx:82-87` 进度条 markup + 活动文字。新 `sha256_util.{h,cpp}`（bcrypt，CNG SHA256）供下载校验 + 首启比对。
+
+### updater 自替换死循环（用户点出的核心）
+问题：每次更新由 install 里那个 updater.exe 执行覆盖，它换不掉运行中的自己 → updater.exe 永卡旧版；0.3.3 旧 updater
+（无改名技巧）一路遗传，updater 永远升不上去。破解两层：
+- **updater.cpp 改名技巧**：copy_staging 遇目标==自己 → `MoveFileExA(updater.exe→updater.exe.old)` 再拷新（运行中
+  改名合法）。加 `--self-install` 模式（updater.new 把自己拷成 updater.exe）。启动清理 .old。→ 0.3.5→0.3.6+ 能自替换。
+- **monitor_app 首启破冰（仅 0.3.3→0.3.5 用）**：0.3.5 包带 `bin/updater.new`（= updater.exe 副本，build.cmd
+  `copy updater.exe updater.new`）。WinMain paths_init 后 `check_and_heal_updater()`：读 version.json 期望的
+  bin/updater.exe sha 与磁盘实际 sha 比；不符且 updater.new 存在 → `ShellExecuteA(updater.new,"--self-install")`
+  （monitor_app 仅启动，不碰文件）。0.3.3 老 updater 覆盖全部（updater.exe 拷失败残留旧、updater.new 拷成功）→ 启
+  0.3.5 monitor_app → 拉起 updater.new → updater 升 0.3.5。一跳到位。
+- **传递性**：0.3.5 起 N→N+1 由上一版 updater 改名技巧装 N+1（与 N+1 逻辑无关），monitor_app 不再参与。自检仅
+  0.3.3→0.3.5 一次性破冰，跨过即永久闲置。
+- updater 加 `requireAdministrator` manifest（写 Program Files 必需，link `/MANIFEST:EMBED /MANIFESTUAC`）。
+
+### 坑
+- **build.cmd 括号块内注释含 `()` → cmd 括号提前闭合**：updater.new copy 的 `::` 注释写在 `if EQU 0 ( )` 块内且含
+  `(plan section E / main.cpp)`，cmd 把注释里的 `)` 当块结束 → 「此时不应有 .」，[6/8] FAILED 但 exe 已生成（迷惑）。
+  修：改 `rem` 单行 + 去括号。教训：`( )` 块内注释禁用括号。
+- **中文 VS 的 cl error 是 GBK「错误 Cxxxx」**，ASCII grep `error C` 抓不到 → 用 `iconv -f GBK -t UTF-8` 解码日志。
+
+### 验证 & 发布
+dev build（含 bcrypt）+ 启动验证 backend init OK、自检不崩（dev 无 version.json 早返回）。`bash release.sh 0.3.5`
+隔离验证轮询 frontend served PASS → git push + Gitee Release 741599 + raw URL 200。**进度条 + updater 死循环破解需
+真机验证**（从 0.3.4/0.3.3 装机点 Check Update 实测）。
+
 ## Recent Changes (2026-07-11) — Release pipeline fixes (git-bash environment)
 
 发布 v0.3.3/v0.3.4 时 `build_release.cmd` 在 git-bash 下反复失败。三个环境 bug，全找到根因修掉：

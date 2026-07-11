@@ -1,7 +1,7 @@
 // ═══ UpdateModal — new version available, changelog + download ═══
 import { X, Download, ArrowRight } from 'lucide-react'
 import { ActionBtn } from './Toolkit'
-import { addLog } from '../lib/bridge'
+import { addLog, type UpdateProgressMsg } from '../lib/bridge'
 
 export interface UpdateInfo {
   current: string
@@ -14,12 +14,16 @@ export interface UpdateInfo {
 export function UpdateModal({
   info,
   downloading,
+  progress,
   onDownload,
+  onForceUpdate,
   onClose,
 }: {
   info: UpdateInfo
   downloading: boolean
+  progress?: UpdateProgressMsg | null
   onDownload: () => void
+  onForceUpdate?: () => void
   onClose: () => void
 }) {
   return (
@@ -72,9 +76,39 @@ export function UpdateModal({
           )}
 
           {downloading && (
-            <div className="text-xs text-text-muted text-center animate-pulse">
-              Downloading update...
-            </div>
+            progress ? (
+              <div className="space-y-2">
+                {/* Activity text describing the current step */}
+                <div className="text-xs text-text-secondary">
+                  {progress.phase === 'download' && (
+                    <>正在下载 {progress.file || '...'} ({Math.min(progress.current_file, progress.total_files) || 1}/{progress.total_files})</>
+                  )}
+                  {progress.phase === 'done' && <>下载完成，正在重启安装…</>}
+                  {progress.phase === 'error' && (
+                    <span className="text-error">下载失败：{progress.error_file || progress.file}</span>
+                  )}
+                </div>
+                {/* Progress bar (byte-level; falls back to file count / indeterminate) */}
+                {progress.phase !== 'error' && (
+                  <div className="h-2 rounded-full bg-bg-tertiary overflow-hidden">
+                    <div
+                      className="h-full bg-accent transition-all duration-100"
+                      style={{
+                        width: progress.total_bytes > 0
+                          ? `${Math.min(100, (progress.done_bytes / progress.total_bytes) * 100)}%`
+                          : progress.total_files > 0
+                            ? `${Math.min(100, (progress.current_file / progress.total_files) * 100)}%`
+                            : '15%',
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="text-xs text-text-muted text-center animate-pulse">
+                Downloading update...
+              </div>
+            )
           )}
         </div>
 
@@ -90,6 +124,18 @@ export function UpdateModal({
               onClose()
             }}
           />
+          {!downloading && onForceUpdate && (
+            <ActionBtn
+              label="完整更新"
+              title="强制下载完整安装包（忽略增量，用于更新逻辑本身的改动）"
+              icon={<Download className="w-3.5 h-3.5" />}
+              variant="outline"
+              onClick={() => {
+                addLog('[update] force full update')
+                onForceUpdate()
+              }}
+            />
+          )}
           <ActionBtn
             label={downloading ? 'Installing...' : 'Download & Install'}
             title="Download & Install"

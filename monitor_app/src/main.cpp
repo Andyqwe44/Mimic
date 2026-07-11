@@ -21,6 +21,9 @@
 #include "../dep/WebView2.h"
 #include "../../logger/logger.h"
 #include "commands.h"
+#include "json_helper.h"   // json_get_str
+#include "sha256_util.h"   // sha256_hex_file
+#include <shellapi.h>      // ShellExecuteA
 
 // Forward declare — avoid including virtual_desktop.h which pulls
 // in COM GUIDs that conflict with WebView2.h static initializers.
@@ -128,6 +131,46 @@ static constexpr PCWSTR SINGLE_INSTANCE_MUTEX = L"Global\\GameAgentMonitor_8A3F2
 static constexpr PCWSTR SINGLE_INSTANCE_MUTEX = L"Global\\GameAgentMonitor_8A3F2D";
 #endif
 
+// Read a whole file into a string (empty on failure).
+static std::string read_file_str(const std::string& path) {
+    FILE* f = fopen(path.c_str(), "rb");
+    if (!f) return "";
+    fseek(f, 0, SEEK_END); long n = ftell(f); fseek(f, 0, SEEK_SET);
+    std::string s(n > 0 ? (size_t)n : 0, '\0');
+    if (n > 0) fread(&s[0], 1, (size_t)n, f);
+    fclose(f);
+    return s;
+}
+
+// Minimal JSON string escaper (backslash + quote) for progress push messages.
+static std::string js_escape(const std::string& s) {
+    std::string o; o.reserve(s.size() + 8);
+    for (char c : s) { if (c == '\\' || c == '"') o += '\\'; o += c; }
+    return o;
+}
+
+// First-launch updater self-heal. Breaks the pre-0.3.5 updater deadlock: an old
+// updater cannot overwrite its own running image, so a stale bin\updater.exe would
+// persist forever. If the installed updater.exe sha != version.json's expected sha
+// and bin\updater.new (a copy of the current updater) exists, launch it with
+// --self-install to replace updater.exe. We only START it; it does the copy.
+static void check_and_heal_updater() {
+    std::string installDir = paths_get_install_dir();
+    std::string manifest = read_file_str(installDir + "\\version.json");
+    if (manifest.empty()) return;
+    size_t p = manifest.find("\"bin/updater.exe\"");
+    if (p == std::string::npos) return;
+    std::string expectSha = json_get_str(manifest.substr(p), "sha256");
+    if (expectSha.empty()) return;
+    std::string actualSha = sha256_hex_file((installDir + "\\bin\\updater.exe").c_str());
+    if (actualSha == expectSha) return;  // already current
+    std::string newPath = installDir + "\\bin\\updater.new";
+    if (GetFileAttributesA(newPath.c_str()) == INVALID_FILE_ATTRIBUTES) return;
+    LOG("main", "updater stale (have=%s want=%s) - launching updater.new --self-install",
+        actualSha.empty() ? "?" : actualSha.c_str(), expectSha.c_str());
+    ShellExecuteA(nullptr, "open", newPath.c_str(), "--self-install", installDir.c_str(), SW_HIDE);
+}
+
 // ── WinMain ─────────────────────────────────────────────────
 int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR lpCmdLine, _In_ int nCmdShow)
 {
@@ -179,6 +222,10 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR lpCm
     InitWebView2(g_hwnd);
 
     paths_init();
+
+    // Self-heal a stale updater.exe left by an older updater (see helper above).
+    check_and_heal_updater();
+
     backend_init();
 
     // Auto-start streaming for testing (bypasses GUI)
@@ -219,6 +266,25 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             g_bridge_has_frame.store(false, std::memory_order_release);
         }
         break;
+    case WM_UPDATE_PROGRESS: {
+        // Download thread posted a progress/terminal update. Read the shared state
+        // on this STA thread and push it to JS; on completion, launch updater + exit.
+        UpdateProgress up = update_get_progress();
+        const char* phase = up.failed ? "error" : (up.succeeded ? "done" : "download");
+        std::string json = std::string("{\"type\":\"update_progress\",\"phase\":\"") + phase + "\""
+            + ",\"current_file\":" + std::to_string(up.current_file)
+            + ",\"total_files\":" + std::to_string(up.total_files)
+            + ",\"file\":\"" + js_escape(up.file_path) + "\""
+            + ",\"done_bytes\":" + std::to_string(up.done_bytes)
+            + ",\"total_bytes\":" + std::to_string(up.total_bytes);
+        if (up.failed) json += ",\"error_file\":\"" + js_escape(up.error_file) + "\"";
+        json += "}";
+        PostJsonToWebView(json);
+        if (up.succeeded) {
+            if (update_launch_updater()) { Sleep(200); PostQuitMessage(0); }
+        }
+        break;
+    }
     case WM_DESTROY:
         g_webviewController = nullptr;
         g_webview = nullptr;

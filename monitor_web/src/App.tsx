@@ -12,7 +12,7 @@ import { SettingsView } from './components/SettingsView'
 import { MonitorView, type MonitorApi } from './components/MonitorView'
 import { SelfTestModal } from './components/SelfTestModal'
 import { UpdateModal, type UpdateInfo } from './components/UpdateModal'
-import { hostCall, logMgr, addLog, applyTheme } from './lib/bridge'
+import { hostCall, logMgr, addLog, applyTheme, onUpdateProgress, type UpdateProgressMsg } from './lib/bridge'
 import { runSelfTest, sleep, type SelfTestState } from './lib/selftest'
 import { cantCaptureMinimized } from './lib/constants'
 import type { WindowInfo, Rect } from './lib/types'
@@ -28,6 +28,7 @@ export default function App() {
   const [appVersion, setAppVersion] = useState('...')
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
   const [updateDownloading, setUpdateDownloading] = useState(false)
+  const [updateProgress, setUpdateProgress] = useState<UpdateProgressMsg | null>(null)
   const [rightWidth, setRightWidth] = useState(DEFAULT_RIGHT_WIDTH)
   const [rightCollapsed, setRightCollapsed] = useState(false)
 
@@ -188,7 +189,7 @@ export default function App() {
           diff: info.diff || [],
         } as any)
         const fileCount = info.diff?.length || 0
-        addLog(`[update] v${info.latest} available (${fileCount} files)`)
+        addLog(`[update] v${info.latest} available (${fileCount} files, ${info.mode || 'incremental'})`)
       } else {
         addLog(info?.ok === false
           ? `[update] check failed: ${info?.error || 'unknown'}`
@@ -199,23 +200,60 @@ export default function App() {
     }
   }, [])
 
-  const downloadUpdate = useCallback(async () => {
-    if (!updateInfo) return
-    const diff = (updateInfo as any).diff
-    if (!diff?.length) {
-      addLog('[update] no files to download')
-      return
-    }
+  // Kick off a download for the given diff. C++ returns immediately and drives
+  // the UI via update_progress pushes; the app exits when the updater launches.
+  const startDownload = useCallback(async (diff: any[]) => {
+    if (!diff?.length) { addLog('[update] no files to download'); return }
+    setUpdateProgress(null)
     setUpdateDownloading(true)
     addLog(`[update] downloading ${diff.length} files...`)
     try {
-      await hostCall('download_update', { diff: JSON.stringify(diff) })
-      // C++ launches updater.exe and exits — we may not reach here
+      const res = await hostCall('download_update', { diff: JSON.stringify(diff) })
+      if (res?.ok === false) {
+        addLog(`[update] start failed: ${res.error}`)
+        setUpdateDownloading(false)
+      }
+      // On ok: progress pushes drive the UI; the app exits when updater launches.
     } catch (e: any) {
       addLog(`[update] download error: ${e?.message || e}`)
       setUpdateDownloading(false)
     }
-  }, [updateInfo])
+  }, [])
+
+  const downloadUpdate = useCallback(() => {
+    if (!updateInfo) return
+    startDownload((updateInfo as any).diff)
+  }, [updateInfo, startDownload])
+
+  // Full update: re-query with force_full to get the complete file set, then download.
+  const forceFullUpdate = useCallback(async () => {
+    addLog('[update] fetching full package...')
+    try {
+      const info = await hostCall('check_update', { force_full: true })
+      if (info?.has_update) {
+        setUpdateInfo({
+          current: info.current, latest: info.latest,
+          name: info.name || '', body: info.body || '', url: '',
+          diff: info.diff || [],
+        } as any)
+        startDownload(info.diff || [])
+      } else {
+        addLog('[update] nothing to full-update')
+      }
+    } catch (e: any) {
+      addLog(`[update] full update error: ${e?.message || e}`)
+    }
+  }, [startDownload])
+
+  // Subscribe to C++ download progress pushes.
+  useEffect(() => onUpdateProgress((m) => {
+    setUpdateProgress(m)
+    if (m.phase === 'done') addLog('[update] download complete, launching updater...')
+    else if (m.phase === 'error') {
+      addLog(`[update] failed: ${m.error_file || m.file}`)
+      setUpdateDownloading(false)
+    }
+  }), [])
 
   useEffect(() => {
     logMgr.initSync()
@@ -1083,8 +1121,10 @@ export default function App() {
         <UpdateModal
           info={updateInfo}
           downloading={updateDownloading}
+          progress={updateProgress}
           onDownload={downloadUpdate}
-          onClose={() => { setUpdateInfo(null); setUpdateDownloading(false) }}
+          onForceUpdate={forceFullUpdate}
+          onClose={() => { setUpdateInfo(null); setUpdateDownloading(false); setUpdateProgress(null) }}
         />
       )}
     </div>

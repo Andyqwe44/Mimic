@@ -203,6 +203,25 @@ export function onSelfTest(fn: (m: SelfTestMsg) => void): () => void {
   return () => { _selfTestListeners.delete(fn) }
 }
 
+// ═══ Update-progress bus ═══
+// C++ download thread → WM_UPDATE_PROGRESS → WndProc → {type:'update_progress',...}.
+export type UpdateProgressMsg = {
+  phase: 'download' | 'done' | 'error'
+  current_file: number
+  total_files: number
+  file: string
+  done_bytes: number
+  total_bytes: number
+  error_file?: string
+}
+
+const _updateProgressListeners = new Set<(m: UpdateProgressMsg) => void>()
+
+export function onUpdateProgress(fn: (m: UpdateProgressMsg) => void): () => void {
+  _updateProgressListeners.add(fn)
+  return () => { _updateProgressListeners.delete(fn) }
+}
+
 // ── C++ → JS message listener (responses + remote log push) ──
 if (typeof (window as any).chrome?.webview !== 'undefined') {
   ;(window as any).chrome.webview.addEventListener('message', (e: any) => {
@@ -217,6 +236,11 @@ if (typeof (window as any).chrome?.webview !== 'undefined') {
       // Self-test report push: C++ selftest client → {type:'selftest', data:{...}}
       if (msg.type === 'selftest') {
         _selfTestListeners.forEach((f) => f(msg.data))
+        return
+      }
+      // Update-progress push: C++ download thread → {type:'update_progress',...}
+      if (msg.type === 'update_progress') {
+        _updateProgressListeners.forEach((f) => f(msg))
         return
       }
       // Command response: {id, result} envelope → resolve matching pending call

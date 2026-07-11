@@ -51,9 +51,22 @@ static void ensure_parent_dir(const char* filePath) {
     }
 }
 
-// Copy file: src → dst (create parent dirs as needed)
+// Full path of THIS running updater image; set at the top of WinMain.
+static char g_selfPath[MAX_PATH] = {};
+
+// Copy file: src → dst (create parent dirs as needed).
+// Self-replace guard: Windows won't let CopyFileA overwrite the running .exe.
+// If dst is our own image, rename ourselves aside first (renaming a running exe
+// IS allowed), so the copy then lands cleanly. The stale .old is deleted on the
+// next run. This lets updater.exe update itself (0.3.5+ chain).
 static bool copy_file(const char* src, const char* dst) {
     ensure_parent_dir(dst);
+    if (g_selfPath[0] && _stricmp(dst, g_selfPath) == 0) {
+        char oldPath[MAX_PATH];
+        snprintf(oldPath, MAX_PATH, "%s.old", dst);
+        DeleteFileA(oldPath);
+        MoveFileExA(dst, oldPath, MOVEFILE_REPLACE_EXISTING);
+    }
     return CopyFileA(src, dst, FALSE) != 0;
 }
 
@@ -109,6 +122,32 @@ static void remove_tree(const char* dir) {
 }
 
 int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
+    // Full path of this running updater image.
+    GetModuleFileNameA(nullptr, g_selfPath, MAX_PATH);
+
+    // Best-effort cleanup of a leftover .old from a previous self-replace.
+    {
+        char oldSelf[MAX_PATH];
+        snprintf(oldSelf, MAX_PATH, "%s.old", g_selfPath);
+        DeleteFileA(oldSelf);
+    }
+
+    // --self-install: we are bin\updater.new, launched by monitor_app to replace a
+    // stale bin\updater.exe (breaks the pre-0.3.5 self-replace deadlock: an old
+    // updater could never overwrite its own running image). updater.exe is NOT
+    // running now, so copy ourselves straight over it, then exit. No pid wait,
+    // no staging copy, no relaunch (monitor_app is already running).
+    if (strstr(lpCmdLine, "--self-install")) {
+        char dir[MAX_PATH];
+        strncpy(dir, g_selfPath, MAX_PATH); dir[MAX_PATH-1] = '\0';
+        str_dirname(dir);                                    // → install\bin
+        char target[MAX_PATH];
+        snprintf(target, MAX_PATH, "%s\\updater.exe", dir);
+        CopyFileA(g_selfPath, target, FALSE);                // overwrite stale updater.exe
+        MoveFileExA(g_selfPath, nullptr, MOVEFILE_DELAY_UNTIL_REBOOT); // drop updater.new on reboot
+        return 0;
+    }
+
     // Parse args
     char stagingDir[MAX_PATH] = {};
     DWORD oldPid = 0;

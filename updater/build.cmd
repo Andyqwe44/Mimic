@@ -9,7 +9,8 @@ cl.exe /EHsc /std:c++17 /DNDEBUG /O2 /GS- /Gy /Gw /MT ^
   /Fo"build\\" /Fe:build\updater.exe ^
   updater.cpp ^
   advapi32.lib shell32.lib user32.lib kernel32.lib ^
-  /link /OPT:REF /OPT:ICF /SUBSYSTEM:WINDOWS
+  /link /OPT:REF /OPT:ICF /SUBSYSTEM:WINDOWS ^
+  /MANIFEST:EMBED /MANIFESTUAC:"level='requireAdministrator' uiAccess='false'"
 
 if %ERRORLEVEL% EQU 0 (
   echo Build OK: updater\build\updater.exe

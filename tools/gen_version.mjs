@@ -26,17 +26,21 @@ function walk(dir, base) {
     return files
 }
 
-const [releaseDir, version] = process.argv.slice(2)
+const [releaseDir, version, fullFlag] = process.argv.slice(2)
 if (!releaseDir || !version) {
-    console.error('Usage: node tools/gen_version.mjs <release_dir> <version>')
+    console.error('Usage: node tools/gen_version.mjs <release_dir> <version> [full]')
     process.exit(1)
 }
+// "full"/"true" → mark this release as requiring a FULL (not incremental) update
+// for clients that understand the flag (0.3.5+). Default false.
+const fullUpdate = fullFlag === 'full' || fullFlag === 'true'
 
 const files = walk(releaseDir, releaseDir)
 
 const manifest = {
     app: version,
     released: new Date().toISOString(),
+    full_update: fullUpdate,
     files: {}
 }
 
