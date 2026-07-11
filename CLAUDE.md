@@ -552,7 +552,7 @@ Full development history preserved in `CLAUDE.old.md`. Major milestones:
   `App.tsx`：`appReady` gate + `SPLASH_TEST_MS=1500`(**故意** test 停留,prod 设 0)+ `?splash` query 冻结预览。
   **版本注入**(铁律 8)：`vite.config` 读 `version.h` → `__APP_VERSION__` define,splash/UI 秒显版本(不再 `...` 闪)。
   计时 LOG 保留(INFO,可筛)。**保留想法**：给首页真异步零件(日志/窗口列表/读盘)做 per-widget 骨架 —— 毫秒级暂缓。
-  未升版(仍 0.3.5),随后续发布。
+  并入 **0.3.6**(version.h 已升),待真机验证后 `release.sh 0.3.6` 发布。
 - **2026-07-11 (runtime data → LOCALAPPDATA + Inno 托管，未发布)**: 统一所有运行时写入到
   `%LOCALAPPDATA%\GameAgentMonitor`，装 C:/D: 都不散落、卸载删干净。审计发现只剩一个泄漏点：prod 日志走 exe 相对
   `{app}\bin\log`（`backend_init`，Program Files 下标准用户无写权限，白屏同源）—— WebView2/config(settings)/staging
@@ -561,7 +561,7 @@ Full development history preserved in `CLAUDE.old.md`. Major milestones:
   `capture_log_get_dir()` 自动跟随。`setup.iss` 加 `[Dirs]`（装机建 appdata 夹）+ `[UninstallDelete]`（卸载递归清
   `{localappdata}\GameAgentMonitor` 全夹 + `{app}` 全夹，兜底 updater 增量残留 DLL/`.old`）。已知限：admin 装时
   `{localappdata}` = 提权账户（单用户 Win11 Home 匹配）。dev+prod build 验证、prod 实测日志落 appdata 无泄漏。
-  **未升版**（仍 0.3.5），继续开发后一并发布。
+  **并入 0.3.6**，随该版发布。
 - **2026-07-11 (update system overhaul + v0.3.5)**: 自动更新三大改造 —— (1) **真增量**：`check_update` 改按
   `sha256` 比对（version.json 每文件已自动算），只下内容变的文件，零手动版本号；(2) **全量兜底**：version.json
   `full_update` 标志 / UI「完整更新」按钮（`force_full`）强制全下；(3) **进度条+活动文字**：`download_update` 移后台
