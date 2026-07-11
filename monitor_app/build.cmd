@@ -14,7 +14,7 @@ mkdir "build\config"
 
 set CFLAGS=/EHsc /std:c++17 /I src /I dep /I "%ROOT%\capture\include" /I "%ROOT%\common\include" ^
   /DNDEBUG /O2 /GS- /Gy /Gw /MT
-set LFLAGS=d3d11.lib dxgi.lib windowsapp.lib user32.lib gdi32.lib ole32.lib oleaut32.lib ws2_32.lib windowscodecs.lib dwmapi.lib shell32.lib shlwapi.lib winhttp.lib
+set LFLAGS=d3d11.lib dxgi.lib windowsapp.lib user32.lib gdi32.lib ole32.lib oleaut32.lib ws2_32.lib windowscodecs.lib dwmapi.lib shell32.lib shlwapi.lib winhttp.lib bcrypt.lib
 set LINKFLAGS=/OPT:REF /OPT:ICF
 
 echo === Compiling resources (icon + version) ===
@@ -23,7 +23,7 @@ if %ERRORLEVEL% NEQ 0 (echo rc failed & exit /b 1)
 
 echo === Building monitor_app.exe (PRODUCTION) ===
 cl.exe %CFLAGS% /Fo"build\\" /Fe:build\bin\monitor_app.exe ^
-  src\main.cpp src\commands.cpp src\virtual_desktop.cpp src\paths.cpp ^
+  src\main.cpp src\commands.cpp src\virtual_desktop.cpp src\paths.cpp src\sha256_util.cpp ^
   build\app.res ^
   dep\WebView2LoaderStatic.lib ^
   "%ROOT%\logger\build\logger.lib" ^
@@ -62,6 +62,8 @@ if %ERRORLEVEL% EQU 0 (
   echo.
   echo ^>^> Staging frontend + config into package layout ...
   if exist "%ROOT%\updater\build\updater.exe" copy /y "%ROOT%\updater\build\updater.exe" build\bin\ >NUL
+  rem updater.new: a copy of updater.exe so monitor_app can self-heal a stale updater
+  if exist "build\bin\updater.exe" copy /y "build\bin\updater.exe" "build\bin\updater.new" >NUL
   if exist "%ROOT%\monitor_web\dist" xcopy /y /e /q "%ROOT%\monitor_web\dist\*" build\frontend\ >NUL
   if exist "%ROOT%\config\settings.default.json" copy /y "%ROOT%\config\settings.default.json" build\config\ >NUL
   echo Package staged: build\{bin,frontend,config}

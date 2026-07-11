@@ -503,6 +503,16 @@ CLAUDE.md 只保留摘要和指向 CLAUDE.old.md 的引用。
 ## Changelog
 
 Full development history preserved in `CLAUDE.old.md`. Major milestones:
+- **2026-07-11 (update system overhaul + v0.3.5)**: 自动更新三大改造 —— (1) **真增量**：`check_update` 改按
+  `sha256` 比对（version.json 每文件已自动算），只下内容变的文件，零手动版本号；(2) **全量兜底**：version.json
+  `full_update` 标志 / UI「完整更新」按钮（`force_full`）强制全下；(3) **进度条+活动文字**：`download_update` 移后台
+  `std::thread`（即时返回，`g_up.active` 防双击），`winhttp_get` 加 per-chunk `ProgressCb`，`WM_UPDATE_PROGRESS`
+  桥到 WndProc→`PostJsonToWebView`（仿 `WM_STREAM_FRAME`），前端 `onUpdateProgress` 订阅 + 复用 `SelfTestModal`
+  进度条 markup；每文件 `sha256` 校验（bcrypt，新 `sha256_util`）。**破 updater 自替换死循环**：updater.exe 加改名
+  技巧（`MoveFileEx` 自己→`.old` 再拷）+ `--self-install`；monitor_app 首启比对 updater.exe sha 与 version.json，
+  不符则拉起 `bin\updater.new`（0.3.5 updater 副本）`--self-install`（monitor_app 仅启动器）。updater 加
+  `requireAdministrator` manifest。0.3.3→0.3.5 一跳修好 updater；0.3.5+ 由上一版 updater 自替换，monitor_app 不再参与。
+  **注意**：进度条 + updater 破冰需真机验证。发 Gitee v0.3.5。详见 CLAUDE.old.md。
 - **2026-07-11 (release pipeline fixes + v0.3.3/v0.3.4 published)**: 修 `build_release.cmd` 在 git-bash 下必挂的三个环境 bug — (1) `NoDefaultCurrentDirectoryInExePath=1` 令 cmd 不搜 cwd → 所有 `call build_x.cmd` 报"不是内部命令"（wrapper 清空该变量）；(2) 各子构建脚本无条件 `call vcvars64.bat` 逐步追加 VS 路径撑爆 PATH 8191 上限 → 第 5-6 步 cmd 静默死（5 个构建步 `call`→`cmd /c` 子进程隔离，PATH 不累积）；(3) `verify_isolated.cmd --auto` 原固定 6s 单次查日志，但 WebView2 首启建 env 耗时 0.4~36s 剧烈波动常错过 `frontend served` 标记，加单实例 mutex + msedgewebview2 文件锁掩盖 → 改：拷包前先 kill 旧实例+webview2、轮询 90s 抓标记、结束清理子进程。隔离验证实打实抓到 `prod: frontend served` + React 启动调用 = 白屏真修。发 Gitee v0.3.3/v0.3.4，raw URL 302→200 校验通过。详见 CLAUDE.old.md。
 - **2026-07-11 (white-screen root fix + isolated verify)**: 根治真机白屏 — `CreateCoreWebView2EnvironmentWithOptions` 第2参 `userDataFolder` 原为 `nullptr` → WebView2 默认在 exe 旁（`C:\Program Files\...\bin\`）建数据夹 → 标准用户无写权限 → env 创建失败 → 白屏。改为显式 `LOCALAPPDATA\GameAgentMonitor\WebView2`（恒可写）。env/controller 失败加 `LOG_ERROR`+`MessageBox`（杜绝静默）。修 `paths_get_install_dir` 注册表泄漏：旧 HKLM `InstallPath` 会把 exe 重定向到*上次*安装的 frontend，掩盖打包 bug → 改 exe 相对优先（exe 父目录，叶名==`bin`），注册表降级兜底，只读不写。统一构建产物为发布包结构（`build/{bin,frontend,config}`、`build_dev/bin/`），dev==prod==包，消除相对路径假通过。新增 `verify_isolated.cmd`：拷包到 `%TEMP%\GAM_verify`（repo 外）启动 → Y/N gate；`build_release.cmd` git push 前调用，失败即中止。
 - **2026-07-11 (release automation)**: 消除 setup.iss 版本号手动同步（条件 define + ISCC `/D` 传参）。修复 prod-only 白屏双 bug：WinHTTP 302 重定向 + `SetVirtualHostNameToFolderMapping` 路径缺尾 `\`。建立 prod 本地验证步骤（`build_release.cmd` 后先 `release\...\monitor_app.exe` 实测再发布）。发布 v0.3.3/v0.3.4。

@@ -11,6 +11,7 @@
 #include "json_helper.h"
 #include "paths.h"
 #include "version.h"
+#include "sha256_util.h"
 #include "../../logger/logger.h"
 #include "../../capture/include/capture_methods.h"
 #include "../../capture/include/capture_wgc_ffi.h"
@@ -30,6 +31,7 @@
 #include <thread>
 #include <mutex>
 #include <atomic>
+#include <functional>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -991,9 +993,12 @@ static std::string json_val(const std::string& json, const std::string& key, siz
     return json.substr(p, e - p);
 }
 
+// Progress callback for downloads: (bytesDownloaded, totalBytes | 0 if unknown).
+using ProgressCb = std::function<void(unsigned long long, unsigned long long)>;
+
 // WinHTTP GET — returns response body (empty string on failure).
-// Logs tag for diagnostics.
-static std::string winhttp_get(const wchar_t* url, const char* tag) {
+// Logs tag for diagnostics. on_progress (optional) fires after each read chunk.
+static std::string winhttp_get(const wchar_t* url, const char* tag, ProgressCb on_progress = nullptr) {
     // Crack URL into components
     URL_COMPONENTS uc = {};
     uc.dwStructSize = sizeof(uc);
@@ -1047,11 +1052,22 @@ static std::string winhttp_get(const wchar_t* url, const char* tag) {
         WINHTTP_HEADER_NAME_BY_INDEX, &status, &statusSize, WINHTTP_NO_HEADER_INDEX);
     LOG(tag, "HTTP %lu", (unsigned long)status);
 
+    // Total size for progress (Content-Length header; 0 if absent/chunked).
+    unsigned long long total = 0;
+    {
+        wchar_t clbuf[32] = {}; DWORD clsize = sizeof(clbuf);
+        if (WinHttpQueryHeaders(hReq, WINHTTP_QUERY_CONTENT_LENGTH,
+                WINHTTP_HEADER_NAME_BY_INDEX, clbuf, &clsize, WINHTTP_NO_HEADER_INDEX))
+            total = _wcstoui64(clbuf, nullptr, 10);
+    }
+
     std::string body;
     DWORD bytesRead = 0;
     char buf[4096];
-    while (WinHttpReadData(hReq, buf, sizeof(buf), &bytesRead) && bytesRead > 0)
+    while (WinHttpReadData(hReq, buf, sizeof(buf), &bytesRead) && bytesRead > 0) {
         body.append(buf, bytesRead);
+        if (on_progress) on_progress((unsigned long long)body.size(), total);
+    }
 
     WinHttpCloseHandle(hReq);
     WinHttpCloseHandle(hConn);
@@ -1060,18 +1076,55 @@ static std::string winhttp_get(const wchar_t* url, const char* tag) {
 }
 
 // Also support std::string URL wrapper
-static std::string winhttp_get_str(const std::string& urlStr, const char* tag) {
+static std::string winhttp_get_str(const std::string& urlStr, const char* tag, ProgressCb on_progress = nullptr) {
     int len = MultiByteToWideChar(CP_UTF8, 0, urlStr.c_str(), (int)urlStr.size(), nullptr, 0);
     std::wstring wurl(len, L'\0');
     MultiByteToWideChar(CP_UTF8, 0, urlStr.c_str(), (int)urlStr.size(), &wurl[0], len);
-    return winhttp_get(wurl.c_str(), tag);
+    return winhttp_get(wurl.c_str(), tag, on_progress);
 }
 
 // Forward declarations
 static std::string read_file(const char* path);
 
-// check_update — query Gitee for latest release + version.json diff
-static std::string cmd_check_update() {
+// ── Auto-update: shared progress state (download thread → WndProc → JS) ──
+static UpdateProgress g_up;
+static std::mutex     g_up_mtx;
+
+UpdateProgress update_get_progress() {
+    std::lock_guard<std::mutex> lk(g_up_mtx);
+    return g_up;
+}
+
+// Launch updater.exe for the finished (succeeded) download. Main thread (WndProc).
+bool update_launch_updater() {
+    std::string stagingDir;
+    {
+        std::lock_guard<std::mutex> lk(g_up_mtx);
+        if (!g_up.succeeded || g_up.staging_dir.empty()) return false;
+        stagingDir = g_up.staging_dir;
+    }
+    std::string installDir  = paths_get_install_dir();
+    std::string updaterPath = installDir + "\\bin\\updater.exe";
+    DWORD pid = GetCurrentProcessId();
+    char cmdLine[512];
+    snprintf(cmdLine, sizeof(cmdLine), "\"%s\" \"%s\" %lu",
+        updaterPath.c_str(), stagingDir.c_str(), (unsigned long)pid);
+    STARTUPINFOA si = {}; si.cb = sizeof(si);
+    PROCESS_INFORMATION pi = {};
+    if (!CreateProcessA(nullptr, cmdLine, nullptr, nullptr, FALSE,
+            CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+        LOG("cmd", "update_launch_updater: CreateProcess failed err=%lu",
+            (unsigned long)GetLastError());
+        return false;
+    }
+    CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
+    LOG("cmd", "update_launch_updater: updater launched, staging=%s", stagingDir.c_str());
+    return true;
+}
+
+// check_update — query Gitee for latest release; per-file diff by sha256.
+// forceFull (or remote "full_update":true) → include every file (full package).
+static std::string cmd_check_update(bool forceFull) {
     LOG("cmd", "check_update: querying Gitee API...");
     std::string body = winhttp_get(
         L"https://gitee.com/api/v5/repos/Andyqwe44/tictactoe/releases/latest",
@@ -1093,6 +1146,7 @@ static std::string cmd_check_update() {
 
     bool hasUpdate = !latest.empty() && latest != current;
     std::string diffJson = "[]";
+    bool useFull = forceFull;
 
     if (hasUpdate) {
         // Fetch remote version.json from the release tag
@@ -1106,7 +1160,10 @@ static std::string cmd_check_update() {
         std::string localPath = installDir + "\\version.json";
         std::string localManifest = read_file(localPath.c_str());
 
-        // Compare manifests: find files where remote version differs
+        // Remote may force a full update (updater/protocol changed).
+        if (json_val(remoteManifest, "full_update") == "true") useFull = true;
+
+        // Compare manifests: include files whose sha256 differs (or all, if full)
         if (!remoteManifest.empty()) {
             diffJson = "[";
             bool first = true;
@@ -1125,20 +1182,21 @@ static std::string cmd_check_update() {
                             size_t keyEnd = remoteManifest.find("\"", i+1);
                             if (keyEnd == std::string::npos) break;
                             std::string filePath = remoteManifest.substr(i+1, keyEnd - i - 1);
-                            std::string remoteVer = json_val(remoteManifest, "v", keyEnd);
-                            std::string localVer  = json_val(localManifest, "v",
+                            std::string remoteSha = json_val(remoteManifest, "sha256", keyEnd);
+                            std::string localSha  = json_val(localManifest, "sha256",
                                 localManifest.find("\"" + filePath + "\""));
-                            // Also get sha256 and size for download
-                            std::string sha = json_val(remoteManifest, "sha256", keyEnd);
+                            std::string remoteVer = json_val(remoteManifest, "v", keyEnd);
                             std::string sz = json_val(remoteManifest, "size", keyEnd);
-                            if (!remoteVer.empty() && remoteVer != localVer) {
+                            // Incremental: content changed (sha differs). Full: everything.
+                            bool changed = useFull || (!remoteSha.empty() && remoteSha != localSha);
+                            if (changed) {
                                 if (!first) diffJson += ","; first = false;
                                 // Build download URL from raw file
                                 std::string dlUrl = "https://gitee.com/Andyqwe44/tictactoe/raw/"
                                     + tag + "/release/GameAgentMonitor/" + filePath;
                                 diffJson += "{\"path\":\"" + filePath + "\"";
                                 diffJson += ",\"v\":\"" + remoteVer + "\"";
-                                diffJson += ",\"sha256\":\"" + sha + "\"";
+                                diffJson += ",\"sha256\":\"" + remoteSha + "\"";
                                 diffJson += ",\"size\":" + (sz.empty() ? "0" : sz);
                                 diffJson += ",\"url\":\"" + json_escape(dlUrl) + "\"}";
                             }
@@ -1151,8 +1209,8 @@ static std::string cmd_check_update() {
         }
     }
 
-    LOG("cmd", "check_update: current=%s latest=%s hasUpdate=%d diff_files=%zu",
-        current.c_str(), latest.c_str(), (int)hasUpdate,
+    LOG("cmd", "check_update: current=%s latest=%s hasUpdate=%d full=%d diff_files=%zu",
+        current.c_str(), latest.c_str(), (int)hasUpdate, (int)useFull,
         (size_t)std::count(diffJson.begin(), diffJson.end(), '{'));
 
     return "{\"ok\":true"
@@ -1161,14 +1219,115 @@ static std::string cmd_check_update() {
         ",\"name\":\"" + json_escape(name.empty() ? tag : name) + "\""
         ",\"body\":\"" + json_escape(changelog) + "\""
         ",\"has_update\":" + (hasUpdate ? "true" : "false")
+        + ",\"mode\":\"" + (useFull ? "full" : "incremental") + "\""
         + ",\"diff\":" + diffJson + "}";
 }
 
-// download_update — download changed files to staging, launch updater.exe
+// Background download thread: fetch each diff file to staging, verify sha256,
+// update g_up + throttled-post WM_UPDATE_PROGRESS. On success sets `succeeded`
+// so WndProc launches updater; on any failure sets `failed` and stops.
+static void download_thread_func(std::string diffJsonStr, std::string stagingDir) {
+    HWND hwnd = (HWND)get_main_hwnd();
+    auto post = [&]() { if (hwnd) PostMessageW(hwnd, WM_UPDATE_PROGRESS, 0, 0); };
+
+    unsigned long long baseBytes = 0;  // bytes fully written for prior files
+    int index = 0;
+    ULONGLONG lastPost = 0;
+    bool ok = true;
+
+    size_t pos = 0;
+    while ((pos = diffJsonStr.find("\"path\"", pos)) != std::string::npos) {
+        std::string filePath = json_val(diffJsonStr, "path", pos);
+        std::string wantSha  = json_val(diffJsonStr, "sha256", pos);
+        std::string dlUrl    = json_val(diffJsonStr, "url", pos);
+        pos++;
+        if (filePath.empty() || dlUrl.empty()) continue;
+        index++;
+
+        {
+            std::lock_guard<std::mutex> lk(g_up_mtx);
+            g_up.current_file = index;
+            g_up.file_path = filePath;
+        }
+        post();
+
+        LOG("cmd", "download_update: getting %s", filePath.c_str());
+        std::string data = winhttp_get_str(dlUrl, "update",
+            [&](unsigned long long done, unsigned long long /*total*/) {
+                {
+                    std::lock_guard<std::mutex> lk(g_up_mtx);
+                    g_up.done_bytes = baseBytes + done;
+                }
+                ULONGLONG now = GetTickCount64();
+                if (now - lastPost >= 50) { lastPost = now; post(); }
+            });
+
+        if (data.empty()) {
+            LOG("cmd", "download_update: FAILED download %s", filePath.c_str());
+            ok = false;
+            std::lock_guard<std::mutex> lk(g_up_mtx);
+            g_up.failed = true; g_up.error_file = filePath;
+            break;
+        }
+
+        // Integrity: downloaded bytes must match the manifest sha256.
+        if (!wantSha.empty()) {
+            std::string gotSha = sha256_hex(data.data(), data.size());
+            if (gotSha != wantSha) {
+                LOG("cmd", "download_update: SHA256 mismatch %s (want %s got %s)",
+                    filePath.c_str(), wantSha.c_str(), gotSha.c_str());
+                ok = false;
+                std::lock_guard<std::mutex> lk(g_up_mtx);
+                g_up.failed = true; g_up.error_file = filePath;
+                break;
+            }
+        }
+
+        // Write to staging, creating parent dirs.
+        std::string outPath = stagingDir + "\\" + filePath;
+        for (size_t i = stagingDir.size() + 1; i < outPath.size(); i++)
+            if (outPath[i] == '\\' || outPath[i] == '/')
+                CreateDirectoryA(outPath.substr(0, i).c_str(), nullptr);
+        FILE* f = fopen(outPath.c_str(), "wb");
+        if (!f) {
+            LOG("cmd", "download_update: cannot write %s", outPath.c_str());
+            ok = false;
+            std::lock_guard<std::mutex> lk(g_up_mtx);
+            g_up.failed = true; g_up.error_file = filePath;
+            break;
+        }
+        fwrite(data.data(), 1, data.size(), f);
+        fclose(f);
+        baseBytes += data.size();
+        {
+            std::lock_guard<std::mutex> lk(g_up_mtx);
+            g_up.done_bytes = baseBytes;
+        }
+        LOG("cmd", "download_update: wrote %s (%zu bytes)", filePath.c_str(), data.size());
+        post();
+    }
+
+    {
+        std::lock_guard<std::mutex> lk(g_up_mtx);
+        g_up.active = false;
+        g_up.succeeded = ok && index > 0;
+        if (g_up.succeeded) g_up.done_bytes = g_up.total_bytes;
+    }
+    post();  // terminal push → WndProc sees done/error; on done it launches updater
+    LOG("cmd", "download_update: thread finished ok=%d files=%d", (int)ok, index);
+}
+
+// download_update — spawn a background download thread and return immediately.
+// Real-time progress + completion are delivered via WM_UPDATE_PROGRESS pushes.
 static std::string cmd_download_update(const std::string& diffJsonStr) {
     LOG("cmd", "download_update: diff=%s", diffJsonStr.c_str());
 
-    // Get staging directory
+    {
+        std::lock_guard<std::mutex> lk(g_up_mtx);
+        if (g_up.active) return R"({"ok":false,"error":"already_downloading"})";
+    }
+
+    // Resolve + create staging dir.
     wchar_t localAppData[MAX_PATH];
     std::string stagingDir;
     if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, localAppData))) {
@@ -1182,74 +1341,33 @@ static std::string cmd_download_update(const std::string& diffJsonStr) {
         return R"({"ok":false,"error":"cannot resolve appdata"})";
     }
 
-    // Parse the diff JSON array: [{path, sha256, url}, ...]
-    size_t downloaded = 0;
-    size_t pos = 0;
-    while ((pos = diffJsonStr.find("\"path\"", pos)) != std::string::npos) {
-        std::string filePath = json_val(diffJsonStr, "path", pos);
-        std::string sha256   = json_val(diffJsonStr, "sha256", pos);
-        std::string dlUrl    = json_val(diffJsonStr, "url", pos);
-
-        if (filePath.empty() || dlUrl.empty()) { pos++; continue; }
-
-        // Download
-        LOG("cmd", "download_update: getting %s", filePath.c_str());
-        std::string data = winhttp_get_str(dlUrl, "update");
-        if (data.empty()) {
-            LOG("cmd", "download_update: FAILED %s", filePath.c_str());
-            pos++; continue;
+    // Count files + total bytes for the progress bar.
+    int totalFiles = 0;
+    unsigned long long totalBytes = 0;
+    {
+        size_t p = 0;
+        while ((p = diffJsonStr.find("\"path\"", p)) != std::string::npos) {
+            totalFiles++;
+            std::string sz = json_val(diffJsonStr, "size", p);
+            if (!sz.empty()) totalBytes += _strtoui64(sz.c_str(), nullptr, 10);
+            p++;
         }
+    }
+    if (totalFiles == 0) return R"({"ok":false,"error":"no files to download"})";
 
-        // Write to staging, preserving subdirectory structure
-        std::string outPath = stagingDir + "\\" + filePath;
-        // Ensure parent directories exist
-        for (size_t i = stagingDir.size() + 1; i < outPath.size(); i++) {
-            if (outPath[i] == '\\' || outPath[i] == '/') {
-                std::string part = outPath.substr(0, i);
-                CreateDirectoryA(part.c_str(), nullptr);
-            }
-        }
-        // Also ensure the immediate parent
-        size_t lastSlash = outPath.rfind('\\');
-        if (lastSlash != std::string::npos)
-            CreateDirectoryA(outPath.substr(0, lastSlash).c_str(), nullptr);
-
-        FILE* f = fopen(outPath.c_str(), "wb");
-        if (f) {
-            fwrite(data.data(), 1, data.size(), f);
-            fclose(f);
-            downloaded++;
-            LOG("cmd", "download_update: wrote %s (%zu bytes)", filePath.c_str(), data.size());
-        }
-        pos++;
+    {
+        std::lock_guard<std::mutex> lk(g_up_mtx);
+        g_up = UpdateProgress{};
+        g_up.active = true;
+        g_up.total_files = totalFiles;
+        g_up.total_bytes = totalBytes;
+        g_up.staging_dir = stagingDir;
     }
 
-    if (downloaded == 0) return R"({"ok":false,"error":"no files downloaded"})";
+    std::thread(download_thread_func, diffJsonStr, stagingDir).detach();
 
-    // Launch updater.exe
-    std::string installDir = paths_get_install_dir();
-    std::string updaterPath = installDir + "\\bin\\updater.exe";
-
-    // Get current PID
-    DWORD pid = GetCurrentProcessId();
-    char cmdLine[512];
-    snprintf(cmdLine, sizeof(cmdLine), "\"%s\" \"%s\" %lu",
-        updaterPath.c_str(), stagingDir.c_str(), (unsigned long)pid);
-
-    STARTUPINFOA si = {};
-    si.cb = sizeof(si);
-    PROCESS_INFORMATION pi = {};
-    if (!CreateProcessA(nullptr, cmdLine, nullptr, nullptr, FALSE,
-        CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
-        DWORD err = GetLastError();
-        LOG("cmd", "download_update: CreateProcess failed err=%lu", (unsigned long)err);
-        return R"({"ok":false,"error":"launch updater failed"})";
-    }
-    CloseHandle(pi.hProcess);
-    CloseHandle(pi.hThread);
-
-    LOG("cmd", "download_update: %zu files, updater launched, exiting", downloaded);
-    return "{\"ok\":true,\"files\":" + std::to_string(downloaded) + "}";
+    return "{\"ok\":true,\"started\":true,\"total_files\":" + std::to_string(totalFiles)
+        + ",\"total_bytes\":" + std::to_string(totalBytes) + "}";
 }
 
 // ── Settings persistence ──────────────────────────────────
@@ -1582,7 +1700,8 @@ std::string dispatch_command(const std::string& json) {
         result = vd_switch_desktop(json_get_int(args, "index"));
     }
     else if (cmd == "check_update") {
-        result = cmd_check_update();
+        bool ff = args.find("\"force_full\":true") != std::string::npos;
+        result = cmd_check_update(ff);
     }
     else if (cmd == "download_update") {
         // Extract diff array from args JSON directly
