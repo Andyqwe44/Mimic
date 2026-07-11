@@ -282,6 +282,42 @@ check_update:
 | **raw URL 的文件来自 git 仓库** | `raw/<tag>/path` 读取的是 git tag 下提交的文件，不是 Release asset。所以 release 文件必须 commit 到 git |
 | **China 网络** | Gitee 在国内访问稳定；raw URL 无需认证即可下载 |
 
+## Update Mechanism & Release Package
+
+### 发布包结构（`release.sh` → `build_release.cmd` 组装）
+
+```
+release/GameAgentMonitor/
+  bin/          monitor_app.exe · updater.exe · updater.new · 12 DLL (logger + capture×6 + input×5)
+  frontend/     dist (index.html, assets/)          ← npm run build
+  config/       settings.default.json
+  version.json  { app, released, full_update, files{ "bin/x.dll":{v,sha256,size}, ... } }
+release/GameAgentMonitor_Setup_v<ver>.exe           ← Inno Setup installer → %ProgramFiles%\GameAgentMonitor
+```
+
+`build_release.cmd` 8 步：logger→capture→input→frontend(npm)→updater→**monitor_app(prod)**（顺带 stage
+`build\{bin,frontend,config}`：拷 12 DLL+updater.exe→bin、`copy updater.exe updater.new`、dist→frontend、
+settings.default→config）→**assemble** `release\`（build\ 直拷 + updater + config）→**version.json**（`gen_version.mjs`
+遍历 release 算每文件 sha256）+**installer**（ISCC setup.iss）→ `verify_isolated`（轮询 frontend served）→ git commit+tag+push。
+**`build\` == `release\` == 用户装机结构**（dev==prod==包，消除相对路径假通过）。`version.json` 每文件 sha256 =
+增量比对依据；`updater.new` = updater.exe 字节副本（死循环破冰用）。
+
+### Updater 运作（`updater/updater.cpp`，requireAdministrator manifest）
+
+两种调用：
+1. **覆盖更新** `updater.exe <staging_dir> <old_pid>`（download_update 完成后主线程 CreateProcess）：
+   等 old_pid 退出(≤30s，超时 Terminate)+Sleep 500ms → 注册表 `HKLM\SOFTWARE\GameAgentMonitor\InstallPath` 读 install
+   → `copy_staging` 递归拷 staging 全部 → install（CopyFileA overwrite，**additive**：不删 staging 缺的文件）
+   → 遇目标==自己：`MoveFileExA(updater.exe→.old)` 再拷新（改名技巧=自替换）→ 启 monitor_app.exe → `remove_tree(staging)`。
+2. **自装** `updater.exe --self-install`（monitor_app 首启把 `bin\updater.new` 拉起时）：把自己拷成同目录 updater.exe
+   （updater.exe 此刻没跑）→ `MoveFileEx(self,NULL,DELAY_UNTIL_REBOOT)` 重启删 updater.new。不等 pid、不拷 staging、不启 app。
+   启动均先删 `updater.exe.old` 残留。
+
+**完整更新链**：`download_update`（后台 std::thread 逐文件下+sha256 校验→staging，节流 `WM_UPDATE_PROGRESS` 进度）
+→ done 启 updater.exe 覆盖（除自身）→ 启新 monitor_app → 首启 `check_and_heal_updater`（比 install updater.exe sha
+vs version.json；旧则启 `updater.new --self-install`，monitor_app 仅启动器）→ updater 升级。
+**0.3.3→0.3.5 一跳修好 updater；0.3.5+ 每次由上一版 updater 的改名技巧自替换，monitor_app 不再参与。**
+
 ## Internal Architecture
 
 ### Communication: WebMessage bridge
