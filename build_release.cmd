@@ -1,6 +1,11 @@
 @echo off
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
+:: git-bash exports NoDefaultCurrentDirectoryInExePath=1 into the cmd it spawns,
+:: which stops cmd from searching the current dir → the relative `cmd /c build_x.cmd`
+:: steps below would fail with "not recognized". Clear it so this script runs the
+:: same whether launched from cmd.exe or from git-bash via `cmd /c`.
+set "NoDefaultCurrentDirectoryInExePath="
 call "C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars64.bat" >NUL 2>&1
 if %ERRORLEVEL% NEQ 0 (echo vcvars failed & exit /b 1)
 
