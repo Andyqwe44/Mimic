@@ -36,26 +36,28 @@ Desktop monitor for visual game AI — **pixels in, actions out**.
 
 ### Dev Mode
 
-```bash
-# 1. Build C++ static libs (first time only, re-run after C++ changes)
-cd logger   && build_logger_lib.cmd
-cd capture  && build_capture_lib.cmd
-cd input    && build_input_lib.cmd
+```powershell
+# 1. Build C++ modules (first time, and after C++ changes) — one VS Dev Shell
+powershell -File scripts\Build.ps1               # logger/capture/input/updater/monitor_app
 
 # 2. Dev build (Vite HMR, debug symbols)
-cd monitor_web && npm install && npm run dev   # terminal 1: Vite :1420
-cd monitor_app && build_dev.cmd                # terminal 2: -> build_dev\monitor_app.exe
+cd monitor_web; npm install; npm run dev         # terminal 1: Vite :1420
+powershell -File scripts\Build.ps1 -Module monitor_app -Dev   # terminal 2: -> build_dev\bin\monitor_app.exe
 # Navigates to http://localhost:1420 (hot reload)
 ```
 
 ### Production
 
-```bash
+```powershell
 # 3. Prod build (optimized, self-contained)
-cd monitor_web && npm run build          # Vite -> dist/
-cd monitor_app && build.cmd              # embeds dist + compiles icon/version -> build\monitor_app.exe
+cd monitor_web; npm run build                    # Vite -> dist/
+powershell -File scripts\Build.ps1 -Module monitor_app   # embeds dist -> build\bin\monitor_app.exe
 # Navigates to https://gam.local/index.html (dist embedded in exe, served from memory)
 ```
+
+> All build/release scripts are PowerShell under `scripts/` (`Build.ps1`, `Release.ps1`,
+> `Verify.ps1`, `Publish.ps1`, `New-VersionJson.ps1`). One release command:
+> `powershell -File scripts\Release.ps1`.
 
 Mode set at build time via `/DDEV_MODE` preprocessor define. No runtime `--dev` flag.
 
@@ -75,9 +77,8 @@ tictactoe/
 │   ├── src/              input_common + sendinput/winapi/postmessage/driver
 │   └── build/            output .lib files
 ├── monitor_app/          C++ WebView2 host (main window + commands + single-instance)
-│   ├── build.cmd         Production build (optimized)
-│   ├── build_dev.cmd     Dev build (debug symbols, no opt)
 │   └── dep/              WebView2 SDK
+├── scripts/              PowerShell build/release pipeline (Build/Release/Verify/Publish)
 ├── monitor_web/          React frontend (Vite + TypeScript + Tailwind)
 ├── protocol/             Wire format (C++/Python)
 ├── model/                Python AI

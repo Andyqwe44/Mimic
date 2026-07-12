@@ -141,7 +141,7 @@ tictactoe/
 ├── logger/                       # Unified C++ logging engine (C API)
 │   ├── logger.h                  capture_log_write_msg — THE ONE write function
 │   ├── logger.cpp                Thread-safe file + ring buffer implementation
-│   └── build_logger_lib.cmd      MSVC → logger.lib
+│   └── (build: scripts\Build.ps1 -Module logger → logger.dll + logger.lib)
 ├── protocol/                     # Wire format — shared across C++/Python
 │   ├── protocol.h / .py
 ├── capture/                      # C++ screen capture (per-method static libs)
@@ -156,8 +156,8 @@ tictactoe/
 │   │   ├── capture_dxgi.cpp      DXGI Desktop Duplication backend
 │   │   └── capture_*.cpp         Standalone tools
 │   ├── include/                  Public headers
-│   ├── build.cmd                 Standalone exes
-│   └── build_capture_lib.cmd     Per-method .lib: common/wgc/gdi/pw/screen/desktop
+│   ├── build.cmd                 Standalone h264/dxgi experiment exe (aux, not release)
+│   └── (DLLs: scripts\Build.ps1 -Module capture — common/wgc/gdi/pw/screen/desktop)
 ├── monitor_app/                  # C++ WebView2 host (window + commands + MJPEG + TCP)
 │   ├── src/
 │   │   ├── main.cpp              Win32 window + WebView2 + message loop
@@ -170,8 +170,7 @@ tictactoe/
 │   │   ├── WebView2.h
 │   │   ├── WebView2EnvironmentOptions.h
 │   │   └── WebView2LoaderStatic.lib
-│   ├── build.cmd                 MSVC → build\monitor_app.exe (prod)
-│   └── build_dev.cmd             MSVC → build_dev\monitor_app.exe (dev)
+│   └── (build: scripts\Build.ps1 -Module monitor_app [-Dev])
 ├── monitor_web/                  # React frontend (KEEP — shared by C++ host)
 │   ├── src/
 │   │   └── App.tsx               MXU-style UI (hostCall bridge, no Tauri deps)
@@ -192,23 +191,23 @@ tictactoe/
 
 Dev/prod mode set at build time via `/DDEV_MODE` preprocessor define. No runtime `--dev` flag.
 
-```bash
-# 1. Build C++ static libs (once, or when C++ changes)
-cd logger   && build_logger_lib.cmd
-cd capture  && build_capture_lib.cmd
+```powershell
+# 1. Build C++ modules (once, or when C++ changes) — one VS Dev Shell, no vcvars/cmd
+powershell -File scripts\Build.ps1                # logger/capture/input/updater/monitor_app
 
 # 2a. Dev build (Vite HMR, debug symbols, no optimization)
-cd monitor_web && npm run dev        # Vite on :1420 (keep running)
-cd monitor_app && build_dev.cmd      # → build_dev\monitor_app.exe
-# Launch: build_dev\monitor_app.exe  → http://localhost:1420
+cd monitor_web; npm run dev                       # Vite on :1420 (keep running)
+powershell -File scripts\Build.ps1 -Module monitor_app -Dev   # → build_dev\bin\monitor_app.exe
+# Launch: build_dev\bin\monitor_app.exe  → http://localhost:1420
 
 # 2b. Prod build (optimized, no debug)
-cd monitor_web && npm run build      # Vite → dist/
-cd monitor_app && build.cmd          # → build\monitor_app.exe
-# Launch: build\monitor_app.exe      → http://localhost:8888
+cd monitor_web; npm run build                     # Vite → dist/
+powershell -File scripts\Build.ps1 -Module monitor_app        # → build\bin\monitor_app.exe
 ```
 
-| | Dev (`build_dev.cmd`) | Prod (`build.cmd`) |
+Release: `powershell -File scripts\Release.ps1` (all PowerShell — build → verify → git → Gitee).
+
+| | Dev (`-Dev`) | Prod (default) |
 |---|---|---|
 | Optimize | `/Od` | `/O2 /Gy /Gw /GS-` |
 | Debug info | `/Zi /DEBUG:FULL` | None |
