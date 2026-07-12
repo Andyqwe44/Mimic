@@ -586,6 +586,18 @@ CLAUDE.md 只保留摘要和指向 CLAUDE.old.md 的引用。
 ## Changelog
 
 Full development history preserved in `CLAUDE.old.md`. Major milestones:
+- **2026-07-13 (0.3.23 降级终于通 — Raymond Chen explorer-shellview)**: 0.3.22 `CoCreateInstance(CLSID_Shell)`
+  实测炸 `0x80040154 REGDB_E_CLASSNOTREG`——CLSID_Shell 只注册 InProcServer32,无 LOCAL_SERVER;且 in-proc Shell
+  对象跑在**自己 High IL**,`ShellExecute` 出来仍是管理员,根本不降级。**正解**(`commands.cpp`
+  `shell_execute_via_explorer`):不建新 Shell,伸进**已在跑的桌面 explorer(恒 Medium IL)**要它 ShellExecute →
+  子进程继承 Medium。链:`CoCreateInstance(CLSID_ShellWindows)`→`FindWindowSW(CSIDL_DESKTOP,SWC_DESKTOP,
+  SWFO_NEEDDISPATCH)`→`QI IServiceProvider`→`QueryService(SID_STopLevelBrowser→IShellBrowser)`→
+  `QueryActiveShellView`→`GetItemObject(SVGIO_BACKGROUND→IDispatch)`→`QI IShellFolderViewDual`→`get_Application`
+  →`QI IShellDispatch2`→`ShellExecute(exe,"","","open",SW_SHOWNORMAL)`。每步各自 LOG_ERROR+hr 便于定位。
+  **编译坑**:`<shellapi.h>` `#define ShellExecute ShellExecuteA` 宏污染,把 `psd->ShellExecute` 改写成
+  `psd->ShellExecuteA`(IShellDispatch2 无此成员,C2039)→ 函数前 `#undef ShellExecute`(显式 `ShellExecuteExA`
+  不受影响)。头加 `exdisp.h`/`shldisp.h`/`servprov.h`,libs 不变(GUID 走 uuid.lib)。**实测通过**:0.3.23
+  管理员态点「普通」→ 旧进程退、新进程起、任务管理器/徽章确认 Medium。降级历经 7 版(0.3.16—0.3.23)终结。
 - **2026-07-12 (0.3.13 权限切换重启修复 — 单实例锁)**: 0.3.12 权限切换现象:逻辑全对(flag/token 提权降级都对,手动
   双击能以正确身份开),但**程序自己拉不起新窗口**(点了就关、不重开)。根因:`cmd_switch_permission` 启新进程后立即
   `PostMessage WM_CLOSE`,旧进程还没退、**单实例 mutex 还占着** → 新进程撞单实例守卫 `return 2` 自杀(手动双击时旧进程
