@@ -1141,6 +1141,9 @@ bool update_launch_updater() {
 
 // ── Run-as permission (Medium=normal / High=admin integrity) ────────────────
 
+extern void app_release_singleton();  // main.cpp — frees the single-instance mutex
+extern void app_acquire_singleton();  // main.cpp — re-grabs it if a relaunch aborts
+
 // True if this process runs elevated (High integrity == admin).
 static bool process_is_elevated() {
     bool elevated = false;
@@ -1254,8 +1257,12 @@ static std::string cmd_switch_permission(bool toAdmin) {
     bool already = process_is_elevated();
     set_run_as_admin_flag(toAdmin);
     if (toAdmin == already) return R"({"ok":true,"changed":false})";
+    // Free the single-instance lock BEFORE relaunching, else the new copy hits the
+    // guard and exits (code 2) since this instance hasn't fully quit yet.
+    app_release_singleton();
     bool ok = toAdmin ? relaunch_as_admin() : relaunch_as_medium();
     if (!ok) {
+        app_acquire_singleton();  // relaunch aborted (e.g. UAC denied) → restore the lock
         LOG_ERROR("cmd", "switch_permission: relaunch (%s) failed err=%lu",
             toAdmin ? "admin" : "normal", (unsigned long)GetLastError());
         return R"({"ok":false,"error":"relaunch failed"})";

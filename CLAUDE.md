@@ -295,6 +295,9 @@ check_update:
 
 ## Update Mechanism & Release Package
 
+> **完整自动更新逻辑 + 踩坑史(6 个坑)+ 已知隐患 → [`docs/auto-update.md`](docs/auto-update.md)**
+> （全链路时序、每坑根因/修法/版本、怎么发版 + 怎么测更新链）。首次端到端跑通:0.3.12→0.3.13。
+
 ### 发布包结构（`Release.ps1` 组装）
 
 ```
@@ -555,6 +558,11 @@ CLAUDE.md 只保留摘要和指向 CLAUDE.old.md 的引用。
 ## Changelog
 
 Full development history preserved in `CLAUDE.old.md`. Major milestones:
+- **2026-07-12 (0.3.13 权限切换重启修复 — 单实例锁)**: 0.3.12 权限切换现象:逻辑全对(flag/token 提权降级都对,手动
+  双击能以正确身份开),但**程序自己拉不起新窗口**(点了就关、不重开)。根因:`cmd_switch_permission` 启新进程后立即
+  `PostMessage WM_CLOSE`,旧进程还没退、**单实例 mutex 还占着** → 新进程撞单实例守卫 `return 2` 自杀(手动双击时旧进程
+  已退、mutex 释放 → 能起)。修:mutex 存全局 `g_singleton_mutex` + `app_release_singleton()`(`main.cpp`),
+  `cmd_switch_permission` relaunch 前先释放 → 新进程能起。发 0.3.13,兼作 0.3.12→0.3.13 更新链测试目标。
 - **2026-07-12 (0.3.12 更新链最后一环:updater 提权 + install 定位)**: 0.3.10→0.3.11 首次跑到 download 末段——21 文件
   下载 + sha256 校验**全通过**,卡在启 updater:`update_launch_updater: CreateProcess failed err=740`
   (ERROR_ELEVATION_REQUIRED)。根因:`updater.exe` 是 requireAdministrator(覆盖 Program Files),`CreateProcess` 从

@@ -104,6 +104,7 @@ struct NavCompletedHandler : ComCallbackBase<ICoreWebView2NavigationCompletedEve
 
 // ── Globals ────────────────────────────────────────────────
 static HWND                  g_hwnd = nullptr;
+static HANDLE                g_singleton_mutex = nullptr;  // single-instance lock; released on permission-switch relaunch
 // Window starts hidden and is revealed only once the frontend paints its first
 // frame (WM_SHOW_WINDOW) or the safety timer fires — hides the WebView2 startup
 // gap so the window never appears as a white blank. Idempotent via this flag.
@@ -211,9 +212,9 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR lpCm
     // logging system — a short-lived second process must not spawn a new log
     // session file (would pollute the front-end's history list). Signal via
     // exit code only: 2 = instance already running (raised existing window).
-    HANDLE hMutex = CreateMutexW(NULL, TRUE, SINGLE_INSTANCE_MUTEX);
+    g_singleton_mutex = CreateMutexW(NULL, TRUE, SINGLE_INSTANCE_MUTEX);
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
-        if (hMutex) CloseHandle(hMutex);
+        if (g_singleton_mutex) CloseHandle(g_singleton_mutex);
         HWND hExisting = FindWindowW(WINDOW_CLASS, TITLE);
         if (hExisting) {
             if (IsIconic(hExisting)) ShowWindow(hExisting, SW_RESTORE);
@@ -333,6 +334,23 @@ static void show_main_window()
 void app_post_show_window()
 {
     if (g_hwnd) PostMessageW(g_hwnd, WM_APP_SHOW_WINDOW, 0, 0);
+}
+
+// Release the single-instance mutex so a relaunched copy of ourselves (the
+// permission switch) can start immediately. Without this, the new process hits
+// the single-instance guard and exits (code 2) because we haven't fully quit yet
+// — which is why the app "closed but didn't reopen" on a permission switch.
+void app_release_singleton()
+{
+    if (g_singleton_mutex) { CloseHandle(g_singleton_mutex); g_singleton_mutex = nullptr; }
+}
+
+// Re-acquire the single-instance lock if a relaunch was aborted (e.g. the user
+// denied the UAC prompt) — restores single-instance protection for the instance
+// that stays running.
+void app_acquire_singleton()
+{
+    if (!g_singleton_mutex) g_singleton_mutex = CreateMutexW(NULL, TRUE, SINGLE_INSTANCE_MUTEX);
 }
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
