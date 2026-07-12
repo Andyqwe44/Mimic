@@ -1206,73 +1206,53 @@ static bool relaunch_as_admin() {
     return ok;
 }
 
-// Relaunch a fresh copy at MEDIUM integrity (normal user). Uses the standard
-// Windows technique: the elevated token's TokenLinkedToken is the original
-// non-elevated (Medium) token from before UAC. No manual IL manipulation needed.
+// Relaunch a fresh copy at MEDIUM integrity (normal user). Uses the shell's
+// COM automation (IShellDispatch) — explorer.exe always runs at Medium IL, so
+// processes launched through it inherit Medium IL regardless of our elevation.
+// This is the technique used by Inno Setup, Visual Studio, and all reputable
+// installers to launch a non-elevated process from an elevated one.
 static bool relaunch_as_medium() {
     char exePath[MAX_PATH] = {};
     GetModuleFileNameA(nullptr, exePath, MAX_PATH);
-    // Enable CreateProcessAsUserW privileges (present in admin tokens but may be disabled).
-    HANDLE hAdj = nullptr;
-    if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY | TOKEN_ADJUST_PRIVILEGES, &hAdj)) {
-        const char* privs[] = { "SeAssignPrimaryTokenPrivilege", "SeIncreaseQuotaPrivilege" };
-        for (const char* pn : privs) {
-            LUID luid;
-            if (LookupPrivilegeValueA(nullptr, pn, &luid)) {
-                TOKEN_PRIVILEGES tp = {}; tp.PrivilegeCount = 1;
-                tp.Privileges[0].Luid = luid;
-                tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
-                AdjustTokenPrivileges(hAdj, FALSE, &tp, sizeof(tp), nullptr, nullptr);
-            }
-        }
-        CloseHandle(hAdj);
-    }
-    HANDLE hSelf = nullptr;
-    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hSelf))
-        return false;
-    // The linked token is the pre-UAC-elevation token at Medium IL — exactly
-    // what we need for a normal-user process.
-    HANDLE hLinked = nullptr;
-    TOKEN_LINKED_TOKEN tlt = {};
-    DWORD cb = 0;
-    GetTokenInformation(hSelf, TokenLinkedToken, &tlt, sizeof(tlt), &cb);
-    hLinked = tlt.LinkedToken;
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, exePath, -1, nullptr, 0);
+    if (wlen <= 0) return false;
+    std::wstring wexe(wlen, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, exePath, -1, &wexe[0], wlen);
+
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     bool ok = false;
-    if (hLinked) {
-        // TokenLinkedToken is at SecurityIdentification level (too low for
-        // CreateProcessAsUserW / CreateProcessWithTokenW). Raise it to
-        // SecurityImpersonation, then duplicate to a primary token.
-        HANDLE hImp = nullptr;
-        if (DuplicateToken(hLinked, SecurityImpersonation, &hImp)) {
-            CloseHandle(hLinked);
-            hLinked = hImp;
-        }
-        HANDLE hPrimary = nullptr;
-        if (DuplicateTokenEx(hLinked, TOKEN_QUERY | TOKEN_ASSIGN_PRIMARY, nullptr,
-                SecurityImpersonation, TokenPrimary, &hPrimary)) {
-            CloseHandle(hLinked);
-            hLinked = nullptr;
-            wchar_t wexe[MAX_PATH] = {};
-            MultiByteToWideChar(CP_UTF8, 0, exePath, -1, wexe, MAX_PATH);
-            STARTUPINFOW si = {}; si.cb = sizeof(si);
-            PROCESS_INFORMATION pi = {};
-            if (CreateProcessAsUserW(hPrimary, wexe, nullptr, nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) {
-                CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
-                ok = true;
-            } else {
-                LOG_ERROR("cmd", "relaunch_as_medium: CreateProcessAsUserW failed err=%lu",
-                    (unsigned long)GetLastError());
-            }
-            CloseHandle(hPrimary);
+    IDispatch* pShell = nullptr;
+    HRESULT hr = CoCreateInstance(CLSID_Shell, nullptr, CLSCTX_LOCAL_SERVER,
+        IID_IDispatch, (void**)&pShell);
+    if (SUCCEEDED(hr) && pShell) {
+        // IDispatch::Invoke for ShellExecute(sFile, vArgs, vDir, vOp, vShow)
+        DISPID dispid;
+        OLECHAR* name = const_cast<OLECHAR*>(L"ShellExecute");
+        hr = pShell->GetIDsOfNames(IID_NULL, &name, 1, LOCALE_USER_DEFAULT, &dispid);
+        if (SUCCEEDED(hr)) {
+            // Params in reverse order: [sFile, vArgs, vDir, vOp, vShow]
+            VARIANTARG v[5] = {};
+            VariantInit(&v[4]); v[4].vt = VT_BSTR; v[4].bstrVal = SysAllocString(wexe.c_str());
+            VariantInit(&v[3]); // vArgs = empty
+            VariantInit(&v[2]); // vDir = empty
+            VariantInit(&v[1]); v[1].vt = VT_BSTR; v[1].bstrVal = SysAllocString(L"open");
+            VariantInit(&v[0]);
+            DISPPARAMS dp = { v, nullptr, 5, 0 };
+            VARIANT result; VariantInit(&result);
+            hr = pShell->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT,
+                DISPATCH_METHOD, &dp, &result, nullptr, nullptr);
+            ok = SUCCEEDED(hr);
+            if (!ok) LOG_ERROR("cmd", "relaunch_as_medium: ShellDispatch ShellExecute failed hr=0x%lx", (unsigned long)hr);
+            VariantClear(&result);
+            VariantClear(&v[4]); VariantClear(&v[1]);
         } else {
-            LOG_ERROR("cmd", "relaunch_as_medium: DuplicateTokenEx(linked->primary) failed err=%lu",
-                (unsigned long)GetLastError());
+            LOG_ERROR("cmd", "relaunch_as_medium: GetIDsOfNames(ShellExecute) failed hr=0x%lx", (unsigned long)hr);
         }
-        if (hLinked) CloseHandle(hLinked);
+        pShell->Release();
     } else {
-        LOG_ERROR("cmd", "relaunch_as_medium: TokenLinkedToken not found — cannot launch normal process");
+        LOG_ERROR("cmd", "relaunch_as_medium: CoCreateInstance(CLSID_Shell) failed hr=0x%lx", (unsigned long)hr);
     }
-    CloseHandle(hSelf);
+    CoUninitialize();
     return ok;
 }
 
