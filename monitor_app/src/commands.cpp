@@ -20,6 +20,9 @@
 #include <shlobj.h>    // SHGetFolderPathW, CSIDL_LOCAL_APPDATA
 #include "virtual_desktop.h"  // vd_list_desktops, vd_switch_desktop
 #include <shellapi.h>  // ShellExecuteA
+#include <exdisp.h>    // IShellWindows, CLSID_ShellWindows (explorer-launch)
+#include <shldisp.h>   // IShellFolderViewDual, IShellDispatch2 (explorer-launch)
+#include <servprov.h>  // IServiceProvider (explorer-launch)
 #include <windows.h>
 #include <tlhelp32.h>
 #include <dwmapi.h>
@@ -1206,11 +1209,96 @@ static bool relaunch_as_admin() {
     return ok;
 }
 
-// Relaunch a fresh copy at MEDIUM integrity (normal user). Uses the shell's
-// COM automation (IShellDispatch) — explorer.exe always runs at Medium IL, so
-// processes launched through it inherit Medium IL regardless of our elevation.
-// This is the technique used by Inno Setup, Visual Studio, and all reputable
-// installers to launch a non-elevated process from an elevated one.
+// <shellapi.h> #defines ShellExecute → ShellExecuteA, which would rewrite the
+// IShellDispatch2::ShellExecute method call below into a non-existent member.
+// Drop the macro; explicit ShellExecuteA/ShellExecuteExA elsewhere are unaffected.
+#ifdef ShellExecute
+#undef ShellExecute
+#endif
+
+// Ask the ALREADY-RUNNING desktop shell (explorer.exe, always Medium IL) to
+// ShellExecute for us. No Win32 primitive spawns a lower-IL child, so we reach
+// explorer's automation object through the desktop ShellView's IShellDispatch2
+// (Raymond Chen's technique) and its child inherits explorer's Medium IL.
+// NOT CoCreateInstance(CLSID_Shell): an in-proc Shell object runs at OUR High
+// IL (no de-elevation) and CLSID_Shell has no LOCAL_SERVER reg → 0x80040154.
+static bool shell_execute_via_explorer(const std::wstring& file,
+                                       const std::wstring& args,
+                                       const std::wstring& verb) {
+    bool ok = false;
+    IShellWindows* psw = nullptr;
+    HRESULT hr = CoCreateInstance(CLSID_ShellWindows, nullptr, CLSCTX_ALL,
+                                  IID_IShellWindows, (void**)&psw);
+    if (FAILED(hr) || !psw) {
+        LOG_ERROR("cmd", "explorer-launch: CoCreateInstance(ShellWindows) hr=0x%lx", (unsigned long)hr);
+        return false;
+    }
+
+    VARIANT vEmpty; VariantInit(&vEmpty);
+    VARIANT vLoc;   VariantInit(&vLoc); vLoc.vt = VT_I4; vLoc.lVal = CSIDL_DESKTOP;
+    long lhwnd = 0;
+    IDispatch* pdisp = nullptr;
+    hr = psw->FindWindowSW(&vLoc, &vEmpty, SWC_DESKTOP, &lhwnd, SWFO_NEEDDISPATCH, &pdisp);
+    if (FAILED(hr) || !pdisp) {
+        LOG_ERROR("cmd", "explorer-launch: FindWindowSW hr=0x%lx", (unsigned long)hr);
+        psw->Release();
+        return false;
+    }
+
+    IServiceProvider* psp = nullptr;
+    hr = pdisp->QueryInterface(IID_IServiceProvider, (void**)&psp);
+    if (SUCCEEDED(hr) && psp) {
+        IShellBrowser* psb = nullptr;
+        hr = psp->QueryService(SID_STopLevelBrowser, IID_IShellBrowser, (void**)&psb);
+        if (SUCCEEDED(hr) && psb) {
+            IShellView* psv = nullptr;
+            hr = psb->QueryActiveShellView(&psv);
+            if (SUCCEEDED(hr) && psv) {
+                IDispatch* pvdisp = nullptr;
+                hr = psv->GetItemObject(SVGIO_BACKGROUND, IID_IDispatch, (void**)&pvdisp);
+                if (SUCCEEDED(hr) && pvdisp) {
+                    IShellFolderViewDual* pfvd = nullptr;
+                    hr = pvdisp->QueryInterface(IID_IShellFolderViewDual, (void**)&pfvd);
+                    if (SUCCEEDED(hr) && pfvd) {
+                        IDispatch* pappdisp = nullptr;
+                        hr = pfvd->get_Application(&pappdisp);
+                        if (SUCCEEDED(hr) && pappdisp) {
+                            IShellDispatch2* psd = nullptr;
+                            hr = pappdisp->QueryInterface(IID_IShellDispatch2, (void**)&psd);
+                            if (SUCCEEDED(hr) && psd) {
+                                BSTR bFile = SysAllocString(file.c_str());
+                                VARIANT vArgs; VariantInit(&vArgs);
+                                if (!args.empty()) { vArgs.vt = VT_BSTR; vArgs.bstrVal = SysAllocString(args.c_str()); }
+                                VARIANT vDir;  VariantInit(&vDir);
+                                VARIANT vOp;   VariantInit(&vOp);   vOp.vt = VT_BSTR; vOp.bstrVal = SysAllocString(verb.c_str());
+                                VARIANT vShow; VariantInit(&vShow); vShow.vt = VT_I4;  vShow.lVal = SW_SHOWNORMAL;
+                                hr = psd->ShellExecute(bFile, vArgs, vDir, vOp, vShow);
+                                ok = SUCCEEDED(hr);
+                                if (!ok) LOG_ERROR("cmd", "explorer-launch: ShellExecute hr=0x%lx", (unsigned long)hr);
+                                SysFreeString(bFile);
+                                VariantClear(&vArgs); VariantClear(&vOp);
+                                psd->Release();
+                            } else LOG_ERROR("cmd", "explorer-launch: QI IShellDispatch2 hr=0x%lx", (unsigned long)hr);
+                            pappdisp->Release();
+                        } else LOG_ERROR("cmd", "explorer-launch: get_Application hr=0x%lx", (unsigned long)hr);
+                        pfvd->Release();
+                    } else LOG_ERROR("cmd", "explorer-launch: QI IShellFolderViewDual hr=0x%lx", (unsigned long)hr);
+                    pvdisp->Release();
+                } else LOG_ERROR("cmd", "explorer-launch: GetItemObject hr=0x%lx", (unsigned long)hr);
+                psv->Release();
+            } else LOG_ERROR("cmd", "explorer-launch: QueryActiveShellView hr=0x%lx", (unsigned long)hr);
+            psb->Release();
+        } else LOG_ERROR("cmd", "explorer-launch: QueryService(TopLevelBrowser) hr=0x%lx", (unsigned long)hr);
+        psp->Release();
+    } else LOG_ERROR("cmd", "explorer-launch: QI IServiceProvider hr=0x%lx", (unsigned long)hr);
+
+    pdisp->Release();
+    psw->Release();
+    return ok;
+}
+
+// Relaunch a fresh copy at MEDIUM integrity (normal user) from our elevated
+// process, by routing the launch through explorer (see above).
 static bool relaunch_as_medium() {
     char exePath[MAX_PATH] = {};
     GetModuleFileNameA(nullptr, exePath, MAX_PATH);
@@ -1219,40 +1307,11 @@ static bool relaunch_as_medium() {
     std::wstring wexe(wlen, L'\0');
     MultiByteToWideChar(CP_UTF8, 0, exePath, -1, &wexe[0], wlen);
 
-    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-    bool ok = false;
-    IDispatch* pShell = nullptr;
-    HRESULT hr = CoCreateInstance(CLSID_Shell, nullptr, CLSCTX_LOCAL_SERVER,
-        IID_IDispatch, (void**)&pShell);
-    if (SUCCEEDED(hr) && pShell) {
-        // IDispatch::Invoke for ShellExecute(sFile, vArgs, vDir, vOp, vShow)
-        DISPID dispid;
-        OLECHAR* name = const_cast<OLECHAR*>(L"ShellExecute");
-        hr = pShell->GetIDsOfNames(IID_NULL, &name, 1, LOCALE_USER_DEFAULT, &dispid);
-        if (SUCCEEDED(hr)) {
-            // Params in reverse order: [sFile, vArgs, vDir, vOp, vShow]
-            VARIANTARG v[5] = {};
-            VariantInit(&v[4]); v[4].vt = VT_BSTR; v[4].bstrVal = SysAllocString(wexe.c_str());
-            VariantInit(&v[3]); // vArgs = empty
-            VariantInit(&v[2]); // vDir = empty
-            VariantInit(&v[1]); v[1].vt = VT_BSTR; v[1].bstrVal = SysAllocString(L"open");
-            VariantInit(&v[0]);
-            DISPPARAMS dp = { v, nullptr, 5, 0 };
-            VARIANT result; VariantInit(&result);
-            hr = pShell->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT,
-                DISPATCH_METHOD, &dp, &result, nullptr, nullptr);
-            ok = SUCCEEDED(hr);
-            if (!ok) LOG_ERROR("cmd", "relaunch_as_medium: ShellDispatch ShellExecute failed hr=0x%lx", (unsigned long)hr);
-            VariantClear(&result);
-            VariantClear(&v[4]); VariantClear(&v[1]);
-        } else {
-            LOG_ERROR("cmd", "relaunch_as_medium: GetIDsOfNames(ShellExecute) failed hr=0x%lx", (unsigned long)hr);
-        }
-        pShell->Release();
-    } else {
-        LOG_ERROR("cmd", "relaunch_as_medium: CoCreateInstance(CLSID_Shell) failed hr=0x%lx", (unsigned long)hr);
-    }
-    CoUninitialize();
+    // Balance CoUninitialize only on S_OK/S_FALSE (both bump the ref count);
+    // RPC_E_CHANGED_MODE means COM was already up on this thread — don't unwind it.
+    HRESULT hrInit = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    bool ok = shell_execute_via_explorer(wexe, L"", L"open");
+    if (SUCCEEDED(hrInit)) CoUninitialize();
     return ok;
 }
 
