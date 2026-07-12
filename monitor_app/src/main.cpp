@@ -317,6 +317,18 @@ static void show_main_window()
     KillTimer(g_hwnd, TIMER_SHOW_SAFETY);
     ShowWindow(g_hwnd, SW_SHOWNORMAL);
     SetForegroundWindow(g_hwnd);
+    // Safety-net help text shown on the grey fallback background (only visible
+    // when the frontend fails to load — WebView2 is blank, so hbrBackground shows
+    // through). Give the user actionable steps instead of a dead grey page.
+    {
+        const char* help =
+            "Game Agent Monitor 未能正常加载。"
+            "这可能是因为 WebView2 环境创建失败,或前端资源损坏。"
+            "请尝试: 1. 重新安装 Game Agent Monitor; "
+            "2. 安装/修复 Microsoft Edge WebView2 Runtime (go.microsoft.com/fwlink/p/?LinkId=2124703); "
+            "3. 访问 gitee.com/Andyqwe44/tictactoe 获取最新安装包。";
+        SetWindowTextA(g_hwnd, help);
+    }
     // The WebView2 was created on a HIDDEN window → its compositor was paused and
     // it holds a blank frame. Revealing the HWND alone does NOT force a repaint
     // (that was the grey-window bug). Make the controller visible and re-apply

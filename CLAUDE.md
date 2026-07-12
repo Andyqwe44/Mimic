@@ -591,7 +591,7 @@ Full development history preserved in `CLAUDE.old.md`. Major milestones:
   `PostMessage WM_CLOSE`,旧进程还没退、**单实例 mutex 还占着** → 新进程撞单实例守卫 `return 2` 自杀(手动双击时旧进程
   已退、mutex 释放 → 能起)。修:mutex 存全局 `g_singleton_mutex` + `app_release_singleton()`(`main.cpp`),
   `cmd_switch_permission` relaunch 前先释放 → 新进程能起。发 0.3.13,兼作 0.3.12→0.3.13 更新链测试目标。
-- **2026-07-12 (0.3.14 引号 bug + 铁律 9)**: 0.3.12→0.3.13 更新链覆盖环节失败——下载+sha 全过,但 updater
+- **2026-07-12 (0.3.15 降级失败修复 + 深灰兜底提示 + 引号 bug 铁律 9)**: 0.3.12→0.3.13 更新链覆盖环节失败——下载+sha 全过,但 updater
   `copy_staging` 拷贝 0 文件,staging 23 文件完好(未被删)。**根因**:`update_launch_updater` 给 staging 参数加了
   双引号 → `strtok` 把引号当路径一部分 → `FindFirstFileA` 非法 → 0 文件。手动不引号跑 updater 验证成功。**修**:
   `commands.cpp` params 不加引号(铁律 9a);`updater.cpp` `unquote` 剥两端双引号防御(铁律 9b);CLAUDE.md 加
