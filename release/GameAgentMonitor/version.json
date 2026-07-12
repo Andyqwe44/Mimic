@@ -2,7 +2,7 @@
     "schema":  2,
     "app":  "0.3.16",
     "channel":  "stable",
-    "released":  "2026-07-12T15:59:07.747Z",
+    "released":  "2026-07-12T16:03:34.231Z",
     "min_version":  "0.3.16",
     "mandatory":  false,
     "message":  "",
@@ -15,57 +15,57 @@
     "files":  {
                   "bin/capture_common.dll":  {
                                                  "v":  "0.3.16",
-                                                 "sha256":  "27837e9d417a0b63433085909b9f0c397a6c6077f04b2206a131c3fc93aef625",
+                                                 "sha256":  "cf1bfc5971555adbd03a00323ca4b66aba697e5134bb0d02e6b570a7532b8d09",
                                                  "size":  105984
                                              },
                   "bin/capture_desktop.dll":  {
                                                   "v":  "0.3.16",
-                                                  "sha256":  "26f461509df2c152603d00c975f506742d89d342f516ed9f2d98db05df8a78dc",
+                                                  "sha256":  "3721578ca09d8ac9751374596bc9901ffa7e69d8e3dff44f089eecd6711e5177",
                                                   "size":  125440
                                               },
                   "bin/capture_gdi.dll":  {
                                               "v":  "0.3.16",
-                                              "sha256":  "777260851fde6f7851a91f2bf1943848cf9d7b446fefc1a54317fb851ce5cd25",
+                                              "sha256":  "be0c4c36084b26ef7022c96a04ad41d45c5e4a00778bfcbd503a1d3d814a2ad1",
                                               "size":  126464
                                           },
                   "bin/capture_pw.dll":  {
                                              "v":  "0.3.16",
-                                             "sha256":  "9f5235cdcb0df503a354a22e4fff9d8df2f9df9fffc25d703d071e7de74bc52f",
+                                             "sha256":  "c26c9705bd6d435c46e65eb59e8527d83193645dee09f65063450b0e6b5ce30b",
                                              "size":  124928
                                          },
                   "bin/capture_screen.dll":  {
                                                  "v":  "0.3.16",
-                                                 "sha256":  "4d2475ad3c8dd4754cfe23cb90062c41d954fa0f54dc6a40edf9832c430d0eba",
+                                                 "sha256":  "945d219b57c3891f6ff447d47e9e9e2ccc6a6b8ef2e5cb78b9cedd8f34567b0a",
                                                  "size":  126976
                                              },
                   "bin/capture_wgc.dll":  {
                                               "v":  "0.3.16",
-                                              "sha256":  "510ae73b1a40e14ed421031575cc002ad3df702062905b9a4cf370815e5b9c95",
+                                              "sha256":  "5245b0438e4df8fc2e3d747499654d4774b526f769be5a935620e8aa25d0cecf",
                                               "size":  272384
                                           },
                   "bin/input_common.dll":  {
                                                "v":  "0.3.16",
-                                               "sha256":  "0f0b04f5d90bfca21ccdec4cd6867bbd4f407bf3f0b693f0e90e6dfacc760b65",
+                                               "sha256":  "7c986fa4efaba76678dfaf08638b3f48e798b9293248a7fa5f8efa26cf986ad0",
                                                "size":  201728
                                            },
                   "bin/input_driver.dll":  {
                                                "v":  "0.3.16",
-                                               "sha256":  "fae53b720902273683bf8e7cc093c75a38b8ad3b4b581cfadf59412a7f13e0aa",
+                                               "sha256":  "0a2bd15eb4a808a89032eb975d57dbbb1c9fe90ff883f85e1ae29592d72baec7",
                                                "size":  122368
                                            },
                   "bin/input_postmessage.dll":  {
                                                     "v":  "0.3.16",
-                                                    "sha256":  "e6eb497024b493e7ae995d7dcea8918626008ae2947d6d2f83974abfd6283863",
+                                                    "sha256":  "10a30458b65879d5fb0c9f5b27bbf321a0261673efe08b6de17d101ff90628f8",
                                                     "size":  166400
                                                 },
                   "bin/input_sendinput.dll":  {
                                                   "v":  "0.3.16",
-                                                  "sha256":  "f7feab0d8107f16772a0d5b0d409c3673f6de90be30e62c5cc52f1aa51258dce",
+                                                  "sha256":  "97159daa5fe7ed5f99235058a3b48a9c7d512d4d57b92acb83626653d97ae096",
                                                   "size":  171520
                                               },
                   "bin/input_winapi.dll":  {
                                                "v":  "0.3.16",
-                                               "sha256":  "d93dda802dd1baa0537a9e826e6218aa0b547e24ff8772185031d8e6676996a3",
+                                               "sha256":  "f3c78c874e049e160cde420dfa9eb7e6cfd644c14616ac6b3cae687653110e84",
                                                "size":  166400
                                            },
                   "bin/logger.dll":  {
