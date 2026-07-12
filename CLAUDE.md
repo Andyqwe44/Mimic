@@ -591,6 +591,15 @@ Full development history preserved in `CLAUDE.old.md`. Major milestones:
   `PostMessage WM_CLOSE`,旧进程还没退、**单实例 mutex 还占着** → 新进程撞单实例守卫 `return 2` 自杀(手动双击时旧进程
   已退、mutex 释放 → 能起)。修:mutex 存全局 `g_singleton_mutex` + `app_release_singleton()`(`main.cpp`),
   `cmd_switch_permission` relaunch 前先释放 → 新进程能起。发 0.3.13,兼作 0.3.12→0.3.13 更新链测试目标。
+- **2026-07-13 (0.3.16—0.3.22 降级 debug 马拉松 + 终极 IShellDispatch)**: 管理员→普通降级反复试了 6 个版本——0.3.16
+  (`SetTokenInformation` 连续缓冲区,编译过但降 IL 未生效)、0.3.17-0.3.18(`TokenLinkedToken`+`DuplicateTokenEx`
+  →主,err=1346 `ERROR_BAD_IMPERSONATION_LEVEL`)、0.3.19-0.3.20(CreateProcessAsUserW+CreateProcessWithTokenW
+  双保险,双 1346)、0.3.21(`DuplicateToken` 升身份模拟级别→`DuplicateTokenEx`→仍 1346,**TokenLinkedToken 本质
+  不能转主 token**)。**0.3.22 终极方案 `IShellDispatch` COM**:`CoCreateInstance(CLSID_Shell)`→`IDispatch::Invoke
+  (ShellExecute)` —— 通过 explorer.exe(始终 Medium IL)的 COM 自动化代理启动,explorer 创建子进程 = 普通权限。
+  Token 操作(~70 行)全删,~30 行 COM 替代。这是 Inno Setup / Visual Studio / Chrome 的标准做法。附带:
+  双 UAC 防重入(`update_launch_updater` static guard)、`/Brepro` 确定性 PE 时间戳、深灰页静态控件提示、
+  installer 自动清 `RUNASADMIN`、`updater.log` 自写日志、铁律 9(跨进程参数引号+斜杠规范)。**待测:0.3.22 降级**。
 - **2026-07-12 (0.3.15 降级失败修复 + 深灰兜底提示 + 引号 bug 铁律 9)**: 0.3.12→0.3.13 更新链覆盖环节失败——下载+sha 全过,但 updater
   `copy_staging` 拷贝 0 文件,staging 23 文件完好(未被删)。**根因**:`update_launch_updater` 给 staging 参数加了
   双引号 → `strtok` 把引号当路径一部分 → `FindFirstFileA` 非法 → 0 文件。手动不引号跑 updater 验证成功。**修**:
