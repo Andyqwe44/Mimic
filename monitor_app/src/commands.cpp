@@ -1206,21 +1206,20 @@ static bool relaunch_as_admin() {
     return ok;
 }
 
-// Relaunch a fresh copy at MEDIUM integrity (normal user) — self-contained, NO
-// dependency on explorer: duplicate our own token, drop its integrity level to
-// Medium, CreateProcessAsUser with it.
+// Relaunch a fresh copy at MEDIUM integrity (normal user). Uses the standard
+// Windows technique: the elevated token's TokenLinkedToken is the original
+// non-elevated (Medium) token from before UAC. No manual IL manipulation needed.
 static bool relaunch_as_medium() {
     char exePath[MAX_PATH] = {};
     GetModuleFileNameA(nullptr, exePath, MAX_PATH);
-    // Enable the privileges CreateProcessAsUser needs (present on an admin token).
+    // Enable CreateProcessAsUserW privileges (present in admin tokens but may be disabled).
     HANDLE hAdj = nullptr;
     if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY | TOKEN_ADJUST_PRIVILEGES, &hAdj)) {
         const char* privs[] = { "SeAssignPrimaryTokenPrivilege", "SeIncreaseQuotaPrivilege" };
         for (const char* pn : privs) {
             LUID luid;
             if (LookupPrivilegeValueA(nullptr, pn, &luid)) {
-                TOKEN_PRIVILEGES tp = {};
-                tp.PrivilegeCount = 1;
+                TOKEN_PRIVILEGES tp = {}; tp.PrivilegeCount = 1;
                 tp.Privileges[0].Luid = luid;
                 tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
                 AdjustTokenPrivileges(hAdj, FALSE, &tp, sizeof(tp), nullptr, nullptr);
@@ -1228,52 +1227,32 @@ static bool relaunch_as_medium() {
         }
         CloseHandle(hAdj);
     }
-    HANDLE hSelf = nullptr, hNew = nullptr;
-    if (!OpenProcessToken(GetCurrentProcess(),
-            TOKEN_DUPLICATE | TOKEN_ADJUST_DEFAULT | TOKEN_QUERY | TOKEN_ASSIGN_PRIMARY, &hSelf))
+    HANDLE hSelf = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hSelf))
         return false;
+    // The linked token is the pre-UAC-elevation token at Medium IL — exactly
+    // what we need for a normal-user process.
+    HANDLE hLinked = nullptr;
+    TOKEN_LINKED_TOKEN tlt = {};
+    DWORD cb = 0;
+    GetTokenInformation(hSelf, TokenLinkedToken, &tlt, sizeof(tlt), &cb);
+    hLinked = tlt.LinkedToken;
     bool ok = false;
-    if (DuplicateTokenEx(hSelf, MAXIMUM_ALLOWED, nullptr, SecurityImpersonation, TokenPrimary, &hNew)) {
-        SID_IDENTIFIER_AUTHORITY sia = SECURITY_MANDATORY_LABEL_AUTHORITY;
-        PSID pMed = nullptr;
-        if (AllocateAndInitializeSid(&sia, 1, SECURITY_MANDATORY_MEDIUM_RID, 0, 0, 0, 0, 0, 0, 0, &pMed)) {
-            // SetTokenInformation(TokenIntegrityLevel) requires a CONTIGUOUS
-            // buffer: TOKEN_MANDATORY_LABEL struct immediately followed by the
-            // SID data. The PSID in the struct must point to offset sizeof(*pTml)
-            // into this same buffer. Passing a struct with a PSID pointing to
-            // separately heap-allocated SID memory (AllocateAndInitializeSid)
-            // silently fails — SetTokenInformation returns TRUE but cannot find
-            // the SID, and the integrity level is never lowered. 铁律 ?: check
-            // EVERY API return and validate side-effects.
-            DWORD sidLen = GetLengthSid(pMed);
-            DWORD bufLen = sizeof(TOKEN_MANDATORY_LABEL) + sidLen;
-            BYTE* buf = (BYTE*)malloc(bufLen);
-            if (buf) {
-                TOKEN_MANDATORY_LABEL* pTml = (TOKEN_MANDATORY_LABEL*)buf;
-                pTml->Label.Attributes = SE_GROUP_INTEGRITY;
-                pTml->Label.Sid = (PSID)(buf + sizeof(TOKEN_MANDATORY_LABEL));
-                memcpy(buf + sizeof(TOKEN_MANDATORY_LABEL), pMed, sidLen);
-                if (!SetTokenInformation(hNew, TokenIntegrityLevel, pTml, bufLen)) {
-                    LOG_ERROR("cmd", "relaunch_as_medium: SetTokenInformation(Medium IL) failed err=%lu",
-                        (unsigned long)GetLastError());
-                } else {
-                    wchar_t wexe[MAX_PATH] = {};
-                    MultiByteToWideChar(CP_UTF8, 0, exePath, -1, wexe, MAX_PATH);
-                    STARTUPINFOW si = {}; si.cb = sizeof(si);
-                    PROCESS_INFORMATION pi = {};
-                    if (CreateProcessAsUserW(hNew, wexe, nullptr, nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) {
-                        CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
-                        ok = true;
-                    } else {
-                        LOG_ERROR("cmd", "relaunch_as_medium: CreateProcessAsUserW failed err=%lu",
-                            (unsigned long)GetLastError());
-                    }
-                }
-                free(buf);
-            }
-            FreeSid(pMed);
+    if (hLinked) {
+        wchar_t wexe[MAX_PATH] = {};
+        MultiByteToWideChar(CP_UTF8, 0, exePath, -1, wexe, MAX_PATH);
+        STARTUPINFOW si = {}; si.cb = sizeof(si);
+        PROCESS_INFORMATION pi = {};
+        if (CreateProcessAsUserW(hLinked, wexe, nullptr, nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) {
+            CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
+            ok = true;
+        } else {
+            LOG_ERROR("cmd", "relaunch_as_medium: CreateProcessAsUserW(linked token) failed err=%lu",
+                (unsigned long)GetLastError());
         }
-        CloseHandle(hNew);
+        CloseHandle(hLinked);
+    } else {
+        LOG_ERROR("cmd", "relaunch_as_medium: TokenLinkedToken not found — cannot launch normal process");
     }
     CloseHandle(hSelf);
     return ok;
