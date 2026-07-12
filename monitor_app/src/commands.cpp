@@ -1234,15 +1234,22 @@ static bool relaunch_as_medium() {
             TOKEN_MANDATORY_LABEL tml = {};
             tml.Label.Attributes = SE_GROUP_INTEGRITY;
             tml.Label.Sid = pMed;
-            SetTokenInformation(hNew, TokenIntegrityLevel, &tml,
-                (DWORD)(sizeof(TOKEN_MANDATORY_LABEL) + GetLengthSid(pMed)));
-            wchar_t wexe[MAX_PATH] = {};
-            MultiByteToWideChar(CP_UTF8, 0, exePath, -1, wexe, MAX_PATH);
-            STARTUPINFOW si = {}; si.cb = sizeof(si);
-            PROCESS_INFORMATION pi = {};
-            if (CreateProcessAsUserW(hNew, wexe, nullptr, nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) {
-                CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
-                ok = true;
+            if (!SetTokenInformation(hNew, TokenIntegrityLevel, &tml,
+                    (DWORD)(sizeof(TOKEN_MANDATORY_LABEL) + GetLengthSid(pMed)))) {
+                LOG_ERROR("cmd", "relaunch_as_medium: SetTokenInformation(Medium IL) failed err=%lu — token stays High, process would be admin. Aborting downgrade.",
+                    (unsigned long)GetLastError());
+            } else {
+                wchar_t wexe[MAX_PATH] = {};
+                MultiByteToWideChar(CP_UTF8, 0, exePath, -1, wexe, MAX_PATH);
+                STARTUPINFOW si = {}; si.cb = sizeof(si);
+                PROCESS_INFORMATION pi = {};
+                if (CreateProcessAsUserW(hNew, wexe, nullptr, nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) {
+                    CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
+                    ok = true;
+                } else {
+                    LOG_ERROR("cmd", "relaunch_as_medium: CreateProcessAsUserW failed err=%lu",
+                        (unsigned long)GetLastError());
+                }
             }
             FreeSid(pMed);
         }
