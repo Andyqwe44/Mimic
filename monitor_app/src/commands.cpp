@@ -1239,23 +1239,34 @@ static bool relaunch_as_medium() {
     hLinked = tlt.LinkedToken;
     bool ok = false;
     if (hLinked) {
-        // TokenLinkedToken is an impersonation token; CreateProcessAsUserW
-        // requires a primary token. Duplicate it first.
-        HANDLE hPrimary = nullptr;
-        if (DuplicateTokenEx(hLinked, MAXIMUM_ALLOWED, nullptr, SecurityImpersonation, TokenPrimary, &hPrimary)) {
-            CloseHandle(hLinked);
-            hLinked = hPrimary;
-        }
         wchar_t wexe[MAX_PATH] = {};
         MultiByteToWideChar(CP_UTF8, 0, exePath, -1, wexe, MAX_PATH);
         STARTUPINFOW si = {}; si.cb = sizeof(si);
         PROCESS_INFORMATION pi = {};
-        if (CreateProcessAsUserW(hLinked, wexe, nullptr, nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) {
-            CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
-            ok = true;
-        } else {
-            LOG_ERROR("cmd", "relaunch_as_medium: CreateProcessAsUserW(linked token) failed err=%lu",
-                (unsigned long)GetLastError());
+        // Try primary-token approach first (DuplicateTokenEx → CreateProcessAsUserW).
+        HANDLE hPrimary = nullptr;
+        if (DuplicateTokenEx(hLinked, TOKEN_QUERY | TOKEN_ASSIGN_PRIMARY, nullptr,
+                SecurityImpersonation, TokenPrimary, &hPrimary)) {
+            if (CreateProcessAsUserW(hPrimary, wexe, nullptr, nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) {
+                CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
+                ok = true;
+            } else {
+                LOG_ERROR("cmd", "relaunch_as_medium: CreateProcessAsUserW failed err=%lu",
+                    (unsigned long)GetLastError());
+            }
+            CloseHandle(hPrimary);
+        }
+        // Fallback: CreateProcessWithTokenW accepts impersonation tokens directly.
+        if (!ok) {
+            DWORD dupErr = GetLastError();
+            LOG("cmd", "relaunch_as_medium: DuplicateTokenEx/CreateProcessAsUserW path failed (last-err=%lu), trying CreateProcessWithTokenW", dupErr);
+            if (CreateProcessWithTokenW(hLinked, 0, wexe, nullptr, 0, nullptr, nullptr, &si, &pi)) {
+                CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
+                ok = true;
+            } else {
+                LOG_ERROR("cmd", "relaunch_as_medium: CreateProcessWithTokenW also failed err=%lu",
+                    (unsigned long)GetLastError());
+            }
         }
         CloseHandle(hLinked);
     } else {
