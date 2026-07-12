@@ -25,7 +25,7 @@ const DEFAULT_RIGHT_WIDTH = 324
 // DELIBERATE test delay so the startup skeleton screen stays visible long enough
 // to observe during development. Real startup needs NO artificial wait — the
 // skeleton would otherwise flash by. Set to 0 (or delete the timer) for production.
-const SPLASH_TEST_MS = 1500
+const SPLASH_TEST_MS = 0
 
 export default function App() {
   // ═══ UI state ═══
