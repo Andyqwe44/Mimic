@@ -127,9 +127,14 @@ tictactoe/
 │   └── src/                  # sendinput/winapi/postmessage/driver
 ├── monitor_app/              # C++ WebView2 宿主
 │   ├── src/                  # main + commands + mjpeg + json_helper
-│   ├── dep/                  # WebView2 SDK
-│   ├── build.cmd             # Prod: /O2, 嵌入 dist, → build/
-│   └── build_dev.cmd         # Dev: /Od, HMR, → build_dev/
+│   └── dep/                  # WebView2 SDK  (构建由 scripts\Build.ps1 -Module monitor_app)
+├── scripts/                  # ⭐ 全 PowerShell 构建/发布链 (替旧 .sh/.cmd/.mjs)
+│   ├── lib/Common.ps1        # Enter-VsDevShell / Get-AppVersion / New-VerModuleHeader
+│   ├── Build.ps1             # 编译全模块 (一个 VS Dev Shell, -Module/-Dev)
+│   ├── New-VersionJson.ps1   # version.json (Get-FileHash, 替 gen_version.mjs)
+│   ├── Verify.ps1            # 隔离验证 (替 verify_isolated.cmd)
+│   ├── Publish.ps1           # Gitee (Invoke-RestMethod, 替 publish_release.sh)
+│   └── Release.ps1           # 顶层编排 (替 release.sh + build_release.cmd)
 ├── monitor_web/              # React 前端 (Vite + Tailwind)
 │   └── src/
 │       ├── App.tsx           # 主编排 (~530 lines)
@@ -142,19 +147,22 @@ tictactoe/
 
 ## Build Commands
 
-```bash
-# 1. Build static libs (once, or when C++ changes)
-cd logger   && build_logger_lib.cmd
-cd capture  && build_capture_lib.cmd
-cd input    && build_input_lib.cmd
+**All build/release scripts are PowerShell under `scripts/`** — one VS Dev Shell
+(`Enter-VsDevShell`, no `vcvars.bat`), no cmd/node/bash. Files: `lib/Common.ps1`,
+`Build.ps1`, `New-VersionJson.ps1`, `Verify.ps1`, `Publish.ps1`, `Release.ps1`.
 
-# 2a. Dev build (Vite HMR, debug)
-cd monitor_web && npm run dev        # Vite :1420
-cd monitor_app && build_dev.cmd      # → build_dev\monitor_app.exe
+```powershell
+# 1. Native modules — logger + capture + input + updater + monitor_app (prod)
+powershell -File scripts\Build.ps1                      # all, one VS Dev Shell
+powershell -File scripts\Build.ps1 -Module logger       # a single module
 
-# 2b. Prod build (optimized, self-contained)
-cd monitor_web && npm run build      # Vite → dist/
-cd monitor_app && build.cmd          # embed dist → build\monitor_app.exe
+# 2a. Dev build (Vite HMR + debug monitor_app → build_dev\bin\)
+cd monitor_web; npm run dev                             # Vite :1420
+powershell -File scripts\Build.ps1 -Module monitor_app -Dev
+
+# 2b. Prod build (optimized, self-contained → monitor_app\build\{bin,frontend,config})
+cd monitor_web; npm run build                           # Vite → dist/
+powershell -File scripts\Build.ps1 -Module monitor_app  # stages dist into build\frontend
 ```
 
 | | Dev | Prod |
@@ -180,39 +188,40 @@ Exit code `2` = already running (existing window raised).
 
 ### Step 1: Dev 验证
 
-```bash
+```powershell
 # 1. 改版本号（只需改这一个文件! 铁律 8）
 #    编辑 monitor_app/src/version.h → APP_VERSION + APP_VERSION_RC
 
-# 2. 构建所有 lib + dev app
-cd logger   && build_logger_lib.cmd
-cd capture  && build_capture_lib.cmd
-cd input    && build_input_lib.cmd
-cd monitor_app && build_dev.cmd
+# 2. 构建（一个 VS Dev Shell，无 vcvars/cmd）
+powershell -File scripts\Build.ps1                           # libs + updater + monitor_app(prod)
+powershell -File scripts\Build.ps1 -Module monitor_app -Dev # dev exe → build_dev\bin\
 
 # 3. 启动前端 + 测试
-cd monitor_web && npm run dev      # 终端 1: Vite :1420
-cd monitor_app && build_dev\monitor_app.exe  # 终端 2: Dev app
+cd monitor_web; npm run dev                                 # 终端 1: Vite :1420
+monitor_app\build_dev\bin\monitor_app.exe                   # 终端 2: Dev app
 
 # 4. 验证: GUI 正常渲染, 版本号正确, 功能无回归
 ```
 
-### Step 2 → 4: 一键发布 `release.sh`（推荐）
+### Step 2 → 4: 一键发布 `Release.ps1`（推荐）
 
-**改完 `version.h` 后只需一条命令**（git-bash）——版本号是唯一手改点：
+**改完 `version.h` 后只需一条命令**（PowerShell）——版本号是唯一手改点（脚本从 version.h 读，不传参）：
 
-```bash
-bash release.sh 0.3.5   # 校验 version.h → build_release → publish → 验 raw URL
+```powershell
+powershell -File scripts\Release.ps1            # build → verify → git push → Gitee → 验 raw URL
+powershell -File scripts\Release.ps1 -DryRun    # 只 build+verify（不 push/发），安全全链自测
 ```
 
-`release.sh` 串起全流程，任一步失败即中止（不推不发）：
-1. `build_release.cmd`：编译 libs+app → 组装 `release\GameAgentMonitor\{bin,frontend,config}`
-   → `verify_isolated.cmd --auto`（拷包到 `%TEMP%\GAM_verify`，**轮询 90s 抓 `prod: frontend served`**，
-   拷前 kill 旧实例+webview2）→ 通过才 `git commit+tag+push`。
-2. `publish_release.sh`：建 Gitee Release + 传 installer。
-3. 验 `raw/<tag>/.../version.json` 302→200 + 版本号。
+`Release.ps1` **全 PowerShell 一条链，无跨语言**（无 cmd/bash/node/curl）：
+1. `npm run build`（frontend）→ `Build.ps1 -Module all`（一个 VS Dev Shell 编译 libs+updater+app，stage
+   `monitor_app\build\{bin,frontend,config}`）。
+2. assemble `release\GameAgentMonitor`（只拷 build\{bin,frontend,config}，不含编译中间物）→ `New-VersionJson.ps1`
+   （`Get-FileHash` 每文件 sha256，替 gen_version.mjs）→ ISCC installer。
+3. `Verify.ps1`（拷包到 `%TEMP%\GAM_verify` repo 外启 exe，`Start-Sleep` 轮询 90s 抓 `prod: frontend served`；
+   PS 原生等待，无旧 `timeout`/`ping` 坑）→ 通过才 git commit+tag+push。
+4. `Publish.ps1`（`Invoke-RestMethod` 建 Gitee Release + 手搓 multipart 传 installer）→ 验 raw URL 302→200。
 
-git-bash 环境已在脚本内处理（清 `NoDefaultCurrentDirectoryInExePath`、干净 PATH、`cmd /c` 隔离防 vcvars 撑爆 PATH），下次升 0.3.5/0.3.6 无需改这些。构建产物结构 = 发布包结构（dev==prod==包，消除相对路径假通过）：
+构建产物结构 = 发布包结构：
 
 ```
 monitor_app/build/{bin,frontend,config}   # prod, exe 在 build\bin\
@@ -221,11 +230,12 @@ monitor_app/build_dev/bin/                 # dev (Vite HMR, 无 frontend\)
 
 **手动分步**（调试用）：
 
-```bash
-build_release.cmd 0.3.5        # 只构建+隔离验证+push（顶部自清环境变量）
-verify_isolated.cmd 0.3.5      # 只隔离验证（不重新构建）
-bash publish_release.sh 0.3.5  # 只发 Gitee
+```powershell
+powershell -File scripts\Build.ps1 -Module logger            # 只编一个模块（可 -Dev）
+powershell -File scripts\Verify.ps1 -Version 0.3.6           # 只隔离验证（不重新构建）
+powershell -File scripts\Publish.ps1 -Version 0.3.6 -DryRun  # Gitee 干跑（列出，不发）
 ```
+
 
 **隔离验证为何关键**：白屏只在真机安装复现，本地 prod 从不复现。两个掩盖因素——
 (1) 旧 HKLM `InstallPath` 把 exe 重定向到*上一次*安装的 frontend（已修 `paths.cpp`，改 exe 相对优先）；
@@ -511,11 +521,10 @@ lib/: bridge.ts, types.ts, constants.ts
 | 消费者 | 继承方式 |
 |--------|----------|
 | `monitor_app/app.rc` | `#include "src/version.h"` → `APP_VERSION` / `APP_VERSION_RC` |
-| `logger/logger.cpp` | 构建脚本解析 version.h → 写入 `build/_ver_module.h` → `#include "_ver_module.h"` |
-| 所有 DLL 构建脚本 | `findstr` 解析 `APP_VERSION` → 生成 `_ver_module.h`（给 RC 文件用） |
-| `installer/setup.iss` | `build_release.cmd` 解析 version.h → `iscc -DMyAppVersion=%VER%`，setup.iss 条件 define |
-| 前端 `App.tsx` | 运行时 `hostCall('get_version')` → 返回 `APP_VERSION` |
-| `tools/gen_version.mjs` | CLI 参数传入 → 与 version.h 保持一致 |
+| `logger/logger.cpp` + 各 DLL | `Build.ps1`（`New-VerModuleHeader`）从 version.h 生成 `build/_ver_module.h`（给 RC 用） |
+| `installer/setup.iss` | `Release.ps1` 读 version.h → `ISCC /DMyAppVersion=<ver>`，setup.iss 条件 define |
+| 前端 `App.tsx` | 运行时 `hostCall('get_version')`；构建时 `vite.config` 读 version.h → `__APP_VERSION__`（splash 秒显） |
+| `scripts/New-VersionJson.ps1` | `Get-AppVersion`（读 version.h）→ version.json |
 
 **改版本号步骤：**
 1. 编辑 `monitor_app/src/version.h`：修改 `APP_VERSION` 和 `APP_VERSION_RC`
@@ -539,6 +548,17 @@ CLAUDE.md 只保留摘要和指向 CLAUDE.old.md 的引用。
 ## Changelog
 
 Full development history preserved in `CLAUDE.old.md`. Major milestones:
+- **2026-07-12 (build/release 全 PowerShell 化)**: 治理散乱脚本 —— 旧发布链是 `release.sh`(bash)→`build_release.cmd`(cmd)
+  →各 `build_*.cmd`(cmd)+`gen_version.mjs`(node)+curl，**三生态跨语言链**，脆、难懂、git-bash 下踩 timeout/PATH 坑。
+  全部迁到 **`scripts/*.ps1`**（一种语言，一条链，无 cmd/bash/node/curl）：`lib/Common.ps1`(`Enter-VsDevShell` 替
+  vcvars、`Get-AppVersion`、`New-VerModuleHeader`、日志)；`Build.ps1`(一个 VS Dev Shell 编译 logger/capture/input/
+  updater/monitor_app，`-Module`/`-Dev`)；`New-VersionJson.ps1`(`Get-FileHash` 替 gen_version.mjs 的 node)；
+  `Verify.ps1`(`Start-Sleep` 轮询，无 timeout/ping 坑)；`Publish.ps1`(`Invoke-RestMethod`+手搓 multipart 替 curl)；
+  `Release.ps1`(顶层编排，`-DryRun` 安全自测)。**逐个迁移逐个验证**：各模块产物比对、version.json 21 文件 sha256 与
+  node 版逐一致、`Release.ps1 -DryRun` 全链跑通(frontend served + VERIFICATION PASSED)。删 14 个旧脚本(release.sh、
+  build_release.cmd、publish_release.sh、verify_isolated.cmd、各 build_*.cmd、`_bld.cmd`×3、gen_version.mjs)。
+  保留 `capture/build.cmd`(h264 实验)、`input/build.cmd`(input test)、game/agent/test_target `build.cmd`、`ai/run_*`
+  ——非发布链的独立辅助/实验，未迁。
 - **2026-07-11 (startup white-screen → hidden-window + skeleton screen，未发布)**: 治真机开屏白屏 2-4s。
   诊断(埋计时 LOG 实测)：**不是** DLL 拆分(原生加载毫秒级)、**不是** React(bundle 365KB 本地供给 ~100ms)、
   `backend_init` 仅 **16ms**(先前「backend 串行拖」假设推翻)；2-4s 几乎全是 **WebView2 env 创建**(固有,削不掉)。
