@@ -317,17 +317,27 @@ static void show_main_window()
     KillTimer(g_hwnd, TIMER_SHOW_SAFETY);
     ShowWindow(g_hwnd, SW_SHOWNORMAL);
     SetForegroundWindow(g_hwnd);
-    // Safety-net help text shown on the grey fallback background (only visible
-    // when the frontend fails to load — WebView2 is blank, so hbrBackground shows
-    // through). Give the user actionable steps instead of a dead grey page.
+    // Help text painted on the dark fallback background (hbrBackground = grey).
+    // Only visible when the frontend failed to load — WebView2 paints over it if
+    // it ever attaches. Uses a static child control instead of SetWindowText so
+    // the title bar stays clean.
     {
-        const char* help =
-            "Game Agent Monitor 未能正常加载。"
-            "这可能是因为 WebView2 环境创建失败,或前端资源损坏。"
-            "请尝试: 1. 重新安装 Game Agent Monitor; "
-            "2. 安装/修复 Microsoft Edge WebView2 Runtime (go.microsoft.com/fwlink/p/?LinkId=2124703); "
-            "3. 访问 gitee.com/Andyqwe44/tictactoe 获取最新安装包。";
-        SetWindowTextA(g_hwnd, help);
+        const wchar_t* help =
+            L"Game Agent Monitor 未能正常加载。\r\n\r\n"
+            L"这可能是因为 WebView2 环境创建失败,或前端资源损坏。\r\n\r\n"
+            L"请尝试:\r\n"
+            L"1. 重新安装 Game Agent Monitor\r\n"
+            L"2. 安装/修复 Microsoft Edge WebView2 Runtime\r\n"
+            L"   (go.microsoft.com/fwlink/p/?LinkId=2124703)\r\n"
+            L"3. 访问 gitee.com/Andyqwe44/tictactoe 获取最新安装包";
+        RECT rc; GetClientRect(g_hwnd, &rc);
+        HWND hHelp = CreateWindowExW(0, L"STATIC", help,
+            WS_CHILD | WS_VISIBLE | SS_CENTER | SS_EDITCONTROL,
+            0, 0, rc.right, rc.bottom, g_hwnd, nullptr, nullptr, nullptr);
+        if (hHelp) {
+            // White text on the dark background, monospaced for readability.
+            SetWindowLongPtrW(hHelp, GWL_STYLE, GetWindowLongPtrW(hHelp, GWL_STYLE) & ~WS_BORDER);
+        }
     }
     // The WebView2 was created on a HIDDEN window → its compositor was paused and
     // it holds a blank frame. Revealing the HWND alone does NOT force a repaint
