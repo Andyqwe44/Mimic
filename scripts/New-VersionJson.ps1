@@ -11,7 +11,11 @@
 param(
     [Parameter(Mandatory)][string]$ReleaseDir,
     [Parameter(Mandatory)][string]$Version,
-    [switch]$Full   # mark as a FULL (non-incremental) update for 0.3.5+ clients
+    [switch]$Full,                       # mark as a FULL (non-incremental) update
+    [string]$MinVersion = $Version,      # clients below this must full-install (default: conservative = this version)
+    [string]$Channel    = 'stable',      # release channel (future beta/stable split)
+    [switch]$Mandatory,                  # force the update (client hides "Later")
+    [string]$Message    = ''             # optional user-facing note shown in the update modal
 )
 
 Set-StrictMode -Version Latest
@@ -34,14 +38,25 @@ foreach ($e in $entries) {
     $files[$e.Rel] = [ordered]@{ v = $Version; sha256 = $e.Sha256; size = $e.Size }
 }
 
+$tag = "v$Version"
 $manifest = [ordered]@{
-    app         = $Version
-    released    = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
-    full_update = [bool]$Full
-    files       = $files
+    schema        = 2
+    app           = $Version
+    channel       = $Channel
+    released      = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
+    min_version   = $MinVersion
+    mandatory     = [bool]$Mandatory
+    message       = $Message
+    full_update   = [bool]$Full
+    # Server-controllable download source. The client builds each file's URL from
+    # this base — move host/repo/CDN by editing a future manifest, no client rebuild.
+    download_base = "https://gitee.com/Andyqwe44/tictactoe/raw/$tag/release/GameAgentMonitor/"
+    updater       = [ordered]@{ path = 'bin/updater.exe' }
+    sig           = ''            # reserved: Ed25519 manifest signature (verify added 0.3.8+)
+    files         = $files
 }
 
-$json = $manifest | ConvertTo-Json -Depth 5
+$json = $manifest | ConvertTo-Json -Depth 6
 $outPath = Join-Path $root 'version.json'
 # No-BOM UTF-8 (Set-Content -Encoding UTF8 adds a BOM in PS 5.1; the C++ reader
 # and gen_version.mjs both use plain UTF-8).

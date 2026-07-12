@@ -9,6 +9,9 @@ export interface UpdateInfo {
   name: string
   body: string
   url: string
+  message?: string      // server-supplied note (manifest "message")
+  mandatory?: boolean   // manifest "mandatory" → hide "Later"
+  mode?: string         // 'incremental' | 'full'
 }
 
 export function UpdateModal({
@@ -29,7 +32,7 @@ export function UpdateModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/60" onClick={info.mandatory ? undefined : onClose} />
       {/* Card */}
       <div className="relative bg-bg-primary rounded-xl ring-1 ring-inset ring-border w-[420px] max-h-[80vh] flex flex-col shadow-2xl">
         {/* Header */}
@@ -38,12 +41,14 @@ export function UpdateModal({
             <Download className="w-5 h-5 text-accent" />
             <span className="font-semibold text-sm text-text-primary">Update Available</span>
           </div>
-          <button
-            onClick={onClose}
-            className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-bg-tertiary transition-colors"
-          >
-            <X className="w-4 h-4 text-text-secondary" />
-          </button>
+          {!info.mandatory && (
+            <button
+              onClick={onClose}
+              className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-bg-tertiary transition-colors"
+            >
+              <X className="w-4 h-4 text-text-secondary" />
+            </button>
+          )}
         </div>
 
         {/* Body */}
@@ -58,6 +63,20 @@ export function UpdateModal({
               v{info.latest}
             </span>
           </div>
+
+          {/* Server message (manifest "message") */}
+          {info.message && (
+            <div className="bg-accent/10 ring-1 ring-inset ring-accent/30 rounded-lg p-3 text-xs text-text-primary leading-relaxed">
+              {info.message}
+            </div>
+          )}
+
+          {/* Full-package hint */}
+          {info.mode === 'full' && (
+            <div className="text-xs text-text-secondary text-center">
+              本次为完整更新（下载全部文件）
+            </div>
+          )}
 
           {/* Release name */}
           {info.name && (
@@ -114,16 +133,18 @@ export function UpdateModal({
 
         {/* Footer */}
         <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border shrink-0">
-          <ActionBtn
-            label="Later"
-            title="Later"
-            icon={<X className="w-3.5 h-3.5" />}
-            variant="outline"
-            onClick={() => {
-              addLog('[update] dismissed')
-              onClose()
-            }}
-          />
+          {!info.mandatory && (
+            <ActionBtn
+              label="Later"
+              title="Later"
+              icon={<X className="w-3.5 h-3.5" />}
+              variant="outline"
+              onClick={() => {
+                addLog('[update] dismissed')
+                onClose()
+              }}
+            />
+          )}
           {!downloading && onForceUpdate && (
             <ActionBtn
               label="完整更新"

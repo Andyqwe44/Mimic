@@ -134,7 +134,8 @@ tictactoe/
 │   ├── New-VersionJson.ps1   # version.json (Get-FileHash, 替 gen_version.mjs)
 │   ├── Verify.ps1            # 隔离验证 (替 verify_isolated.cmd)
 │   ├── Publish.ps1           # Gitee (Invoke-RestMethod, 替 publish_release.sh)
-│   └── Release.ps1           # 顶层编排 (替 release.sh + build_release.cmd)
+│   ├── Release.ps1           # 顶层编排 (替 release.sh + build_release.cmd)
+│   └── Read-InstalledLogs.ps1 # 抓「装机版」运行时日志+version.json → tmp/installed-logs/ (调试)
 ├── monitor_web/              # React 前端 (Vite + Tailwind)
 │   └── src/
 │       ├── App.tsx           # 主编排 (~530 lines)
@@ -301,9 +302,14 @@ release/GameAgentMonitor/
   bin/          monitor_app.exe · updater.exe · updater.new · 12 DLL (logger + capture×6 + input×5)
   frontend/     dist (index.html, assets/)          ← npm run build
   config/       settings.default.json
-  version.json  { app, released, full_update, files{ "bin/x.dll":{v,sha256,size}, ... } }
+  version.json  schema v2 { schema, app, released, channel, min_version, mandatory, message,
+                full_update, download_base, updater{path}, sig, files{ "bin/x.dll":{v,sha256,size}, ... } }
 release/GameAgentMonitor_Setup_v<ver>.exe           ← Inno Setup installer → %ProgramFiles%\GameAgentMonitor
 ```
+
+**增量更新下载源 = git raw URL,不是 Release 附件。** Release 附件(setup.exe)只给全新装机;增量更新逐文件从
+`download_base + <path>`(= `raw/<tag>/release/GameAgentMonitor/<path>`,git 仓库文件)拉 + sha256 校验。所以
+`release/GameAgentMonitor/` 必须 commit——它本身就是「增量货」。`download_base`(schema v2)= 服务端可换下载源不重编客户端。
 
 `Release.ps1` 链：`npm run build`(frontend) → `Build.ps1 -Module all`（一个 VS Dev Shell 编译 logger→capture→input
 →updater→monitor_app(prod)，`Build-MonitorApp` 顺带 stage `build\{bin,frontend,config}`：拷 12 DLL+updater.exe→bin、
@@ -549,6 +555,27 @@ CLAUDE.md 只保留摘要和指向 CLAUDE.old.md 的引用。
 ## Changelog
 
 Full development history preserved in `CLAUDE.old.md`. Major milestones:
+- **2026-07-12 (0.3.7 更新系统企业化改造 + 装机日志调试工作流)**: 治「0.3.5→0.3.6 更新升不上去」——症状:弹窗提示可升
+  0.3.6,点更新却「无需升级」(矛盾)。**根因(源码+实测锁定,铁律 5 违背)**:`check_update` 里 `hasUpdate` 由版本串
+  独立算,`diff` 由拉取 `raw/<tag>/version.json` 逐文件比对算 → 一旦远端清单拉取失败(CDN 传播延迟/瞬断/302),
+  `winhttp_get` **把非 2xx 的错误页当数据返回**,`find("\"files\"")` 落空 → `diff=[]`,而 `hasUpdate` 仍 true → 前端
+  「有更新但 0 文件」=「无需升级」的假象。**服务端无辜**:curl(`GAM/1.0` UA)+ WinHTTP COM 同栈实测均 200+合法
+  JSON;全盘扫描证实装机已被卸载(无日志可读),故直接**复现网络路径**代替读日志定位。**P1 修静默**(`commands.cpp`):
+  (1) `winhttp_get` 非 2xx → `LOG_WARN`+返回空(不再把错误页当数据);(2) `check_update` 清单拉取加 3 次重试
+  (治传播延迟),空/无 `"files"` → 返回 `{ok:false,error}` 而非 `has_update+空 diff`(前端已有 `ok===false` 分支报错);
+  (3) 富日志(清单长度/HTTP 码/diff 数/`hasUpdate 但 0 diff` 告警)。**P2 服务端可控更新(manifest schema v2)**:借
+  Sparkle/Omaha/Tauri 通行做法——**策略放服务端 manifest,客户端只留「打不死的最小引导」**。`New-VersionJson.ps1` 产出
+  `schema:2 / channel / min_version / mandatory / message / download_base / updater / sig`(全向后兼容,旧端只读 `files`)。
+  客户端(`check_update`)遵:`schema>2` → 优雅提示「下完整包」(`needs_full_installer`);`download_base` 拼下载 URL
+  (**换主机/仓库/CDN 免重编客户端**);`min_version` 高于当前 → 强制 full;`mandatory`/`message` 透传前端。bootstrap 铁律:
+  只有「拉 manifest→校验→启 updater」不能坏(服务端够不着,0.3.5 正死于此)。**P3 dev 测试通道**:环境变量
+  `GAM_UPDATE_TAG` 指定任意 tag、跳过 releases API → 不发公开版即可测更新链。**前端**(铁律 6):UpdateModal 显 `message`、
+  `mandatory` 藏「稍后」+ 禁关、`mode=full` 提示完整更新;`checkUpdate` 处理 `ok:false`/`needs_full_installer`。**签名**
+  (`sig`):0.3.7 只预留字段,Ed25519 验签留 0.3.8+(验签坏=更新全炸,先稳机制)。**新增调试工作流**
+  `scripts\Read-InstalledLogs.ps1`:定位装机目录(注册表→Uninstall→扫盘)→ 抓 `{install}\bin\log` + `%LOCALAPPDATA%\...\log`
+  最新日志 + 双 version.json → `tmp/installed-logs/`(gitignore),让 Claude 读装机版真日志排查。`Release.ps1 -DryRun` 全链过
+  (VERIFICATION PASSED + version.json 21 文件 schema v2)。**发 0.3.7**;用户须**全新装 0.3.7**(0.3.5 updater 已坏且已卸载),
+  之后 0.3.7→未来走新逻辑。测更新链需发 0.3.8(或用 `GAM_UPDATE_TAG` dev 测)。
 - **2026-07-12 (build/release 全 PowerShell 化)**: 治理散乱脚本 —— 旧发布链是 `release.sh`(bash)→`build_release.cmd`(cmd)
   →各 `build_*.cmd`(cmd)+`gen_version.mjs`(node)+curl，**三生态跨语言链**，脆、难懂、git-bash 下踩 timeout/PATH 坑。
   全部迁到 **`scripts/*.ps1`**（一种语言，一条链，无 cmd/bash/node/curl）：`lib/Common.ps1`(`Enter-VsDevShell` 替

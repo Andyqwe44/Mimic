@@ -221,9 +221,16 @@ export default function App() {
           body: info.body || '',
           url: '', // Phase 2: multi-file diff replaces single URL
           diff: info.diff || [],
+          message: info.message || '',
+          mandatory: !!info.mandatory,
+          mode: info.mode || 'incremental',
         } as any)
         const fileCount = info.diff?.length || 0
         addLog(`[update] v${info.latest} available (${fileCount} files, ${info.mode || 'incremental'})`)
+      } else if (info?.needs_full_installer) {
+        // Manifest schema newer than this client understands — the bootstrap
+        // can't safely incrementally update. Point the user at the full package.
+        addLog(`[update] full reinstall required — download: ${info.download_url || 'Gitee releases'}`)
       } else {
         addLog(info?.ok === false
           ? `[update] check failed: ${info?.error || 'unknown'}`
@@ -269,6 +276,7 @@ export default function App() {
           current: info.current, latest: info.latest,
           name: info.name || '', body: info.body || '', url: '',
           diff: info.diff || [],
+          message: info.message || '', mandatory: !!info.mandatory, mode: info.mode || 'full',
         } as any)
         startDownload(info.diff || [])
       } else {
