@@ -555,6 +555,17 @@ CLAUDE.md 只保留摘要和指向 CLAUDE.old.md 的引用。
 ## Changelog
 
 Full development history preserved in `CLAUDE.old.md`. Major milestones:
+- **2026-07-12 (0.3.12 更新链最后一环:updater 提权 + install 定位)**: 0.3.10→0.3.11 首次跑到 download 末段——21 文件
+  下载 + sha256 校验**全通过**,卡在启 updater:`update_launch_updater: CreateProcess failed err=740`
+  (ERROR_ELEVATION_REQUIRED)。根因:`updater.exe` 是 requireAdministrator(覆盖 Program Files),`CreateProcess` 从
+  非提权进程起不了提权 exe。**修**:`ShellExecuteExA` + `runas` 弹 UAC 提权。**顺带审 updater**:原只读注册表
+  `HKLM\SOFTWARE\GameAgentMonitor\InstallPath` 定位 install(缺则失败)→ 改 **exe-relative 优先**(updater 在
+  `<install>\bin\`,install=父父),注册表 fallback,与 monitor_app `paths_get_install_dir` 一致。**已知隐患(非阻断)**:
+  staging 不含 version.json,updater 不更新 install\version.json → 陈旧;当前 min_version=self 每次强制 full 掩盖
+  (不增量但能更新)。**另加功能3 运行权限切换**(Settings General「运行权限」普通/管理员 + 当前徽章):`get_elevation`
+  查当前进程 IL;`switch_permission {admin}` 写/删 `AppCompatFlags\Layers` RUNASADMIN 持久(下次双击按上次选择自动提权/普通)
+  + 重启到目标权限——升 `ShellExecuteEx runas`(UAC),降 `DuplicateTokenEx`+`SetTokenInformation`(Medium IL)+
+  `CreateProcessAsUser`(**自包含,不依赖 explorer**)。`Build.ps1` 加 `advapi32.lib`。发 0.3.12,手动装,测 0.3.12→0.3.13。
 - **2026-07-12 (0.3.11 更新链验证版)**: 纯 bump,作 0.3.10→0.3.11 一键更新全链的测试目标——验证 download diff 转义
   修复 + 完整下载/sha256 校验/updater 覆盖/重启。无功能改动。
 - **2026-07-12 (0.3.10 更新下载 diff 双重转义修复)**: 0.3.8→0.3.9 首次真跑 download,暴露隐藏 bug——check_update

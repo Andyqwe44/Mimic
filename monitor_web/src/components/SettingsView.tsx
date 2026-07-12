@@ -118,6 +118,8 @@ export function SettingsView({
   onCheckUpdate,
   hasUpdate,
   onPreviewSkeleton,
+  isAdmin,
+  onSwitchPermission,
 }: {
   snapMethod: string; setSnapMethod: (m: string) => void
   streamMethod: string; setStreamMethod: (m: string) => void
@@ -143,6 +145,8 @@ export function SettingsView({
   onCheckUpdate?: () => void
   hasUpdate?: boolean
   onPreviewSkeleton?: () => void
+  isAdmin?: boolean
+  onSwitchPermission?: (toAdmin: boolean) => void
 }) {
   const themePairs = [
     ['#3B82F6', '#F97316'], // Ocean — blue + orange
@@ -724,6 +728,25 @@ export function SettingsView({
 
       <SettingsCard icon={<Sun className="w-4 h-4 text-text-secondary" />} title="General">
         <div className="space-y-3">
+          {/* 运行权限（普通/管理员）— 切换 = 重启到目标权限 */}
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-text-secondary w-24 shrink-0">运行权限</label>
+            <div className="flex gap-1 items-center">
+              {([['普通', false], ['管理员', true]] as [string, boolean][]).map(([l, v]) => (
+                <Tooltip key={String(v)} text={v ? '管理员权限 — 可操作以管理员运行的目标；点击弹 UAC 并重启程序' : '普通用户权限（默认）— 操作普通程序足够，无 UAC 打扰'}>
+                  <button
+                    onClick={() => onSwitchPermission?.(v)}
+                    className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${!!isAdmin === v ? 'bg-accent text-white' : 'bg-bg-tertiary text-text-secondary hover:bg-bg-hover'}`}
+                  >
+                    {l}
+                  </button>
+                </Tooltip>
+              ))}
+              <span className={`ml-1 text-[10px] px-1.5 py-0.5 rounded ${isAdmin ? 'text-accent bg-accent/10' : 'text-text-muted bg-bg-tertiary'}`}>
+                当前: {isAdmin ? '管理员' : '普通'}
+              </span>
+            </div>
+          </div>
           <div className="flex items-center gap-2">
             <label className="text-sm text-text-secondary w-24 shrink-0">Theme</label>
             <div className="flex gap-1">
