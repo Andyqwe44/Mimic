@@ -84,12 +84,20 @@ struct WebMessageHandler : ComCallbackBase<ICoreWebView2WebMessageReceivedEventH
 // Non-static: commands.cpp reads it via extern to time backend_init.
 unsigned long long g_boot_tick = 0;
 
+// Reveal the (initially hidden) main window; defined below. Declared here so the
+// NavigationCompleted handler can trigger the reveal on a reliable C++ event —
+// the frontend's requestAnimationFrame signal never fires while the window is
+// hidden (the compositor is paused), which left the window stuck grey until the
+// 8s safety timer.
+void app_post_show_window();
+
 // perf: log when the first navigation completes — this is ≈ the end of the
 // white screen (content painted). Reuses the ComCallbackBase pattern.
 struct NavCompletedHandler : ComCallbackBase<ICoreWebView2NavigationCompletedEventHandler> {
     STDMETHODIMP Invoke(ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs*) override {
         LOG("main", "perf: NavigationCompleted t+%llums (~white-screen end)",
             GetTickCount64() - g_boot_tick);
+        app_post_show_window();  // reliable reveal trigger (frontend rAF never fires while hidden)
         return S_OK;
     }
 };
@@ -288,6 +296,15 @@ static void show_main_window()
     KillTimer(g_hwnd, TIMER_SHOW_SAFETY);
     ShowWindow(g_hwnd, SW_SHOWNORMAL);
     SetForegroundWindow(g_hwnd);
+    // The WebView2 was created on a HIDDEN window → its compositor was paused and
+    // it holds a blank frame. Revealing the HWND alone does NOT force a repaint
+    // (that was the grey-window bug). Make the controller visible and re-apply
+    // bounds to trigger a fresh composition now that the window is on-screen.
+    if (g_webviewController) {
+        g_webviewController->put_IsVisible(TRUE);
+        RECT rc; GetClientRect(g_hwnd, &rc);
+        g_webviewController->put_Bounds(rc);
+    }
     LOG("main", "perf: window shown t+%llums", GetTickCount64() - g_boot_tick);
 }
 

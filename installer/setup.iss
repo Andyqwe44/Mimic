@@ -11,6 +11,9 @@
 
 [Setup]
 AppId={{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
+; Refuse to install/uninstall while the app is running — Inno built-in, reuses the
+; app's prod single-instance mutex. Inno prompts the user to close it first.
+AppMutex=Global\GameAgentMonitor_8A3F2D
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}

@@ -555,6 +555,16 @@ CLAUDE.md 只保留摘要和指向 CLAUDE.old.md 的引用。
 ## Changelog
 
 Full development history preserved in `CLAUDE.old.md`. Major milestones:
+- **2026-07-12 (0.3.8 真机深灰卡死修复 + installer 运行检测)**: 0.3.7 真机装上打不开——窗口隐藏后揭开是**深灰空窗**,
+  无骨架屏无主 UI。**根因**(读装机日志锁定,`Read-InstalledLogs`):隐藏窗口 → Chromium 合成器暂停 → 前端
+  `requestAnimationFrame` 回调**永不触发**(`setTimeout`/命令照跑,故 get_settings 发得出)→ 前端 `rAF→rAF→show_window`
+  揭窗信号卡死 → 靠 8s 兜底揭窗;且揭窗只 `ShowWindow`,没通知 WebView2 重画 → controller 停在隐藏期空白帧 → 深灰。
+  此 bug 由 0.3.6 引入隐藏窗机制时带入,0.3.7 继承(0.3.7 只改更新逻辑没碰启动)。**修**(`main.cpp`):(1) 揭窗信号改用
+  C++ `NavigationCompleted` 事件(日志证 t+2.4s 可靠触发),不再依赖跑不了的前端 rAF;(2) `show_main_window` 揭窗后
+  `put_IsVisible(TRUE)`+重设 `put_Bounds` 强制重画。`App.tsx` `SPLASH_TEST_MS`→0。实测 `window shown` 从 8031ms→2437ms
+  且无 8s 兜底告警,用户肉眼确认 UI 正常。**installer**:`setup.iss` 加 `AppMutex=Global\GameAgentMonitor_8A3F2D`(Inno
+  内置,复用 prod 单实例锁)——装/卸载时程序在跑则弹标准提示要用户先关闭;旧版升级走 AppId 自动覆盖(内置)。未做
+  「检测到旧版弹框」(需手写 `[Code]`,非必要)。发 0.3.8,用户手动装(0.3.7 UI 坏没法自更新)。
 - **2026-07-12 (0.3.7 更新系统企业化改造 + 装机日志调试工作流)**: 治「0.3.5→0.3.6 更新升不上去」——症状:弹窗提示可升
   0.3.6,点更新却「无需升级」(矛盾)。**根因(源码+实测锁定,铁律 5 违背)**:`check_update` 里 `hasUpdate` 由版本串
   独立算,`diff` 由拉取 `raw/<tag>/version.json` 逐文件比对算 → 一旦远端清单拉取失败(CDN 传播延迟/瞬断/302),
