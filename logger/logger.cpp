@@ -157,11 +157,11 @@ static void _cleanup_old_logs() {
 
     do {
         std::wstring fname = fd.cFileName;
-        // Match: app_name_YYYYMMDD_HHMMSS.log
-        std::string prefix_ansi(g_app_name.begin(), g_app_name.end());
-        std::string fname_ansi(fname.begin(), fname.end());
-        if (fname_ansi.find(prefix_ansi + "_") == 0 &&
-            fname_ansi.find(".log") == fname_ansi.size() - 4) {
+        // Match app_name_YYYYMMDD_HHMMSS.log — compare as WIDE to avoid narrowing
+        // wchar_t -> char (C4244) and to handle any non-ASCII path correctly.
+        std::wstring prefix_w(g_app_name.begin(), g_app_name.end());
+        if (fname.rfind(prefix_w + L"_", 0) == 0 &&
+            fname.size() >= 4 && fname.compare(fname.size() - 4, 4, L".log") == 0) {
             std::wstring full_path;
             full_path.assign(g_log_dir.begin(), g_log_dir.end());
             if (!full_path.empty() && full_path.back() != '\\' && full_path.back() != '/')
@@ -513,13 +513,16 @@ char* capture_log_list_files(int max_files) {
 
     do {
         std::wstring fname = fd.cFileName;
-        std::string fname_ansi(fname.begin(), fname.end());
-        std::string prefix_ansi(g_app_name.begin(), g_app_name.end());
-        if (fname_ansi.find(prefix_ansi + "_") == 0 && fname_ansi.find(".log") != std::string::npos) {
+        // Match as WIDE (no narrowing C4244); convert to UTF-8 only for output.
+        std::wstring prefix_w(g_app_name.begin(), g_app_name.end());
+        if (fname.rfind(prefix_w + L"_", 0) == 0 && fname.find(L".log") != std::wstring::npos) {
             ULARGE_INTEGER size;
             size.LowPart = fd.nFileSizeLow;
             size.HighPart = fd.nFileSizeHigh;
-            files.push_back({fname_ansi, fd.ftLastWriteTime, (size_t)size.QuadPart});
+            int n = WideCharToMultiByte(CP_UTF8, 0, fname.data(), (int)fname.size(), nullptr, 0, nullptr, nullptr);
+            std::string fname_utf8(n, '\0');
+            WideCharToMultiByte(CP_UTF8, 0, fname.data(), (int)fname.size(), fname_utf8.data(), n, nullptr, nullptr);
+            files.push_back({fname_utf8, fd.ftLastWriteTime, (size_t)size.QuadPart});
         }
     } while (FindNextFileW(hFind, &fd));
     FindClose(hFind);

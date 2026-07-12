@@ -14,9 +14,9 @@
 #define PW_CLIENTONLY 0x00000001
 #endif
 
-extern "C" {
-    int WINAPI PrintWindow(HWND hwnd, HDC hdc, UINT flags);
-}
+// PrintWindow is already declared by <windows.h> (winuser.h). A local
+// redeclaration here triggered C4273 (dllimport linkage mismatch), so rely on
+// the system header instead.
 
 // ── DPI awareness helpers (dynamically loaded from User32.dll) ──
 // OBS pattern: set thread DPI context to match target window before GDI ops.

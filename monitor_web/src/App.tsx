@@ -257,7 +257,7 @@ export default function App() {
     setUpdateDownloading(true)
     addLog(`[update] downloading ${diff.length} files...`)
     try {
-      const res = await hostCall('download_update', { diff: JSON.stringify(diff) })
+      const res = await hostCall('download_update', { diff })
       if (res?.ok === false) {
         addLog(`[update] start failed: ${res.error}`)
         setUpdateDownloading(false)

@@ -555,6 +555,13 @@ CLAUDE.md 只保留摘要和指向 CLAUDE.old.md 的引用。
 ## Changelog
 
 Full development history preserved in `CLAUDE.old.md`. Major milestones:
+- **2026-07-12 (0.3.10 更新下载 diff 双重转义修复)**: 0.3.8→0.3.9 首次真跑 download,暴露隐藏 bug——check_update
+  正确算出 21 文件 diff,`download_update` 却报「no files to download」。**根因**:前端
+  `hostCall('download_update',{diff:JSON.stringify(diff)})` 把 diff 数组**双重 JSON 编码**,里层引号被转义成 `\"`;
+  后端 dispatch bracket-match 提取到 `[{\"path\":...}]`(带反斜杠),`cmd_download_update` 的 `find("\"path\"")` 找真引号
+  找不到 → totalFiles=0。这是 download **第一次**被执行(0.3.5-0.3.8 全挂在 check_update 之前),故一直没暴露。**修**:
+  (1) 前端 `{ diff }` 不双重 stringify;(2) 后端 dispatch 提取后反转义 `\"`→`"`(兜底,对干净 array 是 no-op)。发 0.3.10。
+  **注意**:装的 0.3.8 的 download 逻辑坏,须**手动装 0.3.10**;之后 0.3.10→0.3.11 才能测通完整更新链。
 - **2026-07-12 (0.3.9 骨架屏预览开关 + 窗口/任务栏图标修复 + 换logo工具)**: (1) Settings 开发人员区加「预览骨架屏 (3s)」
   按钮(方案A:点一下盖 3 秒自动消失,规避「全屏遮罩关不掉」)；`App.tsx` `previewSkeleton` state,骨架屏渲染改
   `(!appReady || previewSkeleton)`。(2) **图标修复**:`main.cpp` WNDCLASS 加 `hIcon`/`hIconSm`(按 `GetSystemMetricsForDpi`

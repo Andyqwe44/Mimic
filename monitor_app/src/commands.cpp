@@ -1832,7 +1832,18 @@ std::string dispatch_command(const std::string& json) {
                 diffArr = args.substr(p, e - p);
             }
         }
-        result = cmd_download_update(diffArr);
+        // The diff may arrive double-encoded (a JSON string value), so its quotes
+        // are backslash-escaped: [{\"path\":...}]. Unescape \" -> " and \\ -> \ so
+        // the parser finds "path". No-op for a clean array (diff data has no
+        // backslashes). This was the "no files to download" bug on the first real
+        // update run (check_update finds 21 files, download parsed 0).
+        std::string diffClean;
+        diffClean.reserve(diffArr.size());
+        for (size_t i = 0; i < diffArr.size(); i++) {
+            if (diffArr[i] == '\\' && i + 1 < diffArr.size()) { diffClean += diffArr[i + 1]; i++; }
+            else diffClean += diffArr[i];
+        }
+        result = cmd_download_update(diffClean);
     }
     else if (cmd == "get_settings") {
         result = cmd_get_settings();
