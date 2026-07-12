@@ -1,121 +1,121 @@
 {
     "schema":  2,
-    "app":  "0.3.12",
+    "app":  "0.3.13",
     "channel":  "stable",
-    "released":  "2026-07-12T11:02:23.960Z",
-    "min_version":  "0.3.12",
+    "released":  "2026-07-12T13:37:03.900Z",
+    "min_version":  "0.3.13",
     "mandatory":  false,
     "message":  "",
     "full_update":  false,
-    "download_base":  "https://gitee.com/Andyqwe44/tictactoe/raw/v0.3.12/release/GameAgentMonitor/",
+    "download_base":  "https://gitee.com/Andyqwe44/tictactoe/raw/v0.3.13/release/GameAgentMonitor/",
     "updater":  {
                     "path":  "bin/updater.exe"
                 },
     "sig":  "",
     "files":  {
                   "bin/capture_common.dll":  {
-                                                 "v":  "0.3.12",
-                                                 "sha256":  "86d0be8a98dc8f725aac6a39ab7b7c6cefb00037fa711f3af534a941574fddde",
+                                                 "v":  "0.3.13",
+                                                 "sha256":  "40e8b09b0b8490cc9e91ad2408a202e12206a411a5f2a8086f042d565bacc4a6",
                                                  "size":  105984
                                              },
                   "bin/capture_desktop.dll":  {
-                                                  "v":  "0.3.12",
-                                                  "sha256":  "405cd5655ae0784cd9324779a56141aff13f0f2293984dd99d191d15b4660033",
+                                                  "v":  "0.3.13",
+                                                  "sha256":  "08c4e40eecb5ac9fce0283ff516394dde7372e39f27b8c5512ce8bd2a3c83a89",
                                                   "size":  125440
                                               },
                   "bin/capture_gdi.dll":  {
-                                              "v":  "0.3.12",
-                                              "sha256":  "b1897b97667296a5ffdb04a2b077f9008c79aa22af756cdbeb14dd7d5e293ce6",
+                                              "v":  "0.3.13",
+                                              "sha256":  "d467282125aa4b7f8e27e62bc7b8d0e020a41c776921d6e76f49189bfcb1f4b2",
                                               "size":  126464
                                           },
                   "bin/capture_pw.dll":  {
-                                             "v":  "0.3.12",
-                                             "sha256":  "5a555c79f619a7ffb86d9b78cf9c94cadf1ccf129ea0d6cf138386d2749ad0d9",
+                                             "v":  "0.3.13",
+                                             "sha256":  "80ce0696ba89ebd2f099237cf67706e0bfb594be1b53f49923c756d4919a58f2",
                                              "size":  124928
                                          },
                   "bin/capture_screen.dll":  {
-                                                 "v":  "0.3.12",
-                                                 "sha256":  "27c138fcd3c532f83f6e52424e02b15e3c8ad237323028d662705e927740c2a8",
+                                                 "v":  "0.3.13",
+                                                 "sha256":  "acf268d6d81d1683e27d19e0bf09d047d23f21cb610116745e43e3926b482d96",
                                                  "size":  126976
                                              },
                   "bin/capture_wgc.dll":  {
-                                              "v":  "0.3.12",
-                                              "sha256":  "535d795414aa89ac66e0f5808ee9df601aec9193686a35a8ab3df018c4fadb9c",
+                                              "v":  "0.3.13",
+                                              "sha256":  "8c6111e86a142206ba5680b721d72dba77b08e15c706f4b7e6374e0e808525de",
                                               "size":  272384
                                           },
                   "bin/input_common.dll":  {
-                                               "v":  "0.3.12",
-                                               "sha256":  "2616eaed60aafc593043c3ba718311f807d5cc924037d8de190af2679e030041",
+                                               "v":  "0.3.13",
+                                               "sha256":  "91904b000e3a8b75d987bd437d062272e649ce32ca99d1c40d89d46a5c2318f0",
                                                "size":  201728
                                            },
                   "bin/input_driver.dll":  {
-                                               "v":  "0.3.12",
-                                               "sha256":  "7572e808dc522a2870cff5d8eed4fbc65840cf8ee72558e0a42435c2d45fbf5c",
+                                               "v":  "0.3.13",
+                                               "sha256":  "9690126c52d3f04af7703dcdc0f24e450f36c14172164f1b34821eae9b18892e",
                                                "size":  122368
                                            },
                   "bin/input_postmessage.dll":  {
-                                                    "v":  "0.3.12",
-                                                    "sha256":  "9480a58a85e5734a32daf732f441b445bd55aff43205391850cdda01db038c2e",
+                                                    "v":  "0.3.13",
+                                                    "sha256":  "f8bc8e1836cd228f02f4f5ec8cf26f78063ae2d14afee0eb559bc4d150c9077e",
                                                     "size":  166400
                                                 },
                   "bin/input_sendinput.dll":  {
-                                                  "v":  "0.3.12",
-                                                  "sha256":  "8a66a7008d0073ed4cc61f2812dfff368492b3d487c1c184d2e037bfe1095389",
+                                                  "v":  "0.3.13",
+                                                  "sha256":  "5e3359f7f8265f9fa6135efea92ea136020aff94ebcc05d57bdca771a14bc81d",
                                                   "size":  171520
                                               },
                   "bin/input_winapi.dll":  {
-                                               "v":  "0.3.12",
-                                               "sha256":  "5bc069931378044ec222d5a6a4c1a697e7da0052491b9b536dd1a1cb992eadaf",
+                                               "v":  "0.3.13",
+                                               "sha256":  "36c3c866dd422e7105669cdf5dcc0886f6963bd6827562a8c35ac49b902f9510",
                                                "size":  166400
                                            },
                   "bin/logger.dll":  {
-                                         "v":  "0.3.12",
-                                         "sha256":  "695b7dfbc02a98ccdbf754afdd4772ea814ab9112fa7c864acbbbf3a44666e90",
+                                         "v":  "0.3.13",
+                                         "sha256":  "63af4be20298b1df73aa9972717aac1ce57962e34af902f7d39f85b915cdab9e",
                                          "size":  286720
                                      },
                   "bin/monitor_app.exe":  {
-                                              "v":  "0.3.12",
-                                              "sha256":  "7105a5ec2818c472e00ab4ef15cb5935e5a5953977fd5ae9348f39c2418fa032",
+                                              "v":  "0.3.13",
+                                              "sha256":  "b13aa5146e078076b2eddfc6a1996870e3ef7a35bc6461accc85e68ab40babce",
                                               "size":  440320
                                           },
                   "bin/updater.exe":  {
-                                          "v":  "0.3.12",
-                                          "sha256":  "38f8dbc0bbf93d31dca68559e5ae99e61ff403520572b7636de3d0d029cd124d",
-                                          "size":  140288
+                                          "v":  "0.3.13",
+                                          "sha256":  "143d214659b7b739aa545cc404a8df1dad8ced95e650ad2ed29145c52a1dc43d",
+                                          "size":  158720
                                       },
                   "bin/updater.new":  {
-                                          "v":  "0.3.12",
-                                          "sha256":  "38f8dbc0bbf93d31dca68559e5ae99e61ff403520572b7636de3d0d029cd124d",
-                                          "size":  140288
+                                          "v":  "0.3.13",
+                                          "sha256":  "143d214659b7b739aa545cc404a8df1dad8ced95e650ad2ed29145c52a1dc43d",
+                                          "size":  158720
                                       },
                   "config/settings.default.json":  {
-                                                       "v":  "0.3.12",
+                                                       "v":  "0.3.13",
                                                        "sha256":  "182fdb09c54e338725495471ed6e3a93774349263a147cc16eb1e8e9818efa08",
                                                        "size":  294
                                                    },
-                  "frontend/assets/index-CqsCV1vL.js":  {
-                                                            "v":  "0.3.12",
-                                                            "sha256":  "7908d024bb9cde3dac892dc98da860d1ebb4df4365b69ab2f0b90b5dc02f114c",
+                  "frontend/assets/index-CM2QozBX.js":  {
+                                                            "v":  "0.3.13",
+                                                            "sha256":  "2ab68748d21c393a54d015233bc508d495a526f90ef8b818d838c493481af9cb",
                                                             "size":  317214
                                                         },
                   "frontend/assets/index-DxX6uRE-.css":  {
-                                                             "v":  "0.3.12",
+                                                             "v":  "0.3.13",
                                                              "sha256":  "a57afc81ce678e514e33c6dbe485a095b859f6b976eb584d2a5b52868d450910",
                                                              "size":  36566
                                                          },
                   "frontend/favicon.svg":  {
-                                               "v":  "0.3.12",
+                                               "v":  "0.3.13",
                                                "sha256":  "61bc9a161de58248288e6905425d7180f0624c2865007b97d763fdac12043a66",
                                                "size":  9522
                                            },
                   "frontend/icons.svg":  {
-                                             "v":  "0.3.12",
+                                             "v":  "0.3.13",
                                              "sha256":  "b45fa506195cfcdef406ba9f0c77b36ddc1a7c224040926ec70abc2fdea7b93a",
                                              "size":  5031
                                          },
                   "frontend/index.html":  {
-                                              "v":  "0.3.12",
-                                              "sha256":  "d4b1c14aa64ed6370bd8cabd365e84ec12daa115e9ff8fe96d208bb36b0008ae",
+                                              "v":  "0.3.13",
+                                              "sha256":  "be094cb314c644f1fed9c71117e4976d5e9d08292805cb5460c22a541e9717f6",
                                               "size":  461
                                           }
               }
