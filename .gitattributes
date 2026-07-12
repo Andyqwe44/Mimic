@@ -4,6 +4,14 @@
 #   - .sh must stay LF, else git-bash chokes on the shebang (`/bin/bash^M`).
 #   - .cmd/.bat must stay CRLF, else cmd.exe misparses lines like `cd /d ...`.
 
+# Line-ending policy — prevents the release pipeline from breaking on checkout.
+#
+# core.autocrlf=true would rewrite these on checkout; pin them explicitly:
+#   - .sh must stay LF, else git-bash chokes on the shebang (`/bin/bash^M`).
+#   - .cmd/.bat must stay CRLF, else cmd.exe misparses lines like `cd /d ...`.
+#   - .ps1 CRLF — Windows PowerShell scripts (the build/release pipeline).
+
 *.sh   text eol=lf
 *.cmd  text eol=crlf
 *.bat  text eol=crlf
+*.ps1  text eol=crlf
