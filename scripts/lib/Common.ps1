@@ -51,6 +51,9 @@ function Enter-BuildShell {
 # Generate a module's version resource header — replaces the cmd
 # `echo #define ... >> build\_ver_module.h` blocks. rc.exe includes this to stamp
 # VERSIONINFO without quoting hell. $FileType: VFT_DLL for libs/DLLs, VFT_APP for exes.
+# $Version here is the MODULE's own version (see $LibVer in Build.ps1), decoupled
+# from APP_VERSION so a bump of the app doesn't churn every DLL's bytes. No
+# APP_VERSION #define is emitted — DLL code must not embed the app version.
 function New-VerModuleHeader {
     param(
         [Parameter(Mandatory)][string]$OutPath,
@@ -62,7 +65,6 @@ function New-VerModuleHeader {
     $lines = @(
         "#define GAM_RC_COMMA $comma"
         "#define GAM_RC_STR `"$Version`""
-        "#define APP_VERSION `"$Version`""
         "#define GAM_MODULE_DESC `"$ModuleDesc`""
         "#define GAM_FILETYPE $FileType"
     )

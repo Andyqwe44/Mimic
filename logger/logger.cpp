@@ -244,7 +244,12 @@ void capture_log_init(const char* app_name,
     // Write session header to ring buffer (matches file content)
     {
         auto ts = _timestamp();
-        _write_ring(ts, "=== agent v" APP_VERSION " ===");
+        // Use the caller-supplied version (not a compile-time APP_VERSION macro) so
+        // this DLL's bytes don't change every app-version bump — enables real
+        // incremental updates. Mirrors the file banner on line ~236.
+        char banner[128];
+        snprintf(banner, sizeof(banner), "=== %s v%s ===", app_name, app_version);
+        _write_ring(ts, banner);
         char info[256];
         snprintf(info, sizeof(info), "Session: %04d%02d%02d_%02d%02d%02d | PID: %lu",
                  tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,

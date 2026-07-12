@@ -20,15 +20,21 @@ param(
 
 $Root = Get-RepoRoot
 $Ver = Get-AppVersion
+# Module version for the native libs/DLLs (logger, capture, input) — DECOUPLED
+# from APP_VERSION so an app bump doesn't change every DLL's VERSIONINFO bytes
+# (that churn defeated incremental updates: every release re-downloaded all 12
+# DLLs). Bump this ONLY when a lib's source actually changes. Combined with
+# /Brepro (deterministic PE), same source → same bytes → same sha256 → not in diff.
+$LibVer = '1.0.0'
 Enter-BuildShell
 
 function Build-Logger {
-    Write-Step "logger.dll (v$Ver)"
+    Write-Step "logger.dll (lib v$LibVer)"
     $dir = Join-Path $Root 'logger'
     $bld = Join-Path $dir 'build'
     New-Item -ItemType Directory -Force -Path $bld | Out-Null
     New-VerModuleHeader -OutPath (Join-Path $bld '_ver_module.h') `
-        -Version $Ver -ModuleDesc 'Unified Logging Engine' -FileType VFT_DLL
+        -Version $LibVer -ModuleDesc 'Unified Logging Engine' -FileType VFT_DLL
     Push-Location $dir
     try {
         Invoke-Native { cl.exe /nologo /EHsc /std:c++17 /source-charset:utf-8 /I "$Root\common\include" /I build `
@@ -42,7 +48,7 @@ function Build-Logger {
 }
 
 function Build-Capture {
-    Write-Step "capture DLLs (v$Ver)"
+    Write-Step "capture DLLs (lib v$LibVer)"
     $dir = Join-Path $Root 'capture'
     $bld = Join-Path $dir 'build'
     New-Item -ItemType Directory -Force -Path $bld | Out-Null
@@ -66,7 +72,7 @@ function Build-Capture {
     Push-Location $dir
     try {
         foreach ($mod in $mods) {
-            New-VerModuleHeader -OutPath 'build\_ver_module.h' -Version $Ver -ModuleDesc $mod.desc -FileType VFT_DLL
+            New-VerModuleHeader -OutPath 'build\_ver_module.h' -Version $LibVer -ModuleDesc $mod.desc -FileType VFT_DLL
             $objs = @()
             foreach ($s in $mod.srcs) {
                 cl.exe @cflags /Fo"build\$s.obj" "src\$s.cpp"
@@ -75,7 +81,7 @@ function Build-Capture {
             }
             rc.exe /nologo /I build /fo "build\$($mod.name).res" "$Root\common\version.rc"
             if ($LASTEXITCODE) { throw "capture: rc $($mod.name) failed" }
-            $lnk = @('/nologo', '/DLL', '/NXCOMPAT', '/DYNAMICBASE', "/OUT:build\$($mod.name).dll") +
+            $lnk = @('/nologo', '/DLL', '/NXCOMPAT', '/DYNAMICBASE', '/Brepro', "/OUT:build\$($mod.name).dll") +
                 $objs + @("build\$($mod.name).res") + $mod.libs + $syslibs + @("/IMPLIB:build\$($mod.name).lib")
             link.exe @lnk
             if ($LASTEXITCODE) { throw "capture: link $($mod.name) failed" }
@@ -86,7 +92,7 @@ function Build-Capture {
 }
 
 function Build-Input {
-    Write-Step "input DLLs (v$Ver)"
+    Write-Step "input DLLs (lib v$LibVer)"
     $dir = Join-Path $Root 'input'
     New-Item -ItemType Directory -Force -Path (Join-Path $dir 'build') | Out-Null
     $cflags = @('/nologo', '/EHsc', '/std:c++17', '/source-charset:utf-8', '/I', 'include', '/I', "$Root\common\include",
@@ -103,7 +109,7 @@ function Build-Input {
     Push-Location $dir
     try {
         foreach ($mod in $mods) {
-            New-VerModuleHeader -OutPath 'build\_ver_module.h' -Version $Ver -ModuleDesc $mod.desc -FileType VFT_DLL
+            New-VerModuleHeader -OutPath 'build\_ver_module.h' -Version $LibVer -ModuleDesc $mod.desc -FileType VFT_DLL
             $objs = @()
             foreach ($s in $mod.srcs) {
                 cl.exe @cflags /Fo"build\$s.obj" "src\$s.cpp"
@@ -112,7 +118,7 @@ function Build-Input {
             }
             rc.exe /nologo /I build /fo "build\$($mod.name).res" "$Root\common\version.rc"
             if ($LASTEXITCODE) { throw "input: rc $($mod.name) failed" }
-            $lnk = @('/nologo', '/DLL', '/NXCOMPAT', '/DYNAMICBASE', "/OUT:build\$($mod.name).dll") +
+            $lnk = @('/nologo', '/DLL', '/NXCOMPAT', '/DYNAMICBASE', '/Brepro', "/OUT:build\$($mod.name).dll") +
                 $objs + @("build\$($mod.name).res") + $mod.libs + $syslibs + @("/IMPLIB:build\$($mod.name).lib")
             link.exe @lnk
             if ($LASTEXITCODE) { throw "input: link $($mod.name) failed" }
