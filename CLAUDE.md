@@ -555,6 +555,8 @@ CLAUDE.md 只保留摘要和指向 CLAUDE.old.md 的引用。
 ## Changelog
 
 Full development history preserved in `CLAUDE.old.md`. Major milestones:
+- **2026-07-12 (0.3.11 更新链验证版)**: 纯 bump,作 0.3.10→0.3.11 一键更新全链的测试目标——验证 download diff 转义
+  修复 + 完整下载/sha256 校验/updater 覆盖/重启。无功能改动。
 - **2026-07-12 (0.3.10 更新下载 diff 双重转义修复)**: 0.3.8→0.3.9 首次真跑 download,暴露隐藏 bug——check_update
   正确算出 21 文件 diff,`download_update` 却报「no files to download」。**根因**:前端
   `hostCall('download_update',{diff:JSON.stringify(diff)})` 把 diff 数组**双重 JSON 编码**,里层引号被转义成 `\"`;
