@@ -68,17 +68,24 @@ if ($DryRun) {
     return
 }
 
-# 7. Git commit + tag + push.
+# 7. Git commit + tag + push. Native git writes progress/banners to stderr; under
+#    $ErrorActionPreference='Stop' that becomes a terminating RemoteException, so
+#    relax it here and check $LASTEXITCODE explicitly on the pushes that matter.
+#    `git add -A` folds source + docs into the commit (the release binaries are
+#    already tracked); `-f` force-adds the release payload past *.dll/*.exe ignores.
 Write-Step 'git commit + tag + push'
-git add release\GameAgentMonitor monitor_app\src\version.h installer\setup.iss
-git commit -m "release: v$ver"   # may be a no-op if nothing changed; that's fine
-git push origin ":refs/tags/v$ver" 2>$null   # delete remote tag if it exists
-git tag -d "v$ver" 2>$null
-git tag "v$ver"
-git push origin main
-if ($LASTEXITCODE) { throw 'git push main failed' }
-git push origin "refs/tags/v${ver}:refs/tags/v$ver"
-if ($LASTEXITCODE) { throw 'git tag push failed' }
+$eap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+try {
+    git add -A
+    git add -f release\GameAgentMonitor monitor_app\src\version.h installer\setup.iss
+    git commit -m "release: v$ver" 2>&1 | Write-Host   # no-op if nothing staged; fine
+    git tag -f "v$ver" 2>&1 | Write-Host               # (re)create local tag
+    git push origin main 2>&1 | Write-Host
+    if ($LASTEXITCODE) { throw "git push main failed (exit $LASTEXITCODE)" }
+    git push -f origin "refs/tags/v${ver}" 2>&1 | Write-Host   # force: overwrite a stale remote tag
+    if ($LASTEXITCODE) { throw "git tag push failed (exit $LASTEXITCODE)" }
+}
+finally { $ErrorActionPreference = $eap }
 Write-Ok "pushed main + v$ver"
 
 # 8. Publish the Gitee Release + installer.
