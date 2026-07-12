@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cstdarg>
 
 // Minimal string helpers (no STL to keep binary small)
 static void str_path_join(char* dst, size_t dstSize, const char* a, const char* b) {
@@ -53,6 +54,20 @@ static void ensure_parent_dir(const char* filePath) {
 
 // Full path of THIS running updater image; set at the top of WinMain.
 static char g_selfPath[MAX_PATH] = {};
+// updater.log path (<install>\bin\updater.log); set at the top of WinMain so
+// every step — including failures — is recorded for the update-test panel.
+static char g_logPath[MAX_PATH] = {};
+
+static void ulog(const char* fmt, ...) {
+    if (!g_logPath[0]) return;
+    FILE* f = fopen(g_logPath, "a");
+    if (!f) return;
+    SYSTEMTIME st; GetLocalTime(&st);
+    fprintf(f, "[%02d:%02d:%02d.%03d] ", st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
+    va_list ap; va_start(ap, fmt); vfprintf(f, fmt, ap); va_end(ap);
+    fputc('\n', f);
+    fclose(f);
+}
 
 // Copy file: src → dst (create parent dirs as needed).
 // Self-replace guard: Windows won't let CopyFileA overwrite the running .exe.
@@ -67,7 +82,10 @@ static bool copy_file(const char* src, const char* dst) {
         DeleteFileA(oldPath);
         MoveFileExA(dst, oldPath, MOVEFILE_REPLACE_EXISTING);
     }
-    return CopyFileA(src, dst, FALSE) != 0;
+    BOOL ok = CopyFileA(src, dst, FALSE);
+    if (ok) ulog("  copied: %s", dst);
+    else    ulog("  COPY FAIL: %s -> %s (err=%lu)", src, dst, (unsigned long)GetLastError());
+    return ok != 0;
 }
 
 // Walk staging_dir recursively; copy every file to install_dir, preserving relative paths.
@@ -124,6 +142,14 @@ static void remove_tree(const char* dir) {
 int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
     // Full path of this running updater image.
     GetModuleFileNameA(nullptr, g_selfPath, MAX_PATH);
+    // updater.log next to this exe (<install>\bin\updater.log) — written from the
+    // very start so any failure (denied copy, occupied exe, missing install) is
+    // captured for the update-test panel.
+    strncpy(g_logPath, g_selfPath, MAX_PATH-1); g_logPath[MAX_PATH-1] = '\0';
+    str_dirname(g_logPath);
+    strncat(g_logPath, "\\updater.log", MAX_PATH - strlen(g_logPath) - 1);
+    ulog("=== updater start === self=%s", g_selfPath);
+    ulog("cmdline: [%s]", lpCmdLine ? lpCmdLine : "(null)");
 
     // Best-effort cleanup of a leftover .old from a previous self-replace.
     {
@@ -158,17 +184,26 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
     if (tok) oldPid = (DWORD)strtoul(tok, nullptr, 10);
 
     if (!stagingDir[0] || !oldPid) {
+        ulog("ERROR: bad args (staging=%s pid=%lu)", stagingDir, (unsigned long)oldPid);
         MessageBoxA(nullptr, "Usage: updater.exe <staging_dir> <old_pid>", "GAM Updater", MB_ICONERROR);
         return 1;
     }
+    ulog("staging=%s  oldPid=%lu", stagingDir, (unsigned long)oldPid);
 
     // 1. Wait for old process to exit
     HANDLE hProc = OpenProcess(SYNCHRONIZE, FALSE, oldPid);
     if (hProc) {
+        ulog("waiting for pid %lu to exit (<=30s)...", (unsigned long)oldPid);
         if (WaitForSingleObject(hProc, 30000) == WAIT_TIMEOUT) {
+            ulog("pid wait TIMEOUT -> terminating");
             TerminateProcess(hProc, 0);
+        } else {
+            ulog("pid exited");
         }
         CloseHandle(hProc);
+    } else {
+        ulog("OpenProcess(pid %lu) failed/absent -> proceeding (err=%lu)",
+            (unsigned long)oldPid, (unsigned long)GetLastError());
     }
 
     // Give the old process a moment to fully release file handles
@@ -198,12 +233,16 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
     }
 
     if (!installDir[0]) {
+        ulog("ERROR: cannot resolve install path");
         MessageBoxA(nullptr, "Cannot resolve install path.", "GAM Updater", MB_ICONERROR);
         return 2;
     }
+    ulog("install dir = %s", installDir);
 
     // 3. Copy staging files to install dir
+    ulog("copying staging -> install ...");
     int copied = copy_staging(stagingDir, installDir);
+    ulog("copied %d files total", copied);
 
     char msg[256];
     snprintf(msg, sizeof(msg), "Update complete: %d files replaced.\nRestarting...", copied);
@@ -211,10 +250,13 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
     // 4. Launch new EXE
     char exePath[MAX_PATH];
     snprintf(exePath, MAX_PATH, "%s\\bin\\monitor_app.exe", installDir);
-    ShellExecuteA(nullptr, "open", exePath, nullptr, installDir, SW_SHOW);
+    ulog("launching %s", exePath);
+    HINSTANCE h = ShellExecuteA(nullptr, "open", exePath, nullptr, installDir, SW_SHOW);
+    ulog("launch result = %llu (>32 = OK)", (unsigned long long)(ULONG_PTR)h);
 
     // 5. Clean up staging
     remove_tree(stagingDir);
+    ulog("=== updater done (copied %d files) ===", copied);
 
     return 0;
 }
