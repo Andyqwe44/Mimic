@@ -1239,6 +1239,13 @@ static bool relaunch_as_medium() {
     hLinked = tlt.LinkedToken;
     bool ok = false;
     if (hLinked) {
+        // TokenLinkedToken is an impersonation token; CreateProcessAsUserW
+        // requires a primary token. Duplicate it first.
+        HANDLE hPrimary = nullptr;
+        if (DuplicateTokenEx(hLinked, MAXIMUM_ALLOWED, nullptr, SecurityImpersonation, TokenPrimary, &hPrimary)) {
+            CloseHandle(hLinked);
+            hLinked = hPrimary;
+        }
         wchar_t wexe[MAX_PATH] = {};
         MultiByteToWideChar(CP_UTF8, 0, exePath, -1, wexe, MAX_PATH);
         STARTUPINFOW si = {}; si.cb = sizeof(si);
