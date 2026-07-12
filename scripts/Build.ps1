@@ -158,7 +158,7 @@ function Build-MonitorApp {
         }
         $lflags = @('d3d11.lib', 'dxgi.lib', 'windowsapp.lib', 'user32.lib', 'gdi32.lib', 'ole32.lib',
             'oleaut32.lib', 'ws2_32.lib', 'windowscodecs.lib', 'dwmapi.lib', 'shell32.lib', 'shlwapi.lib',
-            'winhttp.lib', 'bcrypt.lib')
+            'winhttp.lib', 'bcrypt.lib', 'advapi32.lib')
         $linkflags = if ($Dev) { @('/DEBUG:FULL') } else { @('/OPT:REF', '/OPT:ICF') }
         $srcs = @('src\main.cpp', 'src\commands.cpp', 'src\virtual_desktop.cpp', 'src\paths.cpp', 'src\sha256_util.cpp')
         $libs = @('dep\WebView2LoaderStatic.lib', "$Root\logger\build\logger.lib") +

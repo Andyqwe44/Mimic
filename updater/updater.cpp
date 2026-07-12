@@ -174,18 +174,31 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
     // Give the old process a moment to fully release file handles
     Sleep(500);
 
-    // 2. Read install path from registry
+    // 2. Resolve install dir — prefer exe-relative (this updater lives in
+    //    <install>\bin\updater.exe, so install = parent of bin), matching
+    //    monitor_app's paths_get_install_dir. Robust to a missing/stale registry
+    //    entry; fall back to the registry InstallPath only if exe-relative looks wrong.
     char installDir[MAX_PATH] = {};
-    HKEY hKey;
-    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE,
-        "SOFTWARE\\GameAgentMonitor", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
-        DWORD size = sizeof(installDir);
-        RegQueryValueExA(hKey, "InstallPath", nullptr, nullptr, (LPBYTE)installDir, &size);
-        RegCloseKey(hKey);
+    strncpy(installDir, g_selfPath, MAX_PATH-1); installDir[MAX_PATH-1] = '\0';
+    str_dirname(installDir);  // <install>\bin
+    str_dirname(installDir);  // <install>
+    {
+        char probe[MAX_PATH];
+        snprintf(probe, MAX_PATH, "%s\\bin\\monitor_app.exe", installDir);
+        if (GetFileAttributesA(probe) == INVALID_FILE_ATTRIBUTES) {
+            installDir[0] = '\0';
+            HKEY hKey;
+            if (RegOpenKeyExA(HKEY_LOCAL_MACHINE,
+                "SOFTWARE\\GameAgentMonitor", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+                DWORD size = sizeof(installDir);
+                RegQueryValueExA(hKey, "InstallPath", nullptr, nullptr, (LPBYTE)installDir, &size);
+                RegCloseKey(hKey);
+            }
+        }
     }
 
     if (!installDir[0]) {
-        MessageBoxA(nullptr, "Cannot find install path in registry.", "GAM Updater", MB_ICONERROR);
+        MessageBoxA(nullptr, "Cannot resolve install path.", "GAM Updater", MB_ICONERROR);
         return 2;
     }
 

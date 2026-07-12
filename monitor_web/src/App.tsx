@@ -36,6 +36,7 @@ export default function App() {
   const [appVersion, setAppVersion] = useState(`v${__APP_VERSION__}`)
   const [appReady, setAppReady] = useState(false)   // false = show startup splash overlay
   const [previewSkeleton, setPreviewSkeleton] = useState(false)  // Dev: manual skeleton preview
+  const [isAdmin, setIsAdmin] = useState(false)  // current process elevation (admin?)
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
   const [updateDownloading, setUpdateDownloading] = useState(false)
   const [updateProgress, setUpdateProgress] = useState<UpdateProgressMsg | null>(null)
@@ -214,6 +215,15 @@ export default function App() {
     setPreviewSkeleton(true)
     window.setTimeout(() => setPreviewSkeleton(false), 3000)
     addLog('[Dev] 预览骨架屏 (3s)')
+  }, [])
+
+  // 运行权限：加载当前进程是否管理员；切换 = 重启到目标权限（升→UAC，降→token 降级）。
+  useEffect(() => {
+    hostCall('get_elevation').then((r: any) => setIsAdmin(!!r?.admin)).catch(() => {})
+  }, [])
+  const switchPermission = useCallback((toAdmin: boolean) => {
+    addLog(`[Perm] 切换到${toAdmin ? '管理员' : '普通'}权限，重启程序…`)
+    hostCall('switch_permission', { admin: toAdmin }).catch(() => {})
   }, [])
 
   // ── Update check / download handlers ──
@@ -1028,6 +1038,8 @@ export default function App() {
               onCheckUpdate={checkForUpdate}
               hasUpdate={!!updateInfo}
               onPreviewSkeleton={previewSkeletonScreen}
+              isAdmin={isAdmin}
+              onSwitchPermission={switchPermission}
             />
           )}
           {/* Monitor tab */}

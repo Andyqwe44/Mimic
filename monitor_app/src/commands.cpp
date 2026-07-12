@@ -1117,20 +1117,152 @@ bool update_launch_updater() {
     std::string installDir  = paths_get_install_dir();
     std::string updaterPath = installDir + "\\bin\\updater.exe";
     DWORD pid = GetCurrentProcessId();
-    char cmdLine[512];
-    snprintf(cmdLine, sizeof(cmdLine), "\"%s\" \"%s\" %lu",
-        updaterPath.c_str(), stagingDir.c_str(), (unsigned long)pid);
-    STARTUPINFOA si = {}; si.cb = sizeof(si);
-    PROCESS_INFORMATION pi = {};
-    if (!CreateProcessA(nullptr, cmdLine, nullptr, nullptr, FALSE,
-            CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
-        LOG("cmd", "update_launch_updater: CreateProcess failed err=%lu",
+    // updater.exe is requireAdministrator (it overwrites Program Files). Launching
+    // it from this non-elevated process via CreateProcess fails with
+    // ERROR_ELEVATION_REQUIRED (740). ShellExecuteEx + "runas" raises the UAC
+    // prompt so the updater runs elevated.
+    std::string params = "\"" + stagingDir + "\" " + std::to_string((unsigned long)pid);
+    SHELLEXECUTEINFOA sei = {};
+    sei.cbSize       = sizeof(sei);
+    sei.fMask        = SEE_MASK_NOCLOSEPROCESS;
+    sei.lpVerb       = "runas";
+    sei.lpFile       = updaterPath.c_str();
+    sei.lpParameters = params.c_str();
+    sei.nShow        = SW_HIDE;
+    if (!ShellExecuteExA(&sei)) {
+        LOG_ERROR("cmd", "update_launch_updater: ShellExecuteEx(runas) failed err=%lu",
             (unsigned long)GetLastError());
         return false;
     }
-    CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
-    LOG("cmd", "update_launch_updater: updater launched, staging=%s", stagingDir.c_str());
+    if (sei.hProcess) CloseHandle(sei.hProcess);
+    LOG("cmd", "update_launch_updater: updater launched (elevated), staging=%s", stagingDir.c_str());
     return true;
+}
+
+// ── Run-as permission (Medium=normal / High=admin integrity) ────────────────
+
+// True if this process runs elevated (High integrity == admin).
+static bool process_is_elevated() {
+    bool elevated = false;
+    HANDLE hTok = nullptr;
+    if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hTok)) {
+        TOKEN_ELEVATION te; DWORD cb = 0;
+        if (GetTokenInformation(hTok, TokenElevation, &te, sizeof(te), &cb))
+            elevated = te.TokenIsElevated != 0;
+        CloseHandle(hTok);
+    }
+    return elevated;
+}
+
+// Persist the "always run as admin" preference via the shell compat flag
+// (HKCU\...\AppCompatFlags\Layers = "~ RUNASADMIN" for this exe). With it set,
+// double-clicking the exe auto-prompts UAC — so "last choice = admin" survives a
+// restart WITHOUT the app relaunching itself (no double-flash).
+static void set_run_as_admin_flag(bool enable) {
+    char exePath[MAX_PATH] = {};
+    GetModuleFileNameA(nullptr, exePath, MAX_PATH);
+    const char* sub = "Software\\Microsoft\\Windows NT\\CurrentVersion\\AppCompatFlags\\Layers";
+    HKEY hKey = nullptr;
+    if (enable) {
+        if (RegCreateKeyExA(HKEY_CURRENT_USER, sub, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &hKey, nullptr) == ERROR_SUCCESS) {
+            const char* val = "~ RUNASADMIN";
+            RegSetValueExA(hKey, exePath, 0, REG_SZ, (const BYTE*)val, (DWORD)strlen(val) + 1);
+            RegCloseKey(hKey);
+        }
+    } else if (RegOpenKeyExA(HKEY_CURRENT_USER, sub, 0, KEY_SET_VALUE, &hKey) == ERROR_SUCCESS) {
+        RegDeleteValueA(hKey, exePath);
+        RegCloseKey(hKey);
+    }
+}
+
+// Relaunch a fresh ELEVATED copy of ourselves (UAC prompt).
+static bool relaunch_as_admin() {
+    char exePath[MAX_PATH] = {};
+    GetModuleFileNameA(nullptr, exePath, MAX_PATH);
+    SHELLEXECUTEINFOA sei = {};
+    sei.cbSize = sizeof(sei);
+    sei.fMask  = SEE_MASK_NOCLOSEPROCESS;
+    sei.lpVerb = "runas";
+    sei.lpFile = exePath;
+    sei.nShow  = SW_SHOWNORMAL;
+    bool ok = ShellExecuteExA(&sei) != FALSE;
+    if (sei.hProcess) CloseHandle(sei.hProcess);
+    return ok;
+}
+
+// Relaunch a fresh copy at MEDIUM integrity (normal user) — self-contained, NO
+// dependency on explorer: duplicate our own token, drop its integrity level to
+// Medium, CreateProcessAsUser with it.
+static bool relaunch_as_medium() {
+    char exePath[MAX_PATH] = {};
+    GetModuleFileNameA(nullptr, exePath, MAX_PATH);
+    // Enable the privileges CreateProcessAsUser needs (present on an admin token).
+    HANDLE hAdj = nullptr;
+    if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY | TOKEN_ADJUST_PRIVILEGES, &hAdj)) {
+        const char* privs[] = { "SeAssignPrimaryTokenPrivilege", "SeIncreaseQuotaPrivilege" };
+        for (const char* pn : privs) {
+            LUID luid;
+            if (LookupPrivilegeValueA(nullptr, pn, &luid)) {
+                TOKEN_PRIVILEGES tp = {};
+                tp.PrivilegeCount = 1;
+                tp.Privileges[0].Luid = luid;
+                tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+                AdjustTokenPrivileges(hAdj, FALSE, &tp, sizeof(tp), nullptr, nullptr);
+            }
+        }
+        CloseHandle(hAdj);
+    }
+    HANDLE hSelf = nullptr, hNew = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(),
+            TOKEN_DUPLICATE | TOKEN_ADJUST_DEFAULT | TOKEN_QUERY | TOKEN_ASSIGN_PRIMARY, &hSelf))
+        return false;
+    bool ok = false;
+    if (DuplicateTokenEx(hSelf, MAXIMUM_ALLOWED, nullptr, SecurityImpersonation, TokenPrimary, &hNew)) {
+        SID_IDENTIFIER_AUTHORITY sia = SECURITY_MANDATORY_LABEL_AUTHORITY;
+        PSID pMed = nullptr;
+        if (AllocateAndInitializeSid(&sia, 1, SECURITY_MANDATORY_MEDIUM_RID, 0, 0, 0, 0, 0, 0, 0, &pMed)) {
+            TOKEN_MANDATORY_LABEL tml = {};
+            tml.Label.Attributes = SE_GROUP_INTEGRITY;
+            tml.Label.Sid = pMed;
+            SetTokenInformation(hNew, TokenIntegrityLevel, &tml,
+                (DWORD)(sizeof(TOKEN_MANDATORY_LABEL) + GetLengthSid(pMed)));
+            wchar_t wexe[MAX_PATH] = {};
+            MultiByteToWideChar(CP_UTF8, 0, exePath, -1, wexe, MAX_PATH);
+            STARTUPINFOW si = {}; si.cb = sizeof(si);
+            PROCESS_INFORMATION pi = {};
+            if (CreateProcessAsUserW(hNew, wexe, nullptr, nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) {
+                CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
+                ok = true;
+            }
+            FreeSid(pMed);
+        }
+        CloseHandle(hNew);
+    }
+    CloseHandle(hSelf);
+    return ok;
+}
+
+// get_elevation -> {ok, admin}
+static std::string cmd_get_elevation() {
+    return std::string("{\"ok\":true,\"admin\":") + (process_is_elevated() ? "true" : "false") + "}";
+}
+
+// switch_permission {admin}: persist the preference, relaunch at the target
+// integrity, then close this instance (posted to the UI thread AFTER the result
+// is returned to JS). No-op if already at the target level.
+static std::string cmd_switch_permission(bool toAdmin) {
+    bool already = process_is_elevated();
+    set_run_as_admin_flag(toAdmin);
+    if (toAdmin == already) return R"({"ok":true,"changed":false})";
+    bool ok = toAdmin ? relaunch_as_admin() : relaunch_as_medium();
+    if (!ok) {
+        LOG_ERROR("cmd", "switch_permission: relaunch (%s) failed err=%lu",
+            toAdmin ? "admin" : "normal", (unsigned long)GetLastError());
+        return R"({"ok":false,"error":"relaunch failed"})";
+    }
+    HWND hwnd = (HWND)get_main_hwnd();
+    if (hwnd) PostMessageW(hwnd, WM_CLOSE, 0, 0);   // quit this instance after reply
+    return R"({"ok":true,"changed":true})";
 }
 
 // Compare dotted numeric versions: version_lt("0.3.7","0.3.10") == true.
@@ -1844,6 +1976,13 @@ std::string dispatch_command(const std::string& json) {
             else diffClean += diffArr[i];
         }
         result = cmd_download_update(diffClean);
+    }
+    else if (cmd == "get_elevation") {
+        result = cmd_get_elevation();
+    }
+    else if (cmd == "switch_permission") {
+        bool toAdmin = args.find("\"admin\":true") != std::string::npos;
+        result = cmd_switch_permission(toAdmin);
     }
     else if (cmd == "get_settings") {
         result = cmd_get_settings();
