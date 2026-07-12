@@ -1165,6 +1165,7 @@ static bool process_is_elevated() {
 static void set_run_as_admin_flag(bool enable) {
     char exePath[MAX_PATH] = {};
     GetModuleFileNameA(nullptr, exePath, MAX_PATH);
+    LOG("cmd", "set_run_as_admin_flag: enable=%d exe=%s", (int)enable, exePath);
     const char* sub = "Software\\Microsoft\\Windows NT\\CurrentVersion\\AppCompatFlags\\Layers";
     HKEY hKey = nullptr;
     if (enable) {
@@ -1172,10 +1173,15 @@ static void set_run_as_admin_flag(bool enable) {
             const char* val = "~ RUNASADMIN";
             RegSetValueExA(hKey, exePath, 0, REG_SZ, (const BYTE*)val, (DWORD)strlen(val) + 1);
             RegCloseKey(hKey);
-        }
-    } else if (RegOpenKeyExA(HKEY_CURRENT_USER, sub, 0, KEY_SET_VALUE, &hKey) == ERROR_SUCCESS) {
-        RegDeleteValueA(hKey, exePath);
-        RegCloseKey(hKey);
+            LOG("cmd", "set_run_as_admin_flag: wrote RUNASADMIN");
+        } else { LOG_WARN("cmd", "set_run_as_admin_flag: RegCreateKeyExA failed"); }
+    } else {
+        LONG err = RegOpenKeyExA(HKEY_CURRENT_USER, sub, 0, KEY_SET_VALUE, &hKey);
+        if (err == ERROR_SUCCESS) {
+            err = RegDeleteValueA(hKey, exePath);
+            RegCloseKey(hKey);
+            LOG("cmd", "set_run_as_admin_flag: RegDeleteValueA -> %ld", (long)err);
+        } else { LOG_WARN("cmd", "set_run_as_admin_flag: RegOpenKeyExA failed err=%ld", (long)err); }
     }
 }
 
@@ -1256,8 +1262,9 @@ static std::string cmd_get_elevation() {
 // is returned to JS). No-op if already at the target level.
 static std::string cmd_switch_permission(bool toAdmin) {
     bool already = process_is_elevated();
-    set_run_as_admin_flag(toAdmin);
+    set_run_as_admin_flag(toAdmin);  // write/delete flag BEFORE relaunch (now logs result)
     if (toAdmin == already) return R"({"ok":true,"changed":false})";
+    LOG("cmd", "switch_permission: toAdmin=%d already=%d", (int)toAdmin, (int)already);
     // Free the single-instance lock BEFORE relaunching, else the new copy hits the
     // guard and exits (code 2) since this instance hasn't fully quit yet.
     app_release_singleton();
