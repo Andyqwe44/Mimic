@@ -54,7 +54,7 @@ Source: "..\release\GameAgentMonitor\bin\monitor_app.exe";  DestDir: "{app}\bin"
 Source: "..\release\GameAgentMonitor\bin\logger.dll";       DestDir: "{app}\bin"; Components: core; Flags: ignoreversion
 Source: "..\release\GameAgentMonitor\bin\updater.exe";      DestDir: "{app}\bin"; Components: core; Flags: ignoreversion
 Source: "..\release\GameAgentMonitor\bin\updater.new";      DestDir: "{app}\bin"; Components: core; Flags: ignoreversion
-Source: "..\release\GameAgentMonitor\bin\capture_common.dll"; DestDir: "{app}\bin"; Components: core; Flags: ignoreversion capture; Flags: ignoreversion
+Source: "..\release\GameAgentMonitor\bin\capture_common.dll"; DestDir: "{app}\bin"; Components: core capture Flags: ignoreversion
 
 ; Capture modules
 Source: "..\release\GameAgentMonitor\bin\capture_wgc.dll";     DestDir: "{app}\bin"; Components: capture; Flags: ignoreversion
