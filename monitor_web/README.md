@@ -55,8 +55,8 @@ capture/
 │   ├── capture_wgc_ffi.h             # WGC stream FFI header
 │   ├── capture_methods.h             # Public FFI (all GDI methods)
 │   └── capture_internal.h            # Shared GDI helpers + DPI guard
-├── build.cmd                         # Standalone exe build
-└── build_capture_lib.cmd             # Static lib → linked by build.rs
+├── build.cmd                         # Standalone h264/dxgi experiment exe (aux)
+└── (DLLs built by scripts\Build.ps1 -Module capture)
 ```
 
 ## Transport Methods
