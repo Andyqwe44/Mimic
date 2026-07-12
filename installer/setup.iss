@@ -103,6 +103,14 @@ Type: filesandordirs; Name: "{localappdata}\GameAgentMonitor"
 ; {app}\bin that aren't in Inno's install manifest; nuke the whole tree to leave nothing.
 Type: filesandordirs; Name: "{app}"
 
+; Wipe the "always run as admin" Layers flag on every install/upgrade. A prior
+; run-as-admin choice sticks a RUNASADMIN value into HKCU\...\Layers that forces
+; the exe to always elevate — then ShellExecute from the installer's [Run] fails
+; with error 740 (elevation required vs the already-dropped installer token).
+; Deleting it here resets the user to a clean normal-user launch every install.
+[Registry]
+Root: HKCU; Subkey: "Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers"; ValueType: none; ValueName: "{app}\bin\{#MyAppExeName}"; Flags: deletevalue
+
 [Run]
 Filename: "{app}\bin\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
