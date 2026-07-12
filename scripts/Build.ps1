@@ -31,7 +31,7 @@ function Build-Logger {
         -Version $Ver -ModuleDesc 'Unified Logging Engine' -FileType VFT_DLL
     Push-Location $dir
     try {
-        Invoke-Native { cl.exe /nologo /EHsc /std:c++17 /I "$Root\common\include" /I build `
+        Invoke-Native { cl.exe /nologo /EHsc /std:c++17 /source-charset:utf-8 /I "$Root\common\include" /I build `
                 /DGAM_BUILD_DLL /MT /c /Fo"build\logger.obj" logger.cpp } 'logger cl'
         Invoke-Native { rc.exe /nologo /I build /fo build\logger.res "$Root\common\version.rc" } 'logger rc'
         Invoke-Native { link.exe /nologo /DLL /NXCOMPAT /DYNAMICBASE /OUT:build\logger.dll `
@@ -47,7 +47,7 @@ function Build-Capture {
     $bld = Join-Path $dir 'build'
     New-Item -ItemType Directory -Force -Path $bld | Out-Null
 
-    $cflags = @('/nologo', '/EHsc', '/std:c++17', '/I', 'include', '/I', "$Root\common\include",
+    $cflags = @('/nologo', '/EHsc', '/std:c++17', '/source-charset:utf-8', '/I', 'include', '/I', "$Root\common\include",
         '/DGAM_BUILD_DLL', '/c', '/MT')
     $syslibs = @('user32.lib', 'gdi32.lib', 'dwmapi.lib', "$Root\logger\build\logger.lib")
     $commonLib = "$Root\capture\build\capture_common.lib"
@@ -89,7 +89,7 @@ function Build-Input {
     Write-Step "input DLLs (v$Ver)"
     $dir = Join-Path $Root 'input'
     New-Item -ItemType Directory -Force -Path (Join-Path $dir 'build') | Out-Null
-    $cflags = @('/nologo', '/EHsc', '/std:c++17', '/I', 'include', '/I', "$Root\common\include",
+    $cflags = @('/nologo', '/EHsc', '/std:c++17', '/source-charset:utf-8', '/I', 'include', '/I', "$Root\common\include",
         '/I', "$Root\monitor_app\src", '/I', "$Root\capture\include", '/DGAM_BUILD_DLL', '/MT', '/c')
     $syslibs = @('user32.lib', "$Root\logger\build\logger.lib")
     $commonLib = "$Root\input\build\input_common.lib"
@@ -129,7 +129,7 @@ function Build-Updater {
         New-Item -ItemType Directory -Force -Path 'build' | Out-Null
         # --% (stop-parsing) passes the rest verbatim to cl — avoids PowerShell
         # mangling the /MANIFESTUAC quotes. The whole line is literal (no PS vars).
-        cl.exe --% /nologo /EHsc /std:c++17 /DNDEBUG /O2 /GS- /Gy /Gw /MT /Fobuild\updater.obj /Fe:build\updater.exe updater.cpp advapi32.lib shell32.lib user32.lib kernel32.lib /link /OPT:REF /OPT:ICF /SUBSYSTEM:WINDOWS /MANIFEST:EMBED /MANIFESTUAC:"level='requireAdministrator' uiAccess='false'"
+        cl.exe --% /nologo /EHsc /std:c++17 /source-charset:utf-8 /DNDEBUG /O2 /GS- /Gy /Gw /MT /Fobuild\updater.obj /Fe:build\updater.exe updater.cpp advapi32.lib shell32.lib user32.lib kernel32.lib /link /OPT:REF /OPT:ICF /SUBSYSTEM:WINDOWS /MANIFEST:EMBED /MANIFESTUAC:"level='requireAdministrator' uiAccess='false'"
         if ($LASTEXITCODE) { throw 'updater: build failed' }
     }
     finally { Pop-Location }
@@ -151,10 +151,10 @@ function Build-MonitorApp {
 
         $inc = @('/I', 'src', '/I', 'dep', '/I', "$Root\capture\include", '/I', "$Root\common\include")
         $cflags = if ($Dev) {
-            @('/nologo', '/EHsc', '/std:c++17') + $inc + @('/DDEV_MODE', '/Od', '/Zi', '/MT')
+            @('/nologo', '/EHsc', '/std:c++17', '/source-charset:utf-8') + $inc + @('/DDEV_MODE', '/Od', '/Zi', '/MT')
         }
         else {
-            @('/nologo', '/EHsc', '/std:c++17') + $inc + @('/DNDEBUG', '/O2', '/GS-', '/Gy', '/Gw', '/MT')
+            @('/nologo', '/EHsc', '/std:c++17', '/source-charset:utf-8') + $inc + @('/DNDEBUG', '/O2', '/GS-', '/Gy', '/Gw', '/MT')
         }
         $lflags = @('d3d11.lib', 'dxgi.lib', 'windowsapp.lib', 'user32.lib', 'gdi32.lib', 'ole32.lib',
             'oleaut32.lib', 'ws2_32.lib', 'windowscodecs.lib', 'dwmapi.lib', 'shell32.lib', 'shlwapi.lib',

@@ -232,6 +232,21 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR lpCm
     wc.lpfnWndProc   = WndProc;
     wc.hInstance     = hInstance;
     wc.hCursor       = LoadCursor(nullptr, MAKEINTRESOURCE(32512)); // IDC_ARROW
+    // App icon (app.rc IDI_APPICON=1, a multi-size .ico). Big = taskbar / Alt-Tab,
+    // small = title-bar corner. Without these the window showed no title-bar icon
+    // and a tiny/default taskbar icon.
+    // Windows 10/11 taskbar renders the icon DPI-scaled (nominally 24px logical),
+    // so load at the CURRENT system-DPI metrics — NOT a fixed 32 (too small on
+    // high-DPI) nor a huge 256 (that can fail to load and silently fall back to the
+    // 16px small icon, which looked ~1/3 size). GetSystemMetricsForDpi picks the
+    // right physical size; LoadImage then grabs the matching frame from the .ico.
+    UINT sysDpi = GetDpiForSystem();
+    int bigSz = GetSystemMetricsForDpi(SM_CXICON,   sysDpi);
+    int smSz  = GetSystemMetricsForDpi(SM_CXSMICON, sysDpi);
+    HICON hIconBig   = (HICON)LoadImageW(hInstance, MAKEINTRESOURCEW(1), IMAGE_ICON, bigSz, bigSz, LR_DEFAULTCOLOR);
+    HICON hIconSmall = (HICON)LoadImageW(hInstance, MAKEINTRESOURCEW(1), IMAGE_ICON, smSz,  smSz,  LR_DEFAULTCOLOR);
+    wc.hIcon         = hIconBig;
+    wc.hIconSm       = hIconSmall;
     // Dark background brush: if the window is ever painted before the webview
     // attaches, it shows dark chrome instead of a white flash.
     wc.hbrBackground = CreateSolidBrush(RGB(24, 24, 27));
@@ -245,6 +260,11 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR lpCm
         nullptr, nullptr, hInstance, nullptr);
 
     if (!g_hwnd) return 1;
+
+    // Belt-and-suspenders: also set the window icons explicitly — some shells
+    // don't adopt the class icon for the taskbar button.
+    if (hIconBig)   SendMessageW(g_hwnd, WM_SETICON, ICON_BIG,   (LPARAM)hIconBig);
+    if (hIconSmall) SendMessageW(g_hwnd, WM_SETICON, ICON_SMALL, (LPARAM)hIconSmall);
 
     vd_set_main_hwnd(g_hwnd);  // tell virtual_desktop which HWND to use for desktop detection
 

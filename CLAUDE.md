@@ -555,6 +555,15 @@ CLAUDE.md 只保留摘要和指向 CLAUDE.old.md 的引用。
 ## Changelog
 
 Full development history preserved in `CLAUDE.old.md`. Major milestones:
+- **2026-07-12 (0.3.9 骨架屏预览开关 + 窗口/任务栏图标修复 + 换logo工具)**: (1) Settings 开发人员区加「预览骨架屏 (3s)」
+  按钮(方案A:点一下盖 3 秒自动消失,规避「全屏遮罩关不掉」)；`App.tsx` `previewSkeleton` state,骨架屏渲染改
+  `(!appReady || previewSkeleton)`。(2) **图标修复**:`main.cpp` WNDCLASS 加 `hIcon`/`hIconSm`(按 `GetSystemMetricsForDpi`
+  DPI 尺寸 `LoadImageW`,**避开会加载失败→fallback 16px 的 256**)+ 建窗后 `WM_SETICON`。**关键洞察**:任务栏/Explorer
+  图标来自 **exe 资源图标(`app.rc`→`app.ico`),不是 window HICON** —— 改 window icon 对任务栏无效;真因是 app.ico 的
+  logo 只占画布 60%(留白多)→ 显小一圈。修:`tools/make_app_icon.py`(PIL crop 去留白→居中填满~90%→多尺寸
+  16/20/24/32/48/64/128/256,24=Win 任务栏原生)重生成 app.ico→重编→清 icon cache(`ie4uinit -show` 或重启 explorer
+  删 `iconcache*.db`)。**换 logo 流程见 `tools/make_app_icon.py` 头注释 + memory app-icon-howto。** (3) `Build.ps1` 全 cl
+  加 `/source-charset:utf-8` 消 C4819 刷屏(验证 count 0)。发 0.3.9,兼作 0.3.8→0.3.9 更新链测试目标。
 - **2026-07-12 (0.3.8 真机深灰卡死修复 + installer 运行检测)**: 0.3.7 真机装上打不开——窗口隐藏后揭开是**深灰空窗**,
   无骨架屏无主 UI。**根因**(读装机日志锁定,`Read-InstalledLogs`):隐藏窗口 → Chromium 合成器暂停 → 前端
   `requestAnimationFrame` 回调**永不触发**(`setTimeout`/命令照跑,故 get_settings 发得出)→ 前端 `rAF→rAF→show_window`

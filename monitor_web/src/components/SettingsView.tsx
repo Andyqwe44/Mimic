@@ -117,6 +117,7 @@ export function SettingsView({
   selfTestRunning,
   onCheckUpdate,
   hasUpdate,
+  onPreviewSkeleton,
 }: {
   snapMethod: string; setSnapMethod: (m: string) => void
   streamMethod: string; setStreamMethod: (m: string) => void
@@ -141,6 +142,7 @@ export function SettingsView({
   selfTestRunning?: boolean
   onCheckUpdate?: () => void
   hasUpdate?: boolean
+  onPreviewSkeleton?: () => void
 }) {
   const themePairs = [
     ['#3B82F6', '#F97316'], // Ocean — blue + orange
@@ -939,6 +941,20 @@ export function SettingsView({
           defaultExpanded={true}
         >
           <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm text-text-primary">预览骨架屏</div>
+                <div className="text-xs text-text-muted">显示启动骨架屏，3 秒后自动消失</div>
+              </div>
+              <Tooltip text="预览应用启动时的骨架屏效果，3 秒后自动关闭">
+                <button
+                  onClick={() => onPreviewSkeleton?.()}
+                  className="px-3 h-7 rounded-lg text-xs bg-bg-tertiary hover:opacity-80 text-text-primary transition-opacity"
+                >
+                  预览 (3s)
+                </button>
+              </Tooltip>
+            </div>
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-sm text-text-primary">Save single-frame captures</div>

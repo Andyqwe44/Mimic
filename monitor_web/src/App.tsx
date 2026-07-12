@@ -35,6 +35,7 @@ export default function App() {
   // shows it instantly; get_version overwrites it at runtime (they match).
   const [appVersion, setAppVersion] = useState(`v${__APP_VERSION__}`)
   const [appReady, setAppReady] = useState(false)   // false = show startup splash overlay
+  const [previewSkeleton, setPreviewSkeleton] = useState(false)  // Dev: manual skeleton preview
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
   const [updateDownloading, setUpdateDownloading] = useState(false)
   const [updateProgress, setUpdateProgress] = useState<UpdateProgressMsg | null>(null)
@@ -206,6 +207,13 @@ export default function App() {
       cancelAnimationFrame(raf2)
       if (t) clearTimeout(t)
     }
+  }, [])
+
+  // 预览骨架屏（开发人员）：显示 3 秒后自动消失，避免全屏遮罩关不掉。
+  const previewSkeletonScreen = useCallback(() => {
+    setPreviewSkeleton(true)
+    window.setTimeout(() => setPreviewSkeleton(false), 3000)
+    addLog('[Dev] 预览骨架屏 (3s)')
   }, [])
 
   // ── Update check / download handlers ──
@@ -960,7 +968,7 @@ export default function App() {
   return (
     <div className="relative h-full flex flex-col bg-bg-primary">
       {/* Startup skeleton overlay — covers the UI (z-50) until initial init settles */}
-      {!appReady && <LoadingScreen />}
+      {(!appReady || previewSkeleton) && <LoadingScreen />}
       {/* ── Top bar: tabs + Start/Stop + theme ── */}
       <TopBar
         tab={tab}
@@ -1019,6 +1027,7 @@ export default function App() {
               selfTestRunning={selfTest.phase === 'running'}
               onCheckUpdate={checkForUpdate}
               hasUpdate={!!updateInfo}
+              onPreviewSkeleton={previewSkeletonScreen}
             />
           )}
           {/* Monitor tab */}
