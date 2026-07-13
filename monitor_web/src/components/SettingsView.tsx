@@ -155,9 +155,11 @@ export function SettingsView({
     const v = document.documentElement.style.getPropertyValue('--color-accent-secondary').trim()
     return v || '#F97316'
   })
+  const DEV_PAIR = themePairs[7] // ['#EF4444', '#22C55E']
   const [normalAccent, setNormalAccent] = useState(accent)
   const [normalSecondaryAccent, setNormalSecondaryAccent] = useState(secondaryAccent)
-  const DEV_PAIR = themePairs[7] // ['#EF4444', '#EAB308']
+  const [devAccent, setDevAccent] = useState(DEV_PAIR[0])
+  const [devSecondaryAccent, setDevSecondaryAccent] = useState(DEV_PAIR[1])
 
   // Sync accent-hover on mount (CSS default may be stale)
   useEffect(() => {
@@ -279,17 +281,19 @@ export function SettingsView({
       .catch(() => {})
   }, [])
 
-  // Dev mode: auto-switch to Dev pair, restore normal on exit
+  // Dev mode: auto-switch to Dev accent (remembered), restore normal on exit
   useEffect(() => {
     if (devMode) {
       setNormalAccent(accent)
       setNormalSecondaryAccent(secondaryAccent)
-      setAccent(DEV_PAIR[0])
-      setSecondaryAccent(DEV_PAIR[1])
-      document.documentElement.style.setProperty('--color-accent', DEV_PAIR[0])
-      document.documentElement.style.setProperty('--color-accent-secondary', DEV_PAIR[1])
-      document.documentElement.style.setProperty('--color-accent-hover', darken(DEV_PAIR[0], 15))
+      setAccent(devAccent)
+      setSecondaryAccent(devSecondaryAccent)
+      document.documentElement.style.setProperty('--color-accent', devAccent)
+      document.documentElement.style.setProperty('--color-accent-secondary', devSecondaryAccent)
+      document.documentElement.style.setProperty('--color-accent-hover', darken(devAccent, 15))
     } else {
+      setDevAccent(accent)
+      setDevSecondaryAccent(secondaryAccent)
       setAccent(normalAccent)
       setSecondaryAccent(normalSecondaryAccent)
       document.documentElement.style.setProperty('--color-accent', normalAccent)
@@ -760,21 +764,25 @@ export function SettingsView({
               {themePairs.map(([c1, c2], i) => {
                 const isDev = i === themePairs.length - 1
                 const disabled = isDev ? !devMode : devMode
-                const selected = accent === c1 && secondaryAccent === c2
+                // Selected: compare against the SAVED color for this button's mode,
+                // NOT the current accent. Disabled buttons still show their indicator.
+                const selected = isDev
+                  ? (devAccent === c1 && devSecondaryAccent === c2)
+                  : (normalAccent === c1 && normalSecondaryAccent === c2)
                 const name = themeNames[i]
                 return (
                   <Tooltip key={`${c1}-${c2}`} text={name} className={isDev ? 'ml-3' : ''}>
                   <span className="relative inline-flex items-center justify-center" style={{ width: 28, height: 28 }}>
-                    {/* Selected indicator: top line (c1) + bottom line (c2) */}
+                    {/* Selected indicator: top line (c1) + bottom line (c2). Dim when disabled. */}
                     {selected && (
                       <>
                         <span
                           className="absolute rounded-full"
-                          style={{ width: 20, height: 2, top: 0, left: '50%', transform: 'translateX(-50%)', background: c1 }}
+                          style={{ width: 20, height: 2, top: 0, left: '50%', transform: 'translateX(-50%)', background: c1, opacity: disabled ? 0.3 : 1 }}
                         />
                         <span
                           className="absolute rounded-full"
-                          style={{ width: 20, height: 2, bottom: 0, left: '50%', transform: 'translateX(-50%)', background: c2 }}
+                          style={{ width: 20, height: 2, bottom: 0, left: '50%', transform: 'translateX(-50%)', background: c2, opacity: disabled ? 0.3 : 1 }}
                         />
                       </>
                     )}
@@ -784,8 +792,13 @@ export function SettingsView({
                         if (disabled) return
                         setAccent(c1)
                         setSecondaryAccent(c2)
-                        setNormalAccent(c1)
-                        setNormalSecondaryAccent(c2)
+                        if (isDev) {
+                          setDevAccent(c1)
+                          setDevSecondaryAccent(c2)
+                        } else {
+                          setNormalAccent(c1)
+                          setNormalSecondaryAccent(c2)
+                        }
                         document.documentElement.style.setProperty('--color-accent', c1)
                         document.documentElement.style.setProperty('--color-accent-secondary', c2)
                         document.documentElement.style.setProperty('--color-accent-hover', darken(c1, 15))
