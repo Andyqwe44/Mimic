@@ -491,9 +491,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         std::string json = std::string("{\"type\":\"update_progress\",\"phase\":\"") + phase + "\""
             + ",\"current_file\":" + std::to_string(up.current_file)
             + ",\"total_files\":" + std::to_string(up.total_files)
+            + ",\"skipped_files\":" + std::to_string(up.skipped_files)
             + ",\"file\":\"" + js_escape(up.file_path) + "\""
             + ",\"done_bytes\":" + std::to_string(up.done_bytes)
-            + ",\"total_bytes\":" + std::to_string(up.total_bytes);
+            + ",\"total_bytes\":" + std::to_string(up.total_bytes)
+            + ",\"skipped_bytes\":" + std::to_string(up.skipped_bytes);
         if (up.failed) json += ",\"error_file\":\"" + js_escape(up.error_file) + "\"";
         json += "}";
         PostJsonToWebView(json);

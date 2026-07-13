@@ -24,7 +24,7 @@ export function TopBar({
   devMode: boolean
 }) {
   // ── Tab definitions ──
-  const tabs = [
+  const tabs: Array<{ id: 'Monitor' | 'Log' | 'Settings' | 'DevTools'; icon: React.ReactNode; label: string; tip: string }> = [
     { id: 'Monitor' as const, icon: <Monitor className="w-3.5 h-3.5" />, label: 'Monitor', tip: '实时预览与控制 — 远程操作目标窗口' },
     { id: 'Log' as const, icon: <FileText className="w-3.5 h-3.5" />, label: 'Log', tip: '查看当前会话与历史日志文件' },
     {

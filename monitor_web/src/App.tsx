@@ -261,11 +261,11 @@ export default function App() {
     } as any)
     setUpdateDownloading(true)
     if (phase === 'download') {
-      setUpdateProgress({ phase: 'download', current_file: 3, total_files: 6, file: 'frontend/assets/index-Cys4Z6Yf.js', done_bytes: 460800, total_bytes: 1048576 })
+      setUpdateProgress({ phase: 'download', current_file: 3, total_files: 6, skipped_files: 0, file: 'frontend/assets/index-Cys4Z6Yf.js', done_bytes: 460800, total_bytes: 1048576, skipped_bytes: 0 })
     } else if (phase === 'done') {
-      setUpdateProgress({ phase: 'done', current_file: 6, total_files: 6, file: '', done_bytes: 1048576, total_bytes: 1048576 })
+      setUpdateProgress({ phase: 'done', current_file: 6, total_files: 6, skipped_files: 0, file: '', done_bytes: 1048576, total_bytes: 1048576, skipped_bytes: 0 })
     } else {
-      setUpdateProgress({ phase: 'error', current_file: 3, total_files: 6, file: 'frontend/index.html', done_bytes: 460800, total_bytes: 1048576, error_file: 'frontend/index.html' })
+      setUpdateProgress({ phase: 'error', current_file: 3, total_files: 6, skipped_files: 0, file: 'frontend/index.html', done_bytes: 460800, total_bytes: 1048576, skipped_bytes: 0, error_file: 'frontend/index.html' })
     }
     addLog(`[Dev] inject download: phase=${phase}`)
   }, [appVersion])
@@ -290,6 +290,7 @@ export default function App() {
           message: info.message || '',
           mandatory: !!info.mandatory,
           mode: info.mode || 'incremental',
+          staging_state: info.staging_state || undefined,
         } as any)
         const fileCount = info.diff?.length || 0
         addLog(`[update] v${info.latest} available (${fileCount} files, ${info.mode || 'incremental'})`)
@@ -346,6 +347,12 @@ export default function App() {
   const downloadUpdate = useCallback(() => {
     if (!updateInfo) return
     if ((updateInfo as any)._dev) { addLog('[update] dev mock — download skipped'); return }
+    startDownload((updateInfo as any).diff)
+  }, [updateInfo, startDownload])
+
+  // Clear staging dir — user opts to "重新下载" instead of resuming.
+  const clearStagingAndDownload = useCallback(async () => {
+    await hostCall('clear_staging').catch(() => {})
     startDownload((updateInfo as any).diff)
   }, [updateInfo, startDownload])
 
@@ -1268,6 +1275,7 @@ export default function App() {
           downloading={updateDownloading}
           progress={updateProgress}
           onDownload={downloadUpdate}
+          onClearAndDownload={clearStagingAndDownload}
           onForceUpdate={forceFullUpdate}
           onClose={() => { setUpdateInfo(null); setUpdateDownloading(false); setUpdateProgress(null) }}
         />

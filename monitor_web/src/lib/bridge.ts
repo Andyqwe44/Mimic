@@ -209,9 +209,11 @@ export type UpdateProgressMsg = {
   phase: 'download' | 'done' | 'error'
   current_file: number
   total_files: number
+  skipped_files: number
   file: string
   done_bytes: number
   total_bytes: number
+  skipped_bytes: number
   error_file?: string
 }
 
