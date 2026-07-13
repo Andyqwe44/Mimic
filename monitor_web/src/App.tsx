@@ -229,10 +229,14 @@ export default function App() {
   // ── Update check / download handlers ──
   const checkForUpdate = useCallback(async () => {
     addLog('[update] checking...')
+    const cur = appVersion.replace(/^v/, '')
+    // 立即弹窗显示「检查中」— 无论有无更新都弹, 让结果醒目 (不只在 log 里)
+    setUpdateInfo({ status: 'checking', current: cur, latest: '', name: '', body: '', url: '' } as any)
     try {
       const info = await hostCall('check_update')
       if (info?.has_update) {
         setUpdateInfo({
+          status: 'update',
           current: info.current,
           latest: info.latest,
           name: info.name || '',
@@ -246,18 +250,34 @@ export default function App() {
         const fileCount = info.diff?.length || 0
         addLog(`[update] v${info.latest} available (${fileCount} files, ${info.mode || 'incremental'})`)
       } else if (info?.needs_full_installer) {
-        // Manifest schema newer than this client understands — the bootstrap
-        // can't safely incrementally update. Point the user at the full package.
+        // Manifest schema newer than this client understands — point at full package.
+        setUpdateInfo({
+          status: 'error', current: info.current || cur, latest: '', name: '', body: '', url: '',
+          error: '需要下载完整安装包（更新机制不兼容），请前往 Gitee 下载最新安装程序。',
+        } as any)
         addLog(`[update] full reinstall required — download: ${info.download_url || 'Gitee releases'}`)
+      } else if (info?.ok === false) {
+        setUpdateInfo({
+          status: 'error', current: info.current || cur, latest: '', name: '', body: '', url: '',
+          error: info.error || '未知错误',
+        } as any)
+        addLog(`[update] check failed: ${info?.error || 'unknown'}`)
       } else {
-        addLog(info?.ok === false
-          ? `[update] check failed: ${info?.error || 'unknown'}`
-          : `[update] already latest (v${info?.current || '?'})`)
+        // 已是最新 — 也弹窗 (醒目) 而非只 log
+        setUpdateInfo({
+          status: 'latest', current: info?.current || cur, latest: info?.current || cur,
+          name: '', body: '', url: '',
+        } as any)
+        addLog(`[update] already latest (v${info?.current || '?'})`)
       }
     } catch (e: any) {
+      setUpdateInfo({
+        status: 'error', current: cur, latest: '', name: '', body: '', url: '',
+        error: e?.message || String(e),
+      } as any)
       addLog(`[update] check error: ${e?.message || e}`)
     }
-  }, [])
+  }, [appVersion])
 
   // Kick off a download for the given diff. C++ returns immediately and drives
   // the UI via update_progress pushes; the app exits when the updater launches.
@@ -1036,7 +1056,7 @@ export default function App() {
               onRunSelfTest={runSelfTestFlow}
               selfTestRunning={selfTest.phase === 'running'}
               onCheckUpdate={checkForUpdate}
-              hasUpdate={!!updateInfo}
+              hasUpdate={updateInfo?.status === 'update'}
               onPreviewSkeleton={previewSkeletonScreen}
               isAdmin={isAdmin}
               onSwitchPermission={switchPermission}
@@ -1090,7 +1110,7 @@ export default function App() {
             targetDims={targetDims}
             appVersion={appVersion}
             agentConnected={agentConnected}
-            hasUpdate={!!updateInfo}
+            hasUpdate={updateInfo?.status === 'update'}
             onCheckUpdate={checkForUpdate}
           />
         </div>

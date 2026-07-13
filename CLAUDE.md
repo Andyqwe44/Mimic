@@ -591,6 +591,18 @@ CLAUDE.md 只保留摘要和指向 CLAUDE.old.md 的引用。
 ## Changelog
 
 Full development history preserved in `CLAUDE.old.md`. Major milestones:
+- **2026-07-13 (0.3.29 Check Update 必弹窗 — 已最新/检查中/出错也弹, 不只 log)**: 用户诉求(符合直觉):点
+  Check Update **无论有无更新都弹弹窗**——已是最新也弹「当前已是最新版本 vX」,而非只在 log 留一条不醒目提示。
+  `UpdateModal.tsx` 加 `status:'checking'|'update'|'latest'|'error'`(缺省'update'兼容):header 标题/图标随态变
+  (检查更新+Loader2转 / 发现新版本+Download / 已是最新+CheckCircle2 / 检查失败+AlertTriangle);checking=居中 spinner
+  「正在检查更新…」;latest=居中绿勾「当前已是最新版本 v{current}」+「知道了」;error=居中警告+错误文案。**尺寸策略**:
+  `update` 态固定高 `min(560,85vh)`(防下载跳);`checking/latest/error` 态**自适应高**(去 min-h 不留空)。进度槽仅
+  `update` 态渲染。footer 按态切:checking=取消/latest·error=知道了/update=稍后+全量+增量。`App.tsx checkForUpdate`
+  重写:点击**立即** `setUpdateInfo({status:'checking'})` 弹窗 → `await check_update` → 按结果切
+  `update`/`latest`/`error`(needs_full_installer→error 带「下完整包」文案)。`hasUpdate` 指示器判据改
+  `updateInfo?.status==='update'`(否则 checking/latest/error 误点亮"有更新"红点)。纯前端。
+  **注**:版本号留 0.3.x(核心视觉 AI 未实现, 远未到 1.0),把更新逻辑写完善;`version_lt` 数值分段比较、min_version
+  固定基线 0.3.24、`$LibVer` 脱钩 → bump 只改 version.h 两行, 发布流程零风险。
 - **2026-07-13 (0.3.28 更新弹窗重设计 — 对齐 Select 尺寸 + 可折叠 diff 双列 + 图标按钮)**: 用户要求重做
   Check Update 弹窗(`UpdateModal.tsx`,仅前端,App.tsx props 不动)。(1) **尺寸对齐**:`w-[420px]`→`w-[520px]`
   + 固定高 `min/max-h=min(560px,85vh)`(= `TargetPickerModal` 同款),body `flex-1 overflow-y-auto` 内滚 →
