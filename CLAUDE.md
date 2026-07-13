@@ -591,6 +591,20 @@ CLAUDE.md 只保留摘要和指向 CLAUDE.old.md 的引用。
 ## Changelog
 
 Full development history preserved in `CLAUDE.old.md`. Major milestones:
+- **2026-07-13 (0.3.28 更新弹窗重设计 — 对齐 Select 尺寸 + 可折叠 diff 双列 + 图标按钮)**: 用户要求重做
+  Check Update 弹窗(`UpdateModal.tsx`,仅前端,App.tsx props 不动)。(1) **尺寸对齐**:`w-[420px]`→`w-[520px]`
+  + 固定高 `min/max-h=min(560px,85vh)`(= `TargetPickerModal` 同款),body `flex-1 overflow-y-auto` 内滚 →
+  窗口尺寸恒定。(2) **进度条预留**:body 与 footer 间**常驻 `h-[52px]` 进度槽**,idle 空占位、下载中填充 →
+  加进度条元素不跳。(3) **图标按钮**:「增量更新」(`FileStack`)/「全量更新」(`Package`);`mode==='full'`(服务端/
+  min_version 强制全量)时主按钮自动变「全量更新」并隐藏重复副按钮。(4) **可折叠 diff**(铁律5 画=实发):折叠态
+  `本次更新 · N 个文件` + 右侧总解压/总流量;展开逐文件 `友好名徽章(w-14,核心文件 accent 色) → install 根相对
+  路径(truncate) → 解压 → 流量`。`fileRole()` 映射 path→功能名(主程序/更新器/清单/日志/捕获/输入/界面/配置)。
+  (5) **列对齐**:折叠条两列(w-20)+ chevron(w-5 gutter);文件行两列 + **等宽 w-5 空槽** → 数字列右边界对齐、
+  chevron 恒在最右。chevron 用 **caption 占位**(上方 `&nbsp;` 空行)下移到 number 行 → 与解压/流量数字中线对齐。
+  (6) **双列(大小/流量)语义**:`size`=解压磁盘占用,`dl`=压缩后下载流量(**新增可选字段,给将来压缩下载预留**);
+  当前逐文件裸下载**无压缩** → `dl` 缺省 → `traffic()` 回退 `size` → **两列当前数值相同**(非 bug,version.json
+  无文件级时间字段;后端产出 `dl` 后自动分离)。全量更新逻辑=增量的无 sha 过滤版(同一条逐文件管道,非重装)。
+  前端 tsc 编译通过。
 - **2026-07-13 (0.3.27 更新体验 — 首启自愈清单根治滞后 + 下载前 diff 预览)**: 0.3.25→0.3.26 实测下 17 文件
   (非预期 ~5),读装机日志锁定:`full=0`(P0 生效!)但 `install version.json` 冻结在 **0.3.14**(用户从 0.3.14
   全新装后一路增量,旧 updater 从不刷新它)→ check_update 用 0.3.14 旧 lib sha 比 0.3.26 脱钩 sha → 12 lib 全
