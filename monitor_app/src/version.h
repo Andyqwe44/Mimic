@@ -7,8 +7,8 @@
  * UPDATE THIS ONE FILE when bumping the version.
  */
 #pragma once
-#define APP_VERSION "0.3.25"
+#define APP_VERSION "0.3.26"
 
 // Comma form for Win32 VERSIONINFO (app.rc FILEVERSION/PRODUCTVERSION).
 // Keep in sync with APP_VERSION above.
-#define APP_VERSION_RC 0,3,25,0
+#define APP_VERSION_RC 0,3,26,0
