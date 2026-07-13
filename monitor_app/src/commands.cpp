@@ -1551,6 +1551,43 @@ static std::string cmd_check_update(bool forceFull) {
     LOG("cmd", "check_update: current=%s latest=%s hasUpdate=%d full=%d diff_files=%zu",
         current.c_str(), latest.c_str(), (int)hasUpdate, (int)useFull, nDiff);
 
+    // ── Staging state: check how many diff files are already in staging (resume info) ──
+    std::string stagingStateJson;
+    if (hasUpdate && nDiff > 0) {
+        std::string stagingDir = paths_get_appdata_dir() + "\\staging";
+        int doneFiles = 0;
+        unsigned long long doneBytes = 0, totalBytes2 = 0;
+        std::string donePaths = "[";  // file paths already in staging with matching sha256
+        size_t sp = 0;
+        while ((sp = diffJson.find("\"path\"", sp)) != std::string::npos) {
+            std::string fp = json_val(diffJson, "path", sp);
+            std::string sha = json_val(diffJson, "sha256", sp);
+            std::string sz = json_val(diffJson, "size", sp);
+            unsigned long long fsize = sz.empty() ? 0 : _strtoui64(sz.c_str(), nullptr, 10);
+            totalBytes2 += fsize;
+            sp++;
+            if (fp.empty() || sha.empty()) continue;
+            std::string spath = stagingDir + "\\" + fp;
+            std::string existing = sha256_hex_file(spath.c_str());
+            if (existing == sha) {
+                doneFiles++; doneBytes += fsize;
+                if (doneFiles > 1) donePaths += ",";
+                donePaths += "\"" + fp + "\"";
+            }
+        }
+        donePaths += "]";
+        if (doneFiles > 0) {
+            char buf[384];
+            snprintf(buf, sizeof(buf),
+                ",\"staging_state\":{\"has_partial\":true,\"done_files\":%d"
+                ",\"total_files\":%zu,\"done_bytes\":%llu,\"total_bytes\":%llu"
+                ",\"done_paths\":%s}",
+                doneFiles, nDiff, doneBytes, totalBytes2, donePaths.c_str());
+            stagingStateJson = buf;
+            LOG("cmd", "check_update: staging_state has_partial %d/%zu files", doneFiles, nDiff);
+        }
+    }
+
     return "{\"ok\":true"
         ",\"current\":\"" + json_escape(current) + "\""
         ",\"latest\":\"" + json_escape(latest) + "\""
@@ -1560,7 +1597,8 @@ static std::string cmd_check_update(bool forceFull) {
         + ",\"mode\":\"" + (useFull ? "full" : "incremental") + "\""
         + ",\"mandatory\":" + (mandatory ? "true" : "false")
         + ",\"message\":\"" + json_escape(message) + "\""
-        + ",\"diff\":" + diffJson + "}";
+        + ",\"diff\":" + diffJson
+        + stagingStateJson + "}";
 }
 
 // Background download thread: fetch each diff file to staging, verify sha256,
@@ -1570,11 +1608,44 @@ static void download_thread_func(std::string diffJsonStr, std::string stagingDir
     HWND hwnd = (HWND)get_main_hwnd();
     auto post = [&]() { if (hwnd) PostMessageW(hwnd, WM_UPDATE_PROGRESS, 0, 0); };
 
-    unsigned long long baseBytes = 0;  // bytes fully written for prior files
+    unsigned long long baseBytes = 0;  // bytes fully written for prior files (incl. resumed)
     int index = 0;
     ULONGLONG lastPost = 0;
     bool ok = true;
     std::string firstUrl, firstPath;   // first file's url/path → derive download_base (P1a)
+
+    // ── Pre-scan staging for already-complete files (resume) ──
+    int skippedCount = 0;
+    unsigned long long skippedBytes = 0;
+    {
+        size_t pp = 0;
+        while ((pp = diffJsonStr.find("\"path\"", pp)) != std::string::npos) {
+            std::string fp = json_val(diffJsonStr, "path", pp);
+            std::string sha = json_val(diffJsonStr, "sha256", pp);
+            pp++;
+            if (fp.empty() || sha.empty()) continue;
+            std::string outP = stagingDir + "\\" + fp;
+            std::string existing = sha256_hex_file(outP.c_str());
+            if (existing == sha) {
+                WIN32_FILE_ATTRIBUTE_DATA attr;
+                if (GetFileAttributesExA(outP.c_str(), GetFileExInfoStandard, &attr)) {
+                    ULONGLONG fsize = ((ULONGLONG)attr.nFileSizeHigh << 32) | attr.nFileSizeLow;
+                    baseBytes += fsize;
+                    skippedBytes += fsize;
+                }
+                skippedCount++;
+            }
+        }
+    }
+    if (skippedCount > 0) {
+        std::lock_guard<std::mutex> lk(g_up_mtx);
+        g_up.done_bytes = baseBytes;
+        g_up.skipped_files = skippedCount;
+        g_up.skipped_bytes = skippedBytes;
+        LOG("cmd", "download_update: resume pre-scan -> %d files already staged (%llu bytes)",
+            skippedCount, skippedBytes);
+    }
+    post();
 
     size_t pos = 0;
     while ((pos = diffJsonStr.find("\"path\"", pos)) != std::string::npos) {
@@ -1590,8 +1661,39 @@ static void download_thread_func(std::string diffJsonStr, std::string stagingDir
             std::lock_guard<std::mutex> lk(g_up_mtx);
             g_up.current_file = index;
             g_up.file_path = filePath;
+            g_up.skipped_files = skippedCount;
+            g_up.skipped_bytes = skippedBytes;
         }
         post();
+
+        // ── Resume: skip if staging already has this file with matching sha256 ──
+        std::string outPath = stagingDir + "\\" + filePath;
+        if (!wantSha.empty()) {
+            std::string existingHash = sha256_hex_file(outPath.c_str());
+            if (existingHash == wantSha) {
+                LOG("cmd", "download_update: resume skip %s (sha256 match)", filePath.c_str());
+                WIN32_FILE_ATTRIBUTE_DATA attr;
+                if (GetFileAttributesExA(outPath.c_str(), GetFileExInfoStandard, &attr)) {
+                    ULONGLONG fsize = ((ULONGLONG)attr.nFileSizeHigh << 32) | attr.nFileSizeLow;
+                    baseBytes += fsize;
+                    skippedBytes += fsize;
+                }
+                skippedCount++;
+                {
+                    std::lock_guard<std::mutex> lk(g_up_mtx);
+                    g_up.done_bytes = baseBytes;
+                    g_up.skipped_files = skippedCount;
+                    g_up.skipped_bytes = skippedBytes;
+                }
+                post();
+                continue;
+            } else if (!existingHash.empty()) {
+                // File exists but sha256 doesn't match — delete corrupt partial
+                LOG("cmd", "download_update: stale file %s (sha256 mismatch want=%s got=%s), re-downloading",
+                    filePath.c_str(), wantSha.c_str(), existingHash.c_str());
+                DeleteFileA(outPath.c_str());
+            }
+        }
 
         LOG("cmd", "download_update: getting %s", filePath.c_str());
         std::string data = winhttp_get_str(dlUrl, "update",
@@ -1625,8 +1727,7 @@ static void download_thread_func(std::string diffJsonStr, std::string stagingDir
             }
         }
 
-        // Write to staging, creating parent dirs.
-        std::string outPath = stagingDir + "\\" + filePath;
+        // Write to staging, creating parent dirs (outPath declared above in resume check).
         for (size_t i = stagingDir.size() + 1; i < outPath.size(); i++)
             if (outPath[i] == '\\' || outPath[i] == '/')
                 CreateDirectoryA(outPath.substr(0, i).c_str(), nullptr);
@@ -1676,14 +1777,48 @@ static void download_thread_func(std::string diffJsonStr, std::string stagingDir
         std::lock_guard<std::mutex> lk(g_up_mtx);
         g_up.active = false;
         g_up.succeeded = ok && index > 0;
+        g_up.skipped_files = skippedCount;
+        g_up.skipped_bytes = skippedBytes;
         if (g_up.succeeded) g_up.done_bytes = g_up.total_bytes;
     }
     post();  // terminal push → WndProc sees done/error; on done it launches updater
     LOG("cmd", "download_update: thread finished ok=%d files=%d", (int)ok, index);
 }
 
+// clear_staging — remove all files from the staging directory.
+// Called when user opts to "重新下载" instead of resuming a partial download.
+static std::string cmd_clear_staging() {
+    std::string stagingDir = paths_get_appdata_dir() + "\\staging";
+    // Recursively delete everything in staging/
+    auto remove_dir = [](const std::string& dir, auto& self) -> void {
+        char searchPath[MAX_PATH];
+        snprintf(searchPath, MAX_PATH, "%s\\*", dir.c_str());
+        WIN32_FIND_DATAA fd;
+        HANDLE hFind = FindFirstFileA(searchPath, &fd);
+        if (hFind == INVALID_HANDLE_VALUE) { RemoveDirectoryA(dir.c_str()); return; }
+        do {
+            if (strcmp(fd.cFileName, ".") == 0 || strcmp(fd.cFileName, "..") == 0) continue;
+            char full[MAX_PATH];
+            snprintf(full, MAX_PATH, "%s\\%s", dir.c_str(), fd.cFileName);
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                self(full, self);
+            } else {
+                DeleteFileA(full);
+            }
+        } while (FindNextFileA(hFind, &fd));
+        FindClose(hFind);
+        RemoveDirectoryA(dir.c_str());
+    };
+    remove_dir(stagingDir, remove_dir);
+    // Recreate empty staging dir
+    CreateDirectoryA(stagingDir.c_str(), nullptr);
+    LOG("cmd", "clear_staging: done");
+    return R"({"ok":true})";
+}
+
 // download_update — spawn a background download thread and return immediately.
 // Real-time progress + completion are delivered via WM_UPDATE_PROGRESS pushes.
+// Auto-resumes: files already in staging with matching sha256 are skipped.
 static std::string cmd_download_update(const std::string& diffJsonStr) {
     LOG("cmd", "download_update: diff=%s", diffJsonStr.c_str());
 
@@ -1693,18 +1828,8 @@ static std::string cmd_download_update(const std::string& diffJsonStr) {
     }
 
     // Resolve + create staging dir.
-    wchar_t localAppData[MAX_PATH];
-    std::string stagingDir;
-    if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, localAppData))) {
-        int len = WideCharToMultiByte(CP_UTF8, 0, localAppData, -1, nullptr, 0, nullptr, nullptr);
-        std::string base(len - 1, '\0');
-        WideCharToMultiByte(CP_UTF8, 0, localAppData, -1, &base[0], len, nullptr, nullptr);
-        stagingDir = base + "\\GameAgentMonitor\\staging";
-        CreateDirectoryA((base + "\\GameAgentMonitor").c_str(), nullptr);
-        CreateDirectoryA(stagingDir.c_str(), nullptr);
-    } else {
-        return R"({"ok":false,"error":"cannot resolve appdata"})";
-    }
+    std::string stagingDir = paths_get_appdata_dir() + "\\staging";
+    CreateDirectoryA(stagingDir.c_str(), nullptr);
 
     // Count files + total bytes for the progress bar.
     int totalFiles = 0;
@@ -2104,6 +2229,9 @@ std::string dispatch_command(const std::string& json) {
             else diffClean += diffArr[i];
         }
         result = cmd_download_update(diffClean);
+    }
+    else if (cmd == "clear_staging") {
+        result = cmd_clear_staging();
     }
     else if (cmd == "get_elevation") {
         result = cmd_get_elevation();

@@ -60,9 +60,11 @@ struct UpdateProgress {
     bool failed = false;       // a file failed (download or sha256 mismatch)
     int current_file = 0;      // 1-based index currently downloading
     int total_files = 0;
+    int skipped_files = 0;     // files already in staging (resume)
     std::string file_path;     // current file path
     unsigned long long done_bytes = 0;
     unsigned long long total_bytes = 0;
+    unsigned long long skipped_bytes = 0;  // bytes already staged (resume)
     std::string error_file;    // first failed file
     std::string staging_dir;   // where files were written (for updater launch)
 };

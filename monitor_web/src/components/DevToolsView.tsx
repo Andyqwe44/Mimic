@@ -343,6 +343,30 @@ export function DevToolsView({
               }],
               ['下载进度', () => onDevInjectDownload?.('download')],
               ['下载失败', () => onDevInjectDownload?.('error')],
+              ['续传(有残留)', () => {
+                const cur = appVersion.replace(/^v/, '')
+                const fakeDiff = [
+                  { path: 'bin/monitor_app.exe', size: 524288, dl: 491520 },
+                  { path: 'bin/logger.dll', size: 98304, dl: 98304 },
+                  { path: 'bin/capture_wgc.dll', size: 65536, dl: 65536 },
+                  { path: 'frontend/index.html', size: 2048, dl: 2048 },
+                  { path: 'frontend/assets/index-xxx.js', size: 327680, dl: 294912 },
+                  { path: 'frontend/assets/index-xxx.css', size: 16384, dl: 8192 },
+                  { path: 'config/settings.default.json', size: 4096, dl: 2048 },
+                ]
+                onDevInjectUpdate?.({
+                  status: 'update', current: cur, latest: '99.99.99',
+                  name: '', body: '', url: '',
+                  diff: fakeDiff,
+                  mode: 'incremental', mandatory: false,
+                  staging_state: {
+                    has_partial: true, done_files: 3, total_files: 7,
+                    done_bytes: 688128, total_bytes: 1048320,
+                    done_paths: ['bin/monitor_app.exe', 'bin/logger.dll', 'bin/capture_wgc.dll'],
+                  },
+                  _dev: true,
+                })
+              }],
             ] as [string, () => void][]).map(([label, fn]) => (
               <button key={label} onClick={fn}
                 className="px-2.5 h-7 rounded-md text-[11px] font-medium bg-accent-secondary/10 text-accent-secondary hover:bg-accent-secondary/20 border border-accent-secondary/20 transition-colors">
