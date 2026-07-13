@@ -1186,3 +1186,36 @@ Replaced with copy button (checkmark animation) in right panel Log.
 Added refresh button (with spin animation) to each history file tile.
 History tile buttons ordered: refresh → copy → expand (copy rightmost).
 Removed unused `IconBtn` component; fixed TS errors (`_setPendingWin`, `STATE_LABEL` index).
+
+---
+
+## Changelog (consolidated from CLAUDE.md, 2026-07-13)
+
+Full development history. Major milestones:
+- **2026-07-13 (0.3.29 Check Update 必弹窗)**: UpdateModal 加 status 状态机,checking/latest/error 均弹窗。纯前端。
+- **2026-07-13 (0.3.28 更新弹窗重设计)**: 对齐 Select 尺寸 `w-[520px]` + 可折叠 diff 双列 + 图标按钮。
+- **2026-07-13 (0.3.27 更新体验 — 首启自愈清单)**: local 基准清单移 appdata + `heal_local_manifest` 根治滞后。
+- **2026-07-13 (0.3.25 更新系统企业级改造)**: P0 真增量(min_version 固定基线) + P1 删除同步 + P2 ECDSA P-256 签名。
+- **2026-07-13 (DLL 版本与 APP_VERSION 解耦)**: `/Brepro` + `$LibVer` 独立模块版本 → 12 lib 字节冻结。
+- **2026-07-13 (0.3.23 降级终于通)**: Raymond Chen explorer-shellview — 伸进桌面 explorer 代理 ShellExecute。
+- **2026-07-12 (0.3.13 权限切换重启修复)**: 单实例锁 release 再 relaunch。
+- **2026-07-12 (0.3.15 降级失败修复 + 铁律 9)**: 跨进程参数引号 bug + 斜杠规范。
+- **2026-07-12 (0.3.12 更新链最后一环)**: updater 提权 ShellExecuteEx runas + install 定位 exe-relative 优先。
+- **2026-07-12 (0.3.10 更新下载 diff 双重转义修复)**: 前端 { diff } 不双重 stringify。
+- **2026-07-12 (0.3.9 骨架屏 + 图标修复)**: 骨架屏预览开关、app.ico 重生成。
+- **2026-07-12 (0.3.8 真机深灰卡死修复)**: 揭窗信号改用 NavigationCompleted,不依赖前端 rAF。
+- **2026-07-12 (0.3.7 更新系统企业化改造)**: manifest schema v2 + dev 测试通道 GAM_UPDATE_TAG。
+- **2026-07-12 (build/release 全 PowerShell 化)**: scripts/*.ps1 全链,删 14 个旧脚本。
+- **2026-07-11 (startup white-screen → hidden-window + skeleton screen)**: 隐藏窗+骨架屏治真机白屏。
+- **2026-07-11 (runtime data → LOCALAPPDATA + Inno 托管)**: 统一运行时写入 appdata。
+- **2026-07-11 (update system overhaul + v0.3.5)**: 真增量 sha256 + 进度条 + updater 自替换死循环破解。
+- **2026-07-11 (release pipeline fixes + v0.3.3/v0.3.4)**: git-bash 下三个环境 bug 修复。
+- **2026-07-11 (white-screen root fix + isolated verify)**: WebView2 userDataFolder → LOCALAPPDATA 根治白屏。
+- **2026-07-10 (version unification)**: 铁律 8 — 版本号单一真相源 version.h,消除 12 个硬编码位点。
+- **2026-07-10 (Phase 2)**: Modular DLL build (12 DLLs), InnoSetup installer, multi-file incremental update.
+- **2026-07-10 (auto-update)**: Phase 1 full-EXE update — WinHTTP check_update + download_update.
+- **2026-07-10 (self-test)**: test_target TCP self-test 通道 (:9998 JSON-lines),映射校准热力图。
+- **2026-07-10**: Log collapse, 3-mode input, WGC crash fixes.
+- **2026-07-09**: Two-color theme + Dev mode, MonitorView remote-control, component decomposition.
+- **2026-07-08**: Method routing 铁律 5 enforcement, stream bridge, SharedBuffer pipeline.
+- Earlier: Rust→C++ migration complete, WGC/DXGI capture, MJPEG server, TCP protocol.
