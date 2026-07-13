@@ -5,8 +5,10 @@ import { Tooltip } from './Toolkit'
 import { hostCall, addLog } from '../lib/bridge'
 import { CAPTURE_MODES } from '../lib/constants'
 import type { WindowInfo } from '../lib/types'
+import { useScrollLock } from '../lib/useScrollLock'
+import { MODAL_W } from '../lib/design'
 
-const PICKER_W = 'w-[520px]'
+const PICKER_W = MODAL_W.picker
 const PICKER_MAXH = 'max-h-[min(560px,85vh)] min-h-[min(560px,85vh)]'
 
 export function TargetPickerModal({
@@ -28,6 +30,9 @@ export function TargetPickerModal({
   const [loading, setLoading] = useState(false)
   const [currentDesktop, setCurrentDesktop] = useState(1)
   const [pendingWin, _setPendingWin] = useState<WindowInfo | null>(null)
+
+  // Lock body scroll while modal is open
+  useScrollLock(open)
 
   useEffect(() => {
     if (open) {

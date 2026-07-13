@@ -1,5 +1,25 @@
 # CLAUDE.md — monitor_web 前端
 
+## 铁律：设计令牌统一管理 — `src/lib/design.ts`
+
+所有可复用的 UI 常量（尺寸、间距、字号、圆角、组件预设）**必须**定义在 `src/lib/design.ts` 中。
+组件引用 `design.ts` 的导出常量，**禁止**在 `.tsx` 中手写 magic Tailwind 值。
+
+| 类别 | 导出 | 示例 |
+|------|------|------|
+| 高度 | `H` | `H.control` = `h-7` (28px) |
+| 按钮宽度 | `BTN_SIZE_CLASS`, `btnAutoSize()` | `BTN_SIZE_CLASS.sm` = `w-20` |
+| 图标 | `H.iconSm`, `H.icon`, `H.iconLg` | `w-3.5 h-3.5` / `w-4 h-4` / `w-5 h-5` |
+| 弹窗宽度 | `MODAL_W` | `MODAL_W.picker` = `w-[520px]` |
+| 间距 | `GAP`, `PAD`, `PAD_X`, `PAD_Y` | `GAP.md` = `gap-2` |
+| 字号 | `TEXT` | `TEXT.xs` = `text-xs` |
+| 圆角 | `RADIUS` | `RADIUS.lg` = `rounded-lg` |
+| 组件预设 | `MODAL_CARD`, `DIFF_CONTAINER`, `DIFF_COL` | 弹窗卡片、diff 折叠条列宽 |
+
+**原则**：不改布局，只改引用源。新组件必须用 design.ts；旧组件渐进迁移。
+
+---
+
 ## 铁律：禁止 className 静默覆盖组件内部样式
 
 ### 问题本质

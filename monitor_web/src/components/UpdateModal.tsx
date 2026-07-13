@@ -3,6 +3,8 @@ import { useState } from 'react'
 import { X, Download, ArrowRight, FileStack, Package, ChevronDown, CheckCircle2, AlertTriangle, Loader2 } from 'lucide-react'
 import { ActionBtn } from './Toolkit'
 import { addLog, type UpdateProgressMsg } from '../lib/bridge'
+import { useScrollLock } from '../lib/useScrollLock'
+import { MODAL_CARD, DIFF_CONTAINER, DIFF_COL, TEXT, RADIUS, PAD, PAD_X, PAD_Y, GAP, H } from '../lib/design'
 
 // 弹窗状态: 检查中 / 有更新 / 已最新 / 出错. 缺省视为 'update' (向后兼容).
 export type UpdateStatus = 'checking' | 'update' | 'latest' | 'error'
@@ -76,6 +78,9 @@ export function UpdateModal({
 }) {
   const [expanded, setExpanded] = useState(false)
 
+  // Lock body scroll while modal is mounted
+  useScrollLock()
+
   const status: UpdateStatus = info.status ?? 'update'
   const isUpdate = status === 'update'
   const hdr = headerFor(status)
@@ -96,8 +101,7 @@ export function UpdateModal({
       {/* Card — 宽固定 520 (= Select 弹窗). 有更新态固定高 min(560,85vh) 防下载时跳;
           检查中/已最新/出错态自适应高 (内容少不留空) */}
       <div
-        className={`relative bg-bg-primary rounded-xl ring-1 ring-inset ring-border w-[520px] max-h-[min(560px,85vh)] flex flex-col shadow-2xl overflow-hidden
-          ${isUpdate ? 'min-h-[min(560px,85vh)]' : ''}`}
+        className={`relative ${MODAL_CARD} ${isUpdate ? 'min-h-[min(560px,85vh)]' : ''}`}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
@@ -190,29 +194,27 @@ export function UpdateModal({
             {/* ── Collapsible diff (铁律 5: 画=实发). 折叠条右侧两列(解压/流量)与文件行
                    数字列共用固定宽 w-20; chevron 独占 w-5 gutter, 文件行留等宽空槽对齐 ── */}
             {nFiles > 0 && (
-              <div className="bg-bg-secondary rounded-lg overflow-hidden">
-                {/* Header row — whole bar toggles */}
+              <div className={DIFF_CONTAINER}>
+                {/* Header row — whole bar toggles, single-line horizontal */}
                 <button
                   onClick={() => setExpanded((v) => !v)}
                   className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-bg-tertiary/50 transition-colors text-left"
                 >
-                  <span className="flex-1 min-w-0 text-xs text-text-secondary">
+                  <span className="flex-1 min-w-0 text-xs text-text-secondary truncate">
                     本次更新 · <span className="font-medium text-text-primary">{nFiles}</span> 个文件
                   </span>
-                  {/* 解压总计 */}
-                  <span className="w-20 shrink-0 text-right leading-tight">
-                    <span className="block text-[9px] text-text-muted">解压</span>
-                    <span className="block text-[11px] font-mono font-medium text-text-primary tabular-nums">{fmtSize(totalSize)}</span>
+                  {/* 解压总计 — label+number same line */}
+                  <span className={`${DIFF_COL.num} shrink-0 text-right text-xs tabular-nums leading-tight`}>
+                    <span className="text-text-muted">解压 </span>
+                    <span className="font-mono font-medium text-text-primary">{fmtSize(totalSize)}</span>
                   </span>
-                  {/* 流量总计 */}
-                  <span className="w-20 shrink-0 text-right leading-tight">
-                    <span className="block text-[9px] text-text-muted">流量</span>
-                    <span className="block text-[11px] font-mono font-medium text-accent tabular-nums">{fmtSize(totalDl)}</span>
+                  {/* 流量总计 — label+number same line */}
+                  <span className={`${DIFF_COL.num} shrink-0 text-right text-xs tabular-nums leading-tight`}>
+                    <span className="text-text-muted">流量 </span>
+                    <span className="font-mono font-medium text-accent">{fmtSize(totalDl)}</span>
                   </span>
-                  {/* chevron gutter (w-5) — caption 占位使 chevron 下移到 number 行、
-                      与解压/流量数字中线对齐; 文件行留等宽空槽保持列对齐 */}
-                  <span className="w-5 shrink-0 flex flex-col items-center leading-tight">
-                    <span className="block text-[9px] leading-tight select-none">&nbsp;</span>
+                  {/* chevron — vertically centered, no caption trick needed */}
+                  <span className={`${DIFF_COL.chevron} shrink-0 flex items-center justify-center`}>
                     <ChevronDown
                       className={`w-4 h-4 text-text-muted transition-transform ${expanded ? 'rotate-180' : ''}`}
                     />
@@ -308,19 +310,21 @@ export function UpdateModal({
                   title="稍后再更新"
                   icon={<X className="w-3.5 h-3.5" />}
                   variant="outline"
+                  size="sm"
                   onClick={() => {
                     addLog('[update] dismissed')
                     onClose()
                   }}
                 />
               )}
-              {/* 全量更新 — 强制重下全部文件 (逐文件覆盖, 非重装). serverFull 时增量按钮即全量, 隐藏此按钮避免重复 */}
+              {/* 全量更新 — 强制重下全部文件. serverFull 时增量按钮即全量, 隐藏此按钮避免重复 */}
               {!downloading && onForceUpdate && !serverFull && (
                 <ActionBtn
                   label="全量更新"
                   title="强制下载全部文件（逐文件覆盖，用于本地文件损坏或增量疑漏）"
                   icon={<Package className="w-3.5 h-3.5" />}
                   variant="outline"
+                  size="lg"
                   onClick={() => {
                     addLog('[update] force full update')
                     onForceUpdate()
@@ -333,6 +337,7 @@ export function UpdateModal({
                 title={serverFull ? '下载全部文件并安装' : '只下载变化的文件并安装'}
                 icon={serverFull ? <Package className="w-3.5 h-3.5" /> : <FileStack className="w-3.5 h-3.5" />}
                 variant="primary"
+                size="lg"
                 onClick={() => {
                   addLog(`[update] downloading v${info.latest}`)
                   onDownload()
@@ -345,6 +350,7 @@ export function UpdateModal({
               title="取消检查"
               icon={<X className="w-3.5 h-3.5" />}
               variant="outline"
+              size="sm"
               onClick={onClose}
             />
           ) : (
@@ -354,6 +360,7 @@ export function UpdateModal({
               title="关闭"
               icon={<CheckCircle2 className="w-3.5 h-3.5" />}
               variant="primary"
+              size="sm"
               onClick={onClose}
             />
           )}

@@ -3,6 +3,7 @@ import { useState, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { Moon, Sun } from 'lucide-react'
 import type { ReactNode } from 'react'
+import { BTN_SIZE_CLASS, btnAutoSize, H } from '../lib/design'
 
 // ── Tooltip: 300ms delay, portal to body, smart positioning ──
 export function Tooltip({
@@ -76,29 +77,7 @@ export function Tooltip({
   )
 }
 
-// ── ActionBtn: golden-ratio modular scale (×√φ ≈ 1.272) ──
-//   xs: w-16 (64px) — ≤3 chars
-//   sm: w-20 (80px) — 4–6 chars (default auto)
-//   md: w-[104px]    — 7–9 chars
-//   lg: w-[132px]    — 10–14 chars
-//   xl: w-[168px]    — 15+ chars
-//   Height fixed at h-7 (28px). size auto-detected from label.length when omitted.
-const SIZE_CLASS: Record<string, string> = {
-  xs: 'w-16',
-  sm: 'w-20',
-  md: 'w-[104px]',
-  lg: 'w-[132px]',
-  xl: 'w-[168px]',
-}
-function autoSize(label: string): string {
-  const n = label.length
-  if (n <= 3) return 'xs'
-  if (n <= 6) return 'sm'
-  if (n <= 9) return 'md'
-  if (n <= 14) return 'lg'
-  return 'xl'
-}
-
+// ── ActionBtn: golden-ratio modular scale (×√φ ≈ 1.272), tokens from design.ts ──
 export function ActionBtn({
   icon,
   label,
@@ -116,12 +95,12 @@ export function ActionBtn({
   onClick?: () => void
   className?: string
 }) {
-  const w = SIZE_CLASS[size ?? autoSize(label)]
+  const w = BTN_SIZE_CLASS[size ?? btnAutoSize(label)]
   return (
     <Tooltip text={title}>
       <button
         onClick={onClick}
-        className={`inline-flex items-center justify-center gap-1.5 rounded-md px-2.5 h-7 text-xs font-medium transition-all duration-150 ${w} ${className ?? ''} ${
+        className={`inline-flex items-center justify-center gap-1.5 rounded-md px-2.5 ${H.control} text-xs font-medium transition-all duration-150 ${w} ${className ?? ''} ${
           variant === 'primary'
             ? 'bg-accent text-white hover:bg-accent-hover'
             : variant === 'danger'

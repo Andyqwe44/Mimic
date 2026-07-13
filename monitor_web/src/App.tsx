@@ -9,6 +9,7 @@ import { ConnectionPanel } from './components/ConnectionPanel'
 import { ScreenshotPanel } from './components/ScreenshotPanel'
 import { LogPanel } from './components/LogPanel'
 import { SettingsView } from './components/SettingsView'
+import { DevToolsView } from './components/DevToolsView'
 import { MonitorView, type MonitorApi } from './components/MonitorView'
 import { SelfTestModal } from './components/SelfTestModal'
 import { UpdateModal, type UpdateInfo } from './components/UpdateModal'
@@ -29,7 +30,7 @@ const SPLASH_TEST_MS = 0
 
 export default function App() {
   // ═══ UI state ═══
-  const [tab, setTab] = useState<'Monitor' | 'Log' | 'Settings'>('Settings')
+  const [tab, setTab] = useState<'Monitor' | 'Log' | 'Settings' | 'DevTools'>('Settings')
   const [running, setRunning] = useState(false)
   // Initialised from the compile-time version (version.h via Vite) so the splash
   // shows it instantly; get_version overwrites it at runtime (they match).
@@ -226,6 +227,49 @@ export default function App() {
     hostCall('switch_permission', { admin: toAdmin }).catch(() => {})
   }, [])
 
+  // ── Dev demo backdoors: inject fake UI states without backend ──
+  const devInjectUpdate = useCallback((info: UpdateInfo) => {
+    setUpdateInfo(info)
+    setUpdateDownloading(false)
+    setUpdateProgress(null)
+    addLog(`[Dev] inject update: status=${info.status}`)
+  }, [])
+  const devInjectSelfTest = useCallback((st: SelfTestState) => {
+    setSelfTest(st)
+    addLog(`[Dev] inject selftest: phase=${st.phase}`)
+  }, [])
+  const devInjectAgent = useCallback((connected: boolean) => {
+    setAgentConnected(connected)
+    addLog(`[Dev] inject agent: ${connected ? 'connected' : 'disconnected'}`)
+  }, [])
+
+  // Fake download progress snapshot (static, no animation)
+  const devInjectDownload = useCallback((phase: 'download' | 'done' | 'error') => {
+    const cur = appVersion.replace(/^v/, '')
+    const fakeDiff = [
+      { path: 'bin/monitor_app.exe', size: 524288, dl: 491520 },
+      { path: 'bin/updater.exe', size: 131072, dl: 122880 },
+      { path: 'bin/updater.new', size: 131072, dl: 122880 },
+      { path: 'frontend/assets/index-Cys4Z6Yf.js', size: 204800, dl: 196608 },
+      { path: 'frontend/assets/index-ByT4uD_r.css', size: 65536, dl: 61440 },
+      { path: 'frontend/index.html', size: 2048, dl: 2048 },
+    ]
+    setUpdateInfo({
+      status: 'update', current: cur, latest: '9.9.99',
+      name: 'v9.9.99 — Demo Download (模拟)', body: '', url: '',
+      diff: fakeDiff, message: '', mandatory: false, mode: 'incremental', _dev: true,
+    } as any)
+    setUpdateDownloading(true)
+    if (phase === 'download') {
+      setUpdateProgress({ phase: 'download', current_file: 3, total_files: 6, file: 'frontend/assets/index-Cys4Z6Yf.js', done_bytes: 460800, total_bytes: 1048576 })
+    } else if (phase === 'done') {
+      setUpdateProgress({ phase: 'done', current_file: 6, total_files: 6, file: '', done_bytes: 1048576, total_bytes: 1048576 })
+    } else {
+      setUpdateProgress({ phase: 'error', current_file: 3, total_files: 6, file: 'frontend/index.html', done_bytes: 460800, total_bytes: 1048576, error_file: 'frontend/index.html' })
+    }
+    addLog(`[Dev] inject download: phase=${phase}`)
+  }, [appVersion])
+
   // ── Update check / download handlers ──
   const checkForUpdate = useCallback(async () => {
     addLog('[update] checking...')
@@ -301,11 +345,13 @@ export default function App() {
 
   const downloadUpdate = useCallback(() => {
     if (!updateInfo) return
+    if ((updateInfo as any)._dev) { addLog('[update] dev mock — download skipped'); return }
     startDownload((updateInfo as any).diff)
   }, [updateInfo, startDownload])
 
   // Full update: re-query with force_full to get the complete file set, then download.
   const forceFullUpdate = useCallback(async () => {
+    if ((updateInfo as any)._dev) { addLog('[update] dev mock — force full skipped'); return }
     addLog('[update] fetching full package...')
     try {
       const info = await hostCall('check_update', { force_full: true })
@@ -658,6 +704,11 @@ export default function App() {
   const [saveStreamFrames, setSaveStreamFrames] = useState(false)
   const [frameDumpDir, setFrameDumpDir] = useState('')
 
+  // Auto-switch from Dev tab when devMode is turned off
+  useEffect(() => {
+    if (!devMode && tab === 'DevTools') setTab('Settings')
+  }, [devMode, tab])
+
   // ── Target window state (polled every 500ms) ──
   const [winState, setWinState] = useState('desktop')
   const lastWinStateRef = useRef('desktop')
@@ -675,7 +726,7 @@ export default function App() {
   const [snapshotLatency, setSnapshotLatency] = useState<number | null>(null)
   const [streamFps, setStreamFps] = useState(0)
   const [targetDims, setTargetDims] = useState<{w:number,h:number} | null>(null)
-  const [agentConnected] = useState(false) // placeholder — future TCP agent detection
+  const [agentConnected, setAgentConnected] = useState(false) // placeholder — toggleable via Dev demo
 
   // ── Self-target detection: GAM window rect + virtual screen rect ──
   const [selfRect, setSelfRect] = useState<Rect | null>(null)
@@ -1008,6 +1059,7 @@ export default function App() {
         onStop={() => setRunning(false)}
         dark={resolvedDark}
         onToggleTheme={() => setTheme(resolvedDark ? 'light' : 'dark')}
+        devMode={devMode}
       />
       {/* ── Main content area: left (tab content) + resize divider + right (panels) ── */}
       <div className="flex-1 flex overflow-hidden">
@@ -1044,22 +1096,30 @@ export default function App() {
               keepFiles={keepFiles} setKeepFiles={setKeepFiles}
               appVersion={appVersion} theme={theme} setTheme={setTheme}
               devMode={devMode} setDevMode={setDevMode}
-              saveCaptureFrames={saveCaptureFrames}
-              setSaveCaptureFrames={setSaveCaptureFrames}
-              saveStreamFrames={saveStreamFrames}
-              setSaveStreamFrames={setSaveStreamFrames}
-              frameDumpDir={frameDumpDir} setFrameDumpDir={setFrameDumpDir}
               mouseMode={mouseMode} setMouseMode={setMouseMode}
               keyMode={keyMode} setKeyMode={setKeyMode}
               mappingHotkey={mappingHotkey} setMappingHotkey={setMappingHotkey}
               selfTargetMode={selfTargetMode} setSelfTargetMode={setSelfTargetMode}
-              onRunSelfTest={runSelfTestFlow}
-              selfTestRunning={selfTest.phase === 'running'}
               onCheckUpdate={checkForUpdate}
               hasUpdate={updateInfo?.status === 'update'}
-              onPreviewSkeleton={previewSkeletonScreen}
               isAdmin={isAdmin}
               onSwitchPermission={switchPermission}
+            />
+          )}
+          {/* Dev tab */}
+          {tab === 'DevTools' && (
+            <DevToolsView
+              appVersion={appVersion}
+              saveCaptureFrames={saveCaptureFrames} setSaveCaptureFrames={setSaveCaptureFrames}
+              saveStreamFrames={saveStreamFrames} setSaveStreamFrames={setSaveStreamFrames}
+              frameDumpDir={frameDumpDir} setFrameDumpDir={setFrameDumpDir}
+              onRunSelfTest={runSelfTestFlow}
+              selfTestRunning={selfTest.phase === 'running'}
+              onPreviewSkeleton={previewSkeletonScreen}
+              onDevInjectUpdate={devInjectUpdate}
+              onDevInjectDownload={devInjectDownload}
+              onDevInjectSelfTest={devInjectSelfTest}
+              onDevInjectAgent={devInjectAgent}
             />
           )}
           {/* Monitor tab */}

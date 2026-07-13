@@ -322,6 +322,23 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR lpCm
 
     if (!g_hwnd) return 1;
 
+    // Append elevation to window title — "Game Agent Monitor (Dev) (管理员)"
+    {
+        BOOL isAdmin = FALSE;
+        PSID adminGroup = nullptr;
+        SID_IDENTIFIER_AUTHORITY NtAuthority = SECURITY_NT_AUTHORITY;
+        if (AllocateAndInitializeSid(&NtAuthority, 2,
+                SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_ADMINS,
+                0, 0, 0, 0, 0, 0, &adminGroup)) {
+            CheckTokenMembership(nullptr, adminGroup, &isAdmin);
+            FreeSid(adminGroup);
+        }
+        wchar_t titled[192];
+        swprintf(titled, 192, L"%s (%s)", TITLE, isAdmin ? L"管理员" : L"普通");
+        SetWindowTextW(g_hwnd, titled);
+        LOG("main", "Window title updated (admin=%d)", (int)isAdmin);
+    }
+
     // Belt-and-suspenders: also set the window icons explicitly — some shells
     // don't adopt the class icon for the taskbar button.
     if (hIconBig)   SendMessageW(g_hwnd, WM_SETICON, ICON_BIG,   (LPARAM)hIconBig);

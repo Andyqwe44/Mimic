@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   Camera, Play, Cpu, Sun, RefreshCw, ChevronDown,
-  Monitor, Pencil, FolderOpen, MousePointer2, Keyboard, Crosshair,
+  Monitor, MousePointer2, Keyboard, Pencil, FolderOpen,
 } from 'lucide-react'
 import { Tooltip, ActionBtn } from './Toolkit'
 import { ConnectionPanel } from './ConnectionPanel'
@@ -23,7 +23,7 @@ function darken(hex: string, pct: number): string {
 }
 
 // ── SettingsCard (collapsible) ──
-function SettingsCard({
+export function SettingsCard({
   icon,
   title,
   defaultExpanded,
@@ -106,18 +106,12 @@ export function SettingsView({
   keepFiles, setKeepFiles, appVersion,
   theme, setTheme,
   devMode, setDevMode,
-  saveCaptureFrames, setSaveCaptureFrames,
-  saveStreamFrames, setSaveStreamFrames,
-  frameDumpDir, setFrameDumpDir,
   mouseMode, setMouseMode,
   keyMode, setKeyMode,
   mappingHotkey, setMappingHotkey,
   selfTargetMode, setSelfTargetMode,
-  onRunSelfTest,
-  selfTestRunning,
   onCheckUpdate,
   hasUpdate,
-  onPreviewSkeleton,
   isAdmin,
   onSwitchPermission,
 }: {
@@ -133,18 +127,12 @@ export function SettingsView({
   appVersion: string
   theme: string; setTheme: (t: 'light' | 'dark' | 'system') => void
   devMode: boolean; setDevMode: (v: boolean) => void
-  saveCaptureFrames: boolean; setSaveCaptureFrames: (v: boolean) => void
-  saveStreamFrames: boolean; setSaveStreamFrames: (v: boolean) => void
-  frameDumpDir: string; setFrameDumpDir: (d: string) => void
   mouseMode: 'seize' | 'semi' | 'background'; setMouseMode: (m: 'seize' | 'semi' | 'background') => void
   keyMode: 'seize' | 'postmsg' | 'sendmsg'; setKeyMode: (m: 'seize' | 'postmsg' | 'sendmsg') => void
   mappingHotkey: string; setMappingHotkey: (k: string) => void
   selfTargetMode: 'warn' | 'exclude'; setSelfTargetMode: (m: 'warn' | 'exclude') => void
-  onRunSelfTest?: (perCell: number) => void
-  selfTestRunning?: boolean
   onCheckUpdate?: () => void
   hasUpdate?: boolean
-  onPreviewSkeleton?: () => void
   isAdmin?: boolean
   onSwitchPermission?: (toAdmin: boolean) => void
 }) {
@@ -178,9 +166,6 @@ export function SettingsView({
   const [screenRes, setScreenRes] = useState('?×?')
   const [logDir, setLogDir] = useState('...')
   const [connExpanded, setConnExpanded] = useState(true)
-  const [testTargetRunning, setTestTargetRunning] = useState(false)
-  const [selfTestPerCell, setSelfTestPerCell] = useState(5)   // sub-samples per cell axis
-
   // ── Key recording (sequence-based: press order matters) ──
   const [recording, setRecording] = useState(false)
   const [displayCombo, setDisplayCombo] = useState('')
@@ -956,198 +941,6 @@ export function SettingsView({
           </div>
         </div>
       </SettingsCard>
-
-      {devMode && (
-        <SettingsCard
-          icon={<Cpu className="w-4 h-4 text-accent-secondary" />}
-          title="Developer Mode"
-          defaultExpanded={true}
-        >
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-sm text-text-primary">预览骨架屏</div>
-                <div className="text-xs text-text-muted">显示启动骨架屏，3 秒后自动消失</div>
-              </div>
-              <Tooltip text="预览应用启动时的骨架屏效果，3 秒后自动关闭">
-                <button
-                  onClick={() => onPreviewSkeleton?.()}
-                  className="px-3 h-7 rounded-lg text-xs bg-bg-tertiary hover:opacity-80 text-text-primary transition-opacity"
-                >
-                  预览 (3s)
-                </button>
-              </Tooltip>
-            </div>
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-sm text-text-primary">Save single-frame captures</div>
-                <div className="text-xs text-text-muted">
-                  Save each 📷 snapshot as PNG to disk
-                </div>
-              </div>
-              <Tooltip text="开启后每次截图自动保存为 PNG 文件到 Dump dir">
-              <button
-                onClick={() => {
-                  const v = !saveCaptureFrames
-                  setSaveCaptureFrames(v)
-                  hostCall('set_frame_dump', {
-                    capture: v,
-                    stream: saveStreamFrames,
-                    dir: frameDumpDir,
-                  }).catch(() => {})
-                }}
-                className={`relative w-10 h-5 rounded-full transition-colors ${saveCaptureFrames ? 'bg-success' : 'bg-bg-tertiary'}`}
-              >
-                <span
-                  className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${saveCaptureFrames ? 'translate-x-5' : ''}`}
-                />
-              </button>
-              </Tooltip>
-            </div>
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-sm text-text-primary">Save live preview frames</div>
-                <div className="text-xs text-text-muted">
-                  Save each ▶ preview frame as PNG to disk
-                </div>
-              </div>
-              <Tooltip text="开启后每次预览帧自动保存为 PNG 文件到 Dump dir（注意磁盘空间）">
-              <button
-                onClick={() => {
-                  const v = !saveStreamFrames
-                  setSaveStreamFrames(v)
-                  hostCall('set_frame_dump', {
-                    capture: saveCaptureFrames,
-                    stream: v,
-                    dir: frameDumpDir,
-                  }).catch(() => {})
-                }}
-                className={`relative w-10 h-5 rounded-full transition-colors ${saveStreamFrames ? 'bg-success' : 'bg-bg-tertiary'}`}
-              >
-                <span
-                  className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${saveStreamFrames ? 'translate-x-5' : ''}`}
-                />
-              </button>
-              </Tooltip>
-            </div>
-            <div className="flex items-center gap-2">
-              <label className="text-sm text-text-secondary w-24 shrink-0">Dump dir</label>
-              <Tooltip text="帧保存路径" className="flex-1 min-w-0">
-                <input
-                  value={frameDumpDir || '(not set)'}
-                  readOnly
-                  className="w-full h-7 rounded-lg border border-border bg-bg-primary px-3 text-sm text-text-muted outline-none cursor-default font-mono text-xs truncate"
-                />
-              </Tooltip>
-              <Tooltip text="选择保存目录">
-                <button
-                  onClick={async () => {
-                    try {
-                      const res = await hostCall('pick_dir')
-                      if (res?.dir) {
-                        setFrameDumpDir(res.dir)
-                        if (!saveCaptureFrames) setSaveCaptureFrames(true)
-                        if (!saveStreamFrames) setSaveStreamFrames(true)
-                        hostCall('set_frame_dump', {
-                          capture: true,
-                          stream: true,
-                          dir: res.dir,
-                        }).catch(() => {})
-                        addLog(`[Dev] dump dir = ${res.dir}`)
-                      }
-                    } catch (_) {}
-                  }}
-                  className="shrink-0 p-1.5 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-tertiary transition-colors"
-                >
-                  <Pencil className="w-4 h-4" />
-                </button>
-              </Tooltip>
-              <Tooltip text="在资源管理器中打开保存目录">
-                <button
-                  onClick={() => {
-                    if (frameDumpDir)
-                      hostCall('open_dir', { dir: frameDumpDir }).catch(() => {})
-                  }}
-                  className="shrink-0 p-1.5 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-tertiary transition-colors"
-                >
-                  <FolderOpen className="w-4 h-4" />
-                </button>
-              </Tooltip>
-            </div>
-            {/* ── Test Target Launcher ── */}
-            <div className="border-t border-border pt-3 flex items-center justify-between">
-              <div>
-                <div className="text-sm text-text-primary">Test Target</div>
-                <div className="text-xs text-text-muted">
-                  启动独立测试窗口（GAM Test Target），用于验证输入映射
-                </div>
-              </div>
-              <Tooltip text={testTargetRunning ? '关闭 GAM Test Target 测试窗口' : '打开 GAM Test Target 测试窗口，可被 GAM 捕获并测试鼠标/键盘映射'}>
-              <button
-                onClick={() => {
-                  hostCall('launch_test_target')
-                    .then((res: any) => {
-                      if (res?.ok) {
-                        const action = res?.action || 'launched'
-                        setTestTargetRunning(action === 'launched')
-                        addLog(`[Dev] test target ${action}`)
-                      } else {
-                        addLog(`[Dev] test target failed: ${res?.error || '?'}`)
-                      }
-                    })
-                    .catch((err: any) => addLog(`[Dev] test target error: ${err?.message || err}`))
-                }}
-                className={`inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-medium border transition-colors ${
-                  testTargetRunning
-                    ? 'border-success/30 bg-success/10 text-success hover:bg-success/20'
-                    : 'border-accent-secondary/30 bg-accent-secondary/10 text-accent-secondary hover:bg-accent-secondary/20'
-                }`}
-              >
-                <Play className={`w-3 h-3 ${testTargetRunning ? 'fill-current' : ''}`} />
-                {testTargetRunning ? 'Close' : 'Launch'}
-              </button>
-              </Tooltip>
-            </div>
-            {/* ── Self-Test (mapping calibration) ── */}
-            <div className="border-t border-border pt-3 flex items-center justify-between">
-              <div>
-                <div className="text-sm text-text-primary">Self-Test 映射自检</div>
-                <div className="text-xs text-text-muted">
-                  自动跑完整流程（选窗→预览→映射→密集点击），比对 test_target 反馈校准映射
-                </div>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <Tooltip text="每格采样密度（N×N 子网格）。越大越细，用时越久。">
-                  <select
-                    value={selfTestPerCell}
-                    onChange={(e) => setSelfTestPerCell(Number(e.target.value))}
-                    disabled={selfTestRunning}
-                    className="h-7 rounded-lg border border-border bg-bg-primary px-2 text-xs outline-none focus:border-accent disabled:opacity-50"
-                  >
-                    {[3, 5, 8].map((n) => (
-                      <option key={n} value={n}>{n}×{n}/格</option>
-                    ))}
-                  </select>
-                </Tooltip>
-                <Tooltip text={selfTestRunning ? '自检进行中…' : '一键自检：复用真实用户操作路径，全窗密集点击并比对反馈'}>
-                  <button
-                    onClick={() => onRunSelfTest?.(selfTestPerCell)}
-                    disabled={selfTestRunning}
-                    className={`inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-medium border transition-colors ${
-                      selfTestRunning
-                        ? 'border-border bg-bg-tertiary text-text-muted cursor-not-allowed'
-                        : 'border-accent/30 bg-accent/10 text-accent hover:bg-accent/20'
-                    }`}
-                  >
-                    <Crosshair className="w-3 h-3" />
-                    {selfTestRunning ? '运行中' : 'Self-Test'}
-                  </button>
-                </Tooltip>
-              </div>
-            </div>
-          </div>
-        </SettingsCard>
-      )}
 
       <SettingsCard
         icon={<RefreshCw className="w-4 h-4 text-text-secondary" />}

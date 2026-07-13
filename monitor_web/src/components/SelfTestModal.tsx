@@ -1,6 +1,7 @@
 // ═══ Self-Test report modal — mapping calibration results ═══
 import { X, Crosshair, AlertTriangle } from 'lucide-react'
 import type { SelfTestState, SelfTestSummary } from '../lib/selftest'
+import { useScrollLock } from '../lib/useScrollLock'
 
 // rate 0..1 → red→amber→green
 function rateColor(r: number): string {
@@ -53,6 +54,10 @@ export function SelfTestModal({
   onClose: () => void
   onAbort: () => void
 }) {
+  // Lock body scroll while modal is visible (must be before early return)
+  const modalActive = state.phase !== 'idle'
+  useScrollLock(modalActive)
+
   if (state.phase === 'idle') return null
 
   return (

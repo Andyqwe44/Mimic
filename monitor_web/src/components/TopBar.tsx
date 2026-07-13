@@ -1,5 +1,5 @@
 // ═══ TopBar — MXU-style tab bar with Start/Stop + theme toggle ═══
-import { FileText, Monitor, Settings } from 'lucide-react'
+import { FileText, Monitor, Settings, Cpu } from 'lucide-react'
 import { ActionBtn, ThemeBtn, Tooltip } from './Toolkit'
 import { addLog } from '../lib/bridge'
 import { Play, Square } from 'lucide-react'
@@ -12,14 +12,16 @@ export function TopBar({
   onStop,
   dark,
   onToggleTheme,
+  devMode,
 }: {
   tab: string
-  setTab: (t: 'Monitor' | 'Log' | 'Settings') => void
+  setTab: (t: 'Monitor' | 'Log' | 'Settings' | 'DevTools') => void
   running: boolean
   onStart: () => void
   onStop: () => void
   dark: boolean
   onToggleTheme: () => void
+  devMode: boolean
 }) {
   // ── Tab definitions ──
   const tabs = [
@@ -32,6 +34,14 @@ export function TopBar({
       tip: '配置截图、模型、主题与输入映射',
     },
   ]
+  if (devMode) {
+    tabs.push({
+      id: 'DevTools' as const,
+      icon: <Cpu className="w-3.5 h-3.5" />,
+      label: 'DevTools',
+      tip: '开发人员工具 — Test Target · Self-Test · Frame Dump · UI Demos（与 Dev/Prod 构建版本无关）',
+    })
+  }
   return (
     <div className="flex items-center h-10 bg-bg-secondary border-b border-border select-none shrink-0">
       {/* ── Tab buttons ── */}
