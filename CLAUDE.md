@@ -591,6 +591,16 @@ CLAUDE.md 只保留摘要和指向 CLAUDE.old.md 的引用。
 ## Changelog
 
 Full development history preserved in `CLAUDE.old.md`. Major milestones:
+- **2026-07-13 (0.3.27 更新体验 — 首启自愈清单根治滞后 + 下载前 diff 预览)**: 0.3.25→0.3.26 实测下 17 文件
+  (非预期 ~5),读装机日志锁定:`full=0`(P0 生效!)但 `install version.json` 冻结在 **0.3.14**(用户从 0.3.14
+  全新装后一路增量,旧 updater 从不刷新它)→ check_update 用 0.3.14 旧 lib sha 比 0.3.26 脱钩 sha → 12 lib 全
+  误判为变 → 17。**根治**:local 基准清单移 **appdata**(`monitor_app` asInvoker 写不了 Program Files)+
+  `main.cpp` `heal_local_manifest`:首启若 `appdata\version.json` 的 app≠APP_VERSION,遍历 install
+  `bin`/`frontend`/`config` 真实文件算 sha256 重建 → 清单永远跟当前 exe 一致,**不靠 updater、不重下未变文件**。
+  check_update + check_and_heal_updater 均改读 appdata(回退 install)。**diff 预览**(用户需求):check_update 本就
+  返回 diff(每文件 path+size),`UpdateModal` 下载前渲染「N 个文件 · 总大小」+ 逐文件清单(铁律 5 画=实发)。
+  **滞后**:0.3.27 是「装上自愈码」的最后一版滞后——0.3.26→0.3.27 仍下 17(0.3.26 无自愈码),装上 0.3.27 后
+  appdata 清单自愈;**0.3.27→0.3.28 起真增量 ~5 + 预览生效**。全量编译过。
 - **2026-07-13 (0.3.25 更新系统企业级改造 — P0 真增量 + P1 删除同步 + P2 ECDSA 签名)**: 0.3.23→0.3.24 更新仍
   「下 21 文件」(全量),排查确认**非**脱钩失败(脱钩已实测生效),真因 `New-VersionJson.ps1` 默认
   `$MinVersion=$Version` + `commands.cpp` `current<min_version→强制 full` → 每版 min_version=新版 → local 永远

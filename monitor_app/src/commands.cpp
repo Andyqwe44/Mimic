@@ -1477,10 +1477,17 @@ static std::string cmd_check_update(bool forceFull) {
                 current.c_str(), minVer.c_str());
         }
 
-        // Read local version.json (installed manifest). Missing -> all changed.
+        // Read the local baseline manifest for the sha diff. Prefer the appdata
+        // copy (monitor_app rebuilds it at startup to match the running exe;
+        // Program Files isn't writable by a normal-user process), fall back to the
+        // installed one on first run.
         std::string installDir = paths_get_install_dir();
-        std::string localPath = installDir + "\\version.json";
+        std::string localPath = paths_get_appdata_dir() + "\\version.json";
         std::string localManifest = read_file(localPath.c_str());
+        if (localManifest.empty()) {
+            localPath = installDir + "\\version.json";
+            localManifest = read_file(localPath.c_str());
+        }
         if (localManifest.empty())
             LOG_WARN("cmd", "check_update: local manifest missing (%s) - all files count as changed",
                 localPath.c_str());

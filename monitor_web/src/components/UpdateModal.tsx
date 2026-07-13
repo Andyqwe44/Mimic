@@ -12,6 +12,14 @@ export interface UpdateInfo {
   message?: string      // server-supplied note (manifest "message")
   mandatory?: boolean   // manifest "mandatory" → hide "Later"
   mode?: string         // 'incremental' | 'full'
+  diff?: Array<{ path: string; size?: number }>  // per-file changes (path + bytes)
+}
+
+// Human-readable byte size.
+function fmtSize(b: number): string {
+  if (b < 1024) return `${b} B`
+  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`
+  return `${(b / 1024 / 1024).toFixed(2)} MB`
 }
 
 export function UpdateModal({
@@ -90,6 +98,27 @@ export function UpdateModal({
             <div className="bg-bg-secondary rounded-lg p-3 max-h-48 overflow-y-auto">
               <div className="text-xs text-text-secondary whitespace-pre-wrap font-mono leading-relaxed">
                 {info.body}
+              </div>
+            </div>
+          )}
+
+          {/* Diff preview — the exact files that will download, shown BEFORE the
+              user commits (铁律 5: what's drawn = what's actually fetched). */}
+          {!downloading && info.diff && info.diff.length > 0 && (
+            <div className="bg-bg-secondary rounded-lg p-3 space-y-1.5">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-text-secondary">本次更新</span>
+                <span className="font-medium text-text-primary">
+                  {info.diff.length} 个文件 · {fmtSize(info.diff.reduce((s, f) => s + (f.size || 0), 0))}
+                </span>
+              </div>
+              <div className="max-h-40 overflow-y-auto space-y-0.5 pt-0.5">
+                {info.diff.map((f, i) => (
+                  <div key={i} className="flex items-center justify-between text-[11px] font-mono gap-2">
+                    <span className="text-text-muted truncate">{f.path}</span>
+                    <span className="text-text-secondary shrink-0">{fmtSize(f.size || 0)}</span>
+                  </div>
+                ))}
               </div>
             </div>
           )}

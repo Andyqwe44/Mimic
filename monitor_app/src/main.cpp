@@ -22,6 +22,7 @@
 #include "../../logger/logger.h"
 #include "commands.h"
 #include "json_helper.h"   // json_get_str
+#include "version.h"       // APP_VERSION (heal_local_manifest)
 #include "sha256_util.h"   // sha256_hex_file
 #include <shellapi.h>      // ShellExecuteA
 
@@ -179,6 +180,62 @@ static std::string js_escape(const std::string& s) {
     return o;
 }
 
+// ── First-launch local-manifest self-heal ──────────────────────────────────
+// The baseline manifest that check_update diffs against must match the ACTUAL
+// installed files. The installed {app}\version.json goes stale (an old updater
+// never refreshed it) and {app} (Program Files) isn't writable by this normal-
+// user process — so the authoritative baseline lives in appdata and is rebuilt
+// here at startup whenever it's missing or its "app" != this exe's version.
+// Result: the diff is always correct (no re-downloading unchanged files) without
+// depending on the updater to refresh anything.
+static void manifest_scan_dir(const std::string& base, const std::string& sub,
+                              std::string& out, bool& first) {
+    std::string dir = base + "\\" + sub;
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA((dir + "\\*").c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return;
+    do {
+        if (strcmp(fd.cFileName, ".") == 0 || strcmp(fd.cFileName, "..") == 0) continue;
+        std::string rel = sub + "/" + fd.cFileName;   // forward-slash, matches remote manifest
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            manifest_scan_dir(base, rel, out, first);
+        } else {
+            std::string sha = sha256_hex_file((base + "\\" + rel).c_str());
+            unsigned long long sz = ((unsigned long long)fd.nFileSizeHigh << 32) | fd.nFileSizeLow;
+            if (!first) out += ",";
+            first = false;
+            out += "\"" + rel + "\":{\"sha256\":\"" + sha + "\",\"size\":" + std::to_string(sz) + "}";
+        }
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+}
+
+static void heal_local_manifest() {
+    std::string localPath = paths_get_appdata_dir() + "\\version.json";
+    std::string existing = read_file_str(localPath);
+    if (!existing.empty() && json_get_str(existing, "app") == APP_VERSION) return;  // baseline current
+    std::string installDir = paths_get_install_dir();
+    if (GetFileAttributesA((installDir + "\\bin\\monitor_app.exe").c_str()) == INVALID_FILE_ATTRIBUTES) {
+        LOG_WARN("main", "heal_local_manifest: install not found at %s - skip", installDir.c_str());
+        return;
+    }
+    std::string files;
+    bool first = true;
+    manifest_scan_dir(installDir, "bin", files, first);
+    manifest_scan_dir(installDir, "frontend", files, first);
+    manifest_scan_dir(installDir, "config", files, first);
+    if (first) { LOG_WARN("main", "heal_local_manifest: scanned 0 files - skip"); return; }
+    std::string json = std::string("{\"app\":\"") + APP_VERSION + "\",\"files\":{" + files + "}}";
+    FILE* f = fopen(localPath.c_str(), "wb");
+    if (f) {
+        fwrite(json.data(), 1, json.size(), f);
+        fclose(f);
+        LOG("main", "heal_local_manifest: rebuilt appdata baseline -> %s (%s)", localPath.c_str(), APP_VERSION);
+    } else {
+        LOG_WARN("main", "heal_local_manifest: cannot write %s", localPath.c_str());
+    }
+}
+
 // First-launch updater self-heal. Breaks the pre-0.3.5 updater deadlock: an old
 // updater cannot overwrite its own running image, so a stale bin\updater.exe would
 // persist forever. If the installed updater.exe sha != version.json's expected sha
@@ -186,7 +243,10 @@ static std::string js_escape(const std::string& s) {
 // --self-install to replace updater.exe. We only START it; it does the copy.
 static void check_and_heal_updater() {
     std::string installDir = paths_get_install_dir();
-    std::string manifest = read_file_str(installDir + "\\version.json");
+    // Prefer the appdata baseline (rebuilt at startup to match the running exe);
+    // the installed version.json can be stale (old updater never refreshed it).
+    std::string manifest = read_file_str(paths_get_appdata_dir() + "\\version.json");
+    if (manifest.empty()) manifest = read_file_str(installDir + "\\version.json");
     if (manifest.empty()) return;
     size_t p = manifest.find("\"bin/updater.exe\"");
     if (p == std::string::npos) return;
@@ -281,6 +341,10 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR lpCm
     InitWebView2(g_hwnd);
 
     paths_init();
+
+    // Rebuild the appdata baseline manifest if it doesn't match this exe — keeps
+    // the update diff correct without depending on the updater (see helper above).
+    heal_local_manifest();
 
     // Self-heal a stale updater.exe left by an older updater (see helper above).
     check_and_heal_updater();
