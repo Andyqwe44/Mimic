@@ -110,6 +110,11 @@ export function SettingsView({
   keyMode, setKeyMode,
   mappingHotkey, setMappingHotkey,
   selfTargetMode, setSelfTargetMode,
+  normalAccent, setNormalAccentState,
+  normalSecondaryAccent, setNormalSecondaryAccentState,
+  devAccent, setDevAccentState,
+  devSecondaryAccent, setDevSecondaryAccentState,
+  accent, secondaryAccent: _secondaryAccent,
   onCheckUpdate,
   hasUpdate,
   isAdmin,
@@ -131,6 +136,11 @@ export function SettingsView({
   keyMode: 'seize' | 'postmsg' | 'sendmsg'; setKeyMode: (m: 'seize' | 'postmsg' | 'sendmsg') => void
   mappingHotkey: string; setMappingHotkey: (k: string) => void
   selfTargetMode: 'warn' | 'exclude'; setSelfTargetMode: (m: 'warn' | 'exclude') => void
+  normalAccent: string; setNormalAccentState: (c: string) => void
+  normalSecondaryAccent: string; setNormalSecondaryAccentState: (c: string) => void
+  devAccent: string; setDevAccentState: (c: string) => void
+  devSecondaryAccent: string; setDevSecondaryAccentState: (c: string) => void
+  accent: string; secondaryAccent: string
   onCheckUpdate?: () => void
   hasUpdate?: boolean
   isAdmin?: boolean
@@ -147,24 +157,10 @@ export function SettingsView({
     ['#EF4444', '#22C55E'], // Dev ⚡ — red danger + hacker green
   ]
   const themeNames = ['Ocean', 'Twilight', 'Lagoon', 'Sunset', 'Orchid', 'Mint', 'Nebula', 'Dev']
-  const [accent, setAccent] = useState(() => {
-    const v = document.documentElement.style.getPropertyValue('--color-accent').trim()
-    return v || '#3B82F6'
-  })
-  const [secondaryAccent, setSecondaryAccent] = useState(() => {
-    const v = document.documentElement.style.getPropertyValue('--color-accent-secondary').trim()
-    return v || '#F97316'
-  })
-  const DEV_PAIR = themePairs[7] // ['#EF4444', '#22C55E']
-  const [normalAccent, setNormalAccent] = useState(accent)
-  const [normalSecondaryAccent, setNormalSecondaryAccent] = useState(secondaryAccent)
-  const [devAccent, setDevAccent] = useState(DEV_PAIR[0])
-  const [devSecondaryAccent, setDevSecondaryAccent] = useState(DEV_PAIR[1])
-
-  // Sync accent-hover on mount (CSS default may be stale)
+  // Sync accent-hover whenever accent changes
   useEffect(() => {
     document.documentElement.style.setProperty('--color-accent-hover', darken(accent, 15))
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [accent])
   const [screenRes, setScreenRes] = useState('?×?')
   const [logDir, setLogDir] = useState('...')
   const [connExpanded, setConnExpanded] = useState(true)
@@ -280,27 +276,6 @@ export function SettingsView({
       })
       .catch(() => {})
   }, [])
-
-  // Dev mode: auto-switch to Dev accent (remembered), restore normal on exit
-  useEffect(() => {
-    if (devMode) {
-      setNormalAccent(accent)
-      setNormalSecondaryAccent(secondaryAccent)
-      setAccent(devAccent)
-      setSecondaryAccent(devSecondaryAccent)
-      document.documentElement.style.setProperty('--color-accent', devAccent)
-      document.documentElement.style.setProperty('--color-accent-secondary', devSecondaryAccent)
-      document.documentElement.style.setProperty('--color-accent-hover', darken(devAccent, 15))
-    } else {
-      setDevAccent(accent)
-      setDevSecondaryAccent(secondaryAccent)
-      setAccent(normalAccent)
-      setSecondaryAccent(normalSecondaryAccent)
-      document.documentElement.style.setProperty('--color-accent', normalAccent)
-      document.documentElement.style.setProperty('--color-accent-secondary', normalSecondaryAccent)
-      document.documentElement.style.setProperty('--color-accent-hover', darken(normalAccent, 15))
-    }
-  }, [devMode])
 
   return (
     <div className="flex-1 overflow-y-auto p-6 space-y-3">
@@ -790,18 +765,13 @@ export function SettingsView({
                     <button
                       onClick={() => {
                         if (disabled) return
-                        setAccent(c1)
-                        setSecondaryAccent(c2)
                         if (isDev) {
-                          setDevAccent(c1)
-                          setDevSecondaryAccent(c2)
+                          setDevAccentState(c1)
+                          setDevSecondaryAccentState(c2)
                         } else {
-                          setNormalAccent(c1)
-                          setNormalSecondaryAccent(c2)
+                          setNormalAccentState(c1)
+                          setNormalSecondaryAccentState(c2)
                         }
-                        document.documentElement.style.setProperty('--color-accent', c1)
-                        document.documentElement.style.setProperty('--color-accent-secondary', c2)
-                        document.documentElement.style.setProperty('--color-accent-hover', darken(c1, 15))
                         addLog(`[Theme] accent = ${c1} / ${c2}`)
                       }}
                       className={`relative w-5 h-5 rounded-md overflow-hidden transition-all duration-150 ${disabled ? 'opacity-30 cursor-not-allowed' : ''}`}

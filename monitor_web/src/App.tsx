@@ -409,6 +409,10 @@ export default function App() {
       if (s.snapMethod) setSnapMethod(s.snapMethod)
       if (s.streamMethod) setStreamMethod(s.streamMethod)
       if (s.renderMethod) setRenderMethod(s.renderMethod)
+      if (s.normalAccent) setNormalAccentState(s.normalAccent)
+      if (s.normalSecondaryAccent) setNormalSecondaryAccentState(s.normalSecondaryAccent)
+      if (s.devAccent) setDevAccentState(s.devAccent)
+      if (s.devSecondaryAccent) setDevSecondaryAccentState(s.devSecondaryAccent)
       addLog('[settings] loaded')
     }).catch(() => {})
   }, [])
@@ -416,7 +420,10 @@ export default function App() {
   // Auto-save settings on change (debounced) — declared early, effect wired after all states below
   const saveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
   const saveSetting = useCallback((key: string, value: any) => {
-    hostCall('set_setting', { key, value: typeof value === 'boolean' ? `"${value}"` : value }).catch(() => {})
+    let v: any = value
+    if (typeof value === 'boolean') v = `"${value}"`
+    else if (typeof value === 'string') v = JSON.stringify(value)
+    hostCall('set_setting', { key, value: v }).catch(() => {})
   }, [])
 
   // ── Initial layout check — auto-collapse if panels overflow container ──
@@ -705,8 +712,21 @@ export default function App() {
   const [mappingEnabled, setMappingEnabled] = useState(false)
   const [mappingHotkey, setMappingHotkey] = useState('F10')
 
-  // ── Dev mode + frame dump ──
+  // ── Dev mode + accent colors ──
   const [devMode, setDevMode] = useState(false)
+  const [normalAccent, setNormalAccentState] = useState('#3B82F6')
+  const [normalSecondaryAccent, setNormalSecondaryAccentState] = useState('#F97316')
+  const [devAccent, setDevAccentState] = useState('#EF4444')
+  const [devSecondaryAccent, setDevSecondaryAccentState] = useState('#22C55E')
+  // Derived: current accent depends on devMode
+  const accent = devMode ? devAccent : normalAccent
+  const secondaryAccent = devMode ? devSecondaryAccent : normalSecondaryAccent
+  // Sync CSS variables whenever accent changes
+  useEffect(() => {
+    document.documentElement.style.setProperty('--color-accent', accent)
+    document.documentElement.style.setProperty('--color-accent-secondary', secondaryAccent)
+  }, [accent, secondaryAccent])
+  // Frame dump
   const [saveCaptureFrames, setSaveCaptureFrames] = useState(false)
   const [saveStreamFrames, setSaveStreamFrames] = useState(false)
   const [frameDumpDir, setFrameDumpDir] = useState('')
@@ -756,10 +776,15 @@ export default function App() {
       saveSetting('snapMethod', snapMethod)
       saveSetting('streamMethod', streamMethod)
       saveSetting('renderMethod', renderMethod)
+      saveSetting('normalAccent', normalAccent)
+      saveSetting('normalSecondaryAccent', normalSecondaryAccent)
+      saveSetting('devAccent', devAccent)
+      saveSetting('devSecondaryAccent', devSecondaryAccent)
     }, 1000)
     return () => { if (saveTimeout.current) clearTimeout(saveTimeout.current) }
   }, [theme, mouseMode, keyMode, mappingHotkey, devMode, selfTargetMode,
-      keepFiles, autoSnap, autoStream, snapMethod, streamMethod, renderMethod])
+      keepFiles, autoSnap, autoStream, snapMethod, streamMethod, renderMethod,
+      normalAccent, normalSecondaryAccent, devAccent, devSecondaryAccent])
 
   // ── Load screen info for aspect ratio + self-target detection ──
   useEffect(() => {
@@ -1083,6 +1108,11 @@ export default function App() {
               renderMethod={renderMethod} setRenderMethod={setRenderMethod}
               autoSnap={autoSnap} setAutoSnap={setAutoSnap}
               autoStream={autoStream} setAutoStream={setAutoStream}
+              normalAccent={normalAccent} setNormalAccentState={setNormalAccentState}
+              normalSecondaryAccent={normalSecondaryAccent} setNormalSecondaryAccentState={setNormalSecondaryAccentState}
+              devAccent={devAccent} setDevAccentState={setDevAccentState}
+              devSecondaryAccent={devSecondaryAccent} setDevSecondaryAccentState={setDevSecondaryAccentState}
+              accent={accent} secondaryAccent={secondaryAccent}
               selWin={selWindow} winState={winState}
               expectedCaptureState={expectedCaptureState}
               setExpectedCaptureState={setExpectedCaptureState}
