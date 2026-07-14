@@ -21,7 +21,9 @@
     "start": "启动",
     "start_tip": "启动 Agent 任务",
     "stop": "停止",
-    "stop_tip": "停止所有运行中的任务"
+    "stop_tip": "停止所有运行中的任务",
+    "perm_normal_abbr": "普",
+    "perm_admin_abbr": "管"
   },
 
   "bottombar": {

@@ -5,10 +5,10 @@
  *   Install:  C:\Program Files\GameAgentMonitor\         (get_install_dir)
  *     bin\monitor_app.exe
  *     frontend\index.html
- *   AppData:  %LOCALAPPDATA%\GameAgentMonitor\           (get_appdata_dir)
- *     config\settings.json
- *     log\
- *     staging\
+ *   AppData (compile-time /DDEV_MODE split — not a repo-relative path):
+ *     Prod: %LOCALAPPDATA%\GameAgentMonitor\
+ *     Dev:  %LOCALAPPDATA%\GameAgentMonitor_Dev\
+ *       config\settings.json · log\ · staging\ · WebView2\
  */
 #pragma once
 #include <string>
@@ -20,7 +20,7 @@ std::string paths_get_exe_dir();
 /// Falls back to exe_dir/.. if registry key is missing.
 std::string paths_get_install_dir();
 
-/// User data directory = %LOCALAPPDATA%\GameAgentMonitor.
+/// User data directory under %LOCALAPPDATA% (GameAgentMonitor or GameAgentMonitor_Dev).
 /// Creates the directory tree if it doesn't exist.
 std::string paths_get_appdata_dir();
 

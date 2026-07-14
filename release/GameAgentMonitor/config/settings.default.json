@@ -6,9 +6,14 @@
   "devMode": false,
   "selfTargetMode": "warn",
   "keepFiles": 5,
-  "autoSnap": false,
-  "autoStream": false,
+  "autoSnap": true,
+  "autoStream": true,
   "snapMethod": "wgc",
   "streamMethod": "wgc",
-  "renderMethod": "sharedbuffer"
+  "renderMethod": "shared",
+  "normalAccent": "#3B82F6",
+  "normalSecondaryAccent": "#F97316",
+  "devAccent": "#EF4444",
+  "devSecondaryAccent": "#22C55E",
+  "locale": "en"
 }

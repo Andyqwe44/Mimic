@@ -33,6 +33,8 @@ interface ChromeWebView {
 declare global {
   interface Window {
     chrome?: ChromeWebView;
+    /** Injected by C++ AddScriptToExecuteOnDocumentCreated before first paint. */
+    __BOOT_SETTINGS__?: import('./lib/bootSettings').BootSettings;
   }
   /** Compile-time app version, injected by Vite from version.h (see vite.config.ts). */
   const __APP_VERSION__: string;

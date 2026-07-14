@@ -234,6 +234,17 @@ powershell -File scripts\Build.ps1 -Module monitor_app  # stages dist into build
 
 Exit code `2` = already running (existing window raised).
 
+### User AppData (compile-time `/DDEV_MODE`)
+
+| Build | Path |
+|-------|------|
+| Prod  | `%LOCALAPPDATA%\GameAgentMonitor\` |
+| Dev   | `%LOCALAPPDATA%\GameAgentMonitor_Dev\` |
+
+Whole tree (config / log / staging / WebView2) follows `paths_get_appdata_dir()` — Dev and installed Prod do not share settings. Release binaries never define `DEV_MODE`.
+
+Settings: atomic `set_settings` (bulk JSON); boot injects `window.__BOOT_SETTINGS__` before first paint (no theme flash).
+
 ## Release Workflow — Dev → Prod → Gitee → One-Click Update
 
 完整发布链：dev 验证 → prod 构建 → 打包 installer → Gitee Release → 用户点"Check Update"。
@@ -330,6 +341,7 @@ JS:  'message' event → e.data is pre-parsed → hostCall auto-unwraps .result
 | `log_ui_event` | `{event, detail}` | `{ok:true}` — no echo back |
 | `send_input` | `{hwnd, type, x_norm, y_norm, button, method}` | `{ok:true}` |
 | `get_version` | — | `"0.3.29"` |
+| `get_settings` / `set_settings` | — / `{settings:{...}}` | load / atomic save user prefs (AppData) |
 | `list_desktops` | — | `[{name, index, current}, ...]` |
 | `switch_desktop` | `{index}` | `{ok:true}` |
 | `benchmark_methods` | `{hwnd, method}` | `{results:[...]}` |
@@ -452,11 +464,13 @@ App.tsx (~530 lines) → 11 components:
   TargetPickerModal, ConnectionPanel
   ScreenshotPanel, LogPanel
   SettingsView, MonitorView
-lib/: bridge.ts, types.ts, constants.ts, i18n.ts, windowTitle.ts
+lib/: bridge.ts, types.ts, constants.ts, i18n.ts, windowTitle.ts, bootSettings.ts
 locales/: en.json, zh-CN.json, zh-TW.json
 ```
 
-**i18n（摘要）**：Settings → General → Language；`settings.json` 键 `locale`；插值用 `{var}`（非 `{{var}}`）；`ActionBtn` 宽度按拉丁=1 / CJK≈2 单位自动选档。细则 → `.cursor/rules/monitor-web.mdc`；变更史 → `CLAUDE.old.md`。
+**i18n（摘要）**：TopBar 语言下拉 + Settings → General；`settings.json` 键 `locale`（经 `set_settings`）；插值用 `{var}`（非 `{{var}}`）；`ActionBtn` 宽度按拉丁=1 / CJK≈2 单位自动选档。细则 → `.cursor/rules/monitor-web.mdc`；变更史 → `CLAUDE.old.md`。
+
+**Settings / boot（摘要）**：AppData Dev=`GameAgentMonitor_Dev` / Prod=`GameAgentMonitor`；`set_settings` 整包原子写；C++ `AddScriptToExecuteOnDocumentCreated` 注入 `__BOOT_SETTINGS__` 消主题闪烁。史 → `CLAUDE.old.md`。
 
 **DevMode overlays（摘要 · 铁律 5）**：`display = demoOverlay ?? SSOT`。Demo（Agent/更新弹窗/自检）只写 overlay，禁止写真相。关 Dev = 清 overlay → 关能力（dump/Test Target/真自检）→ `get_agent_status` 重检。假更新弹窗纯前端，不调下载 API。细则 → `monitor-web.mdc`；史 → `CLAUDE.old.md`。
 

@@ -55,9 +55,11 @@ export function LoadingScreen() {
             </div>
           ))}
         </div>
-        <div className="flex items-center gap-2 px-2">
+        <div className="flex items-center gap-1 px-2">
           <Bar className="h-7 w-20" />
           <div className="mx-1 h-4 w-px bg-border" />
+          <Bar className="h-7 w-7" />
+          <Bar className="h-7 w-7" />
           <Bar className="h-7 w-7" />
         </div>
       </div>

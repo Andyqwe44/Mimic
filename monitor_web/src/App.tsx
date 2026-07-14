@@ -16,6 +16,7 @@ import { SelfTestModal } from './components/SelfTestModal'
 import { UpdateModal, type UpdateInfo } from './components/UpdateModal'
 import { LoadingScreen } from './components/LoadingScreen'
 import { hostCall, logMgr, addLog, applyTheme, onUpdateProgress, type UpdateProgressMsg } from './lib/bridge'
+import { hasBootSettings, readBootSettings } from './lib/bootSettings'
 import { runSelfTest, sleep, type SelfTestState } from './lib/selftest'
 import { cantCaptureMinimized } from './lib/constants'
 import { DESKTOP_TITLE, displayTargetTitle } from './lib/windowTitle'
@@ -126,12 +127,18 @@ export default function App() {
   const rightPanelRef = useRef<HTMLDivElement>(null)
 
   // ═══ Theme ═══
-  const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('light')
+  // Boot snapshot from C++ (pre-paint) — avoids default-blue flash on startup.
+  const boot = readBootSettings()
+  const [theme, setTheme] = useState<'light' | 'dark' | 'system'>(
+    () => (boot.theme === 'light' || boot.theme === 'dark' || boot.theme === 'system' ? boot.theme : 'light'),
+  )
   const [systemDark, setSystemDark] = useState(false)
   const resolvedDark = theme === 'system' ? systemDark : theme === 'dark'
 
   // ═══ Locale ═══
-  const [locale, setLocaleState] = useState(i18n.language || 'zh-CN')
+  const [locale, setLocaleState] = useState(
+    () => (typeof boot.locale === 'string' && boot.locale ? boot.locale : (i18n.language || 'zh-CN')),
+  )
   const setLocale = useCallback((l: string) => {
     setLocaleState(l)
     i18n.changeLanguage(l)
@@ -415,44 +422,48 @@ export default function App() {
     logMgr.initSync()
   }, [])
 
-  // Load saved settings on startup
+  // Gate auto-save until disk settings are applied (prevents default wipe on startup).
+  // If C++ already injected __BOOT_SETTINGS__, state was initialized from disk — safe to save.
+  const [settingsReady, setSettingsReady] = useState(() => hasBootSettings())
+
+  // Load saved settings on startup (from %LOCALAPPDATA% — survives app updates).
+  // When boot injection already applied visuals, this is a consistency sync only.
   useEffect(() => {
     hostCall('get_settings').then((res: any) => {
       const s = res?.settings
-      if (!s || typeof s !== 'object') return
-      if (s.theme) setTheme(s.theme)
-      if (s.mouseMode) setMouseMode(s.mouseMode)
-      if (s.keyMode) setKeyMode(s.keyMode)
-      if (s.mappingHotkey) setMappingHotkey(s.mappingHotkey)
-      if (typeof s.devMode === 'boolean') setDevMode(s.devMode)
-      if (s.selfTargetMode) setSelfTargetMode(s.selfTargetMode)
-      if (typeof s.keepFiles === 'number') setKeepFiles(s.keepFiles)
-      if (typeof s.autoSnap === 'boolean') setAutoSnap(s.autoSnap)
-      if (typeof s.autoStream === 'boolean') setAutoStream(s.autoStream)
-      if (s.snapMethod) setSnapMethod(s.snapMethod)
-      if (s.streamMethod) setStreamMethod(s.streamMethod)
-      if (s.renderMethod) setRenderMethod(s.renderMethod)
-      if (s.normalAccent) setNormalAccentState(s.normalAccent)
-      if (s.normalSecondaryAccent) setNormalSecondaryAccentState(s.normalSecondaryAccent)
-      if (s.devAccent) setDevAccentState(s.devAccent)
-      if (s.devSecondaryAccent) setDevSecondaryAccentState(s.devSecondaryAccent)
-      if (s.locale) {
-        setLocaleState(s.locale)
-        i18n.changeLanguage(s.locale)
-        setSavedLocale(s.locale)
+      if (s && typeof s === 'object') {
+        if (s.theme === 'light' || s.theme === 'dark' || s.theme === 'system') setTheme(s.theme)
+        if (s.mouseMode === 'seize' || s.mouseMode === 'semi' || s.mouseMode === 'background') setMouseMode(s.mouseMode)
+        if (s.keyMode === 'seize' || s.keyMode === 'postmsg' || s.keyMode === 'sendmsg') setKeyMode(s.keyMode)
+        if (typeof s.mappingHotkey === 'string' && s.mappingHotkey) setMappingHotkey(s.mappingHotkey)
+        if (typeof s.devMode === 'boolean') setDevMode(s.devMode)
+        if (s.selfTargetMode === 'warn' || s.selfTargetMode === 'exclude') setSelfTargetMode(s.selfTargetMode)
+        if (typeof s.keepFiles === 'number' && s.keepFiles > 0) setKeepFiles(s.keepFiles)
+        if (typeof s.autoSnap === 'boolean') setAutoSnap(s.autoSnap)
+        if (typeof s.autoStream === 'boolean') setAutoStream(s.autoStream)
+        if (typeof s.snapMethod === 'string' && s.snapMethod) setSnapMethod(s.snapMethod)
+        if (typeof s.streamMethod === 'string' && s.streamMethod) setStreamMethod(s.streamMethod)
+        if (typeof s.renderMethod === 'string' && s.renderMethod) setRenderMethod(s.renderMethod)
+        if (typeof s.normalAccent === 'string' && s.normalAccent) setNormalAccentState(s.normalAccent)
+        if (typeof s.normalSecondaryAccent === 'string' && s.normalSecondaryAccent) setNormalSecondaryAccentState(s.normalSecondaryAccent)
+        if (typeof s.devAccent === 'string' && s.devAccent) setDevAccentState(s.devAccent)
+        if (typeof s.devSecondaryAccent === 'string' && s.devSecondaryAccent) setDevSecondaryAccentState(s.devSecondaryAccent)
+        if (typeof s.locale === 'string' && s.locale) {
+          setLocaleState(s.locale)
+          i18n.changeLanguage(s.locale)
+          setSavedLocale(s.locale)
+        }
+        addLog('[settings] loaded')
       }
-      addLog('[settings] loaded')
-    }).catch(() => {})
+    }).catch(() => {
+      addLog('[settings] load failed — using defaults')
+    }).finally(() => {
+      setSettingsReady(true)
+    })
   }, [])
 
   // Auto-save settings on change (debounced) — declared early, effect wired after all states below
   const saveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const saveSetting = useCallback((key: string, value: any) => {
-    let v: any = value
-    if (typeof value === 'boolean') v = `"${value}"`
-    else if (typeof value === 'string') v = JSON.stringify(value)
-    hostCall('set_setting', { key, value: v }).catch(() => {})
-  }, [])
 
   // ── Initial layout check — auto-collapse if panels overflow container ──
   useEffect(() => {
@@ -726,26 +737,46 @@ export default function App() {
   const [screenRatio, setScreenRatio] = useState(16 / 9)
 
   // ── Capture method config (snapshot + stream independent) ──
-  const [snapMethod, setSnapMethod] = useState('dxgi')
-  const [streamMethod, setStreamMethod] = useState('wgc')
-  const [autoSnap, setAutoSnap] = useState(true)
-  const [autoStream, setAutoStream] = useState(true)
-  const [renderMethod, setRenderMethod] = useState('shared')
+  const [snapMethod, setSnapMethod] = useState(
+    () => (typeof boot.snapMethod === 'string' && boot.snapMethod ? boot.snapMethod : 'dxgi'),
+  )
+  const [streamMethod, setStreamMethod] = useState(
+    () => (typeof boot.streamMethod === 'string' && boot.streamMethod ? boot.streamMethod : 'wgc'),
+  )
+  const [autoSnap, setAutoSnap] = useState(() => (typeof boot.autoSnap === 'boolean' ? boot.autoSnap : true))
+  const [autoStream, setAutoStream] = useState(() => (typeof boot.autoStream === 'boolean' ? boot.autoStream : true))
+  const [renderMethod, setRenderMethod] = useState(
+    () => (typeof boot.renderMethod === 'string' && boot.renderMethod ? boot.renderMethod : 'shared'),
+  )
   const [expectedCaptureState, setExpectedCaptureState] = useState('desktop')
 
   // ── General settings ──
-  const [keepFiles, setKeepFiles] = useState(5)
-  const [mouseMode, setMouseMode] = useState<'seize' | 'semi' | 'background'>('background')
-  const [keyMode, setKeyMode] = useState<'seize' | 'postmsg' | 'sendmsg'>('postmsg')
+  const [keepFiles, setKeepFiles] = useState(() => (typeof boot.keepFiles === 'number' && boot.keepFiles > 0 ? boot.keepFiles : 5))
+  const [mouseMode, setMouseMode] = useState<'seize' | 'semi' | 'background'>(
+    () => (boot.mouseMode === 'seize' || boot.mouseMode === 'semi' || boot.mouseMode === 'background' ? boot.mouseMode : 'background'),
+  )
+  const [keyMode, setKeyMode] = useState<'seize' | 'postmsg' | 'sendmsg'>(
+    () => (boot.keyMode === 'seize' || boot.keyMode === 'postmsg' || boot.keyMode === 'sendmsg' ? boot.keyMode : 'postmsg'),
+  )
   const [mappingEnabled, setMappingEnabled] = useState(false)
-  const [mappingHotkey, setMappingHotkey] = useState('F10')
+  const [mappingHotkey, setMappingHotkey] = useState(
+    () => (typeof boot.mappingHotkey === 'string' && boot.mappingHotkey ? boot.mappingHotkey : 'F10'),
+  )
 
   // ── Dev mode + accent colors ──
-  const [devMode, setDevMode] = useState(false)
-  const [normalAccent, setNormalAccentState] = useState('#3B82F6')
-  const [normalSecondaryAccent, setNormalSecondaryAccentState] = useState('#F97316')
-  const [devAccent, setDevAccentState] = useState('#EF4444')
-  const [devSecondaryAccent, setDevSecondaryAccentState] = useState('#22C55E')
+  const [devMode, setDevMode] = useState(() => (typeof boot.devMode === 'boolean' ? boot.devMode : false))
+  const [normalAccent, setNormalAccentState] = useState(
+    () => (typeof boot.normalAccent === 'string' && boot.normalAccent ? boot.normalAccent : '#3B82F6'),
+  )
+  const [normalSecondaryAccent, setNormalSecondaryAccentState] = useState(
+    () => (typeof boot.normalSecondaryAccent === 'string' && boot.normalSecondaryAccent ? boot.normalSecondaryAccent : '#F97316'),
+  )
+  const [devAccent, setDevAccentState] = useState(
+    () => (typeof boot.devAccent === 'string' && boot.devAccent ? boot.devAccent : '#EF4444'),
+  )
+  const [devSecondaryAccent, setDevSecondaryAccentState] = useState(
+    () => (typeof boot.devSecondaryAccent === 'string' && boot.devSecondaryAccent ? boot.devSecondaryAccent : '#22C55E'),
+  )
   // Derived: current accent depends on devMode
   const accent = devMode ? devAccent : normalAccent
   const secondaryAccent = devMode ? devSecondaryAccent : normalSecondaryAccent
@@ -782,32 +813,40 @@ export default function App() {
   // ── Self-target detection: GAM window rect + virtual screen rect ──
   const [selfRect, setSelfRect] = useState<Rect | null>(null)
   const [screenRect, setScreenRect] = useState<Rect | null>(null)
-  const [selfTargetMode, setSelfTargetMode] = useState<'warn' | 'exclude'>('warn')
+  const [selfTargetMode, setSelfTargetMode] = useState<'warn' | 'exclude'>(
+    () => (boot.selfTargetMode === 'warn' || boot.selfTargetMode === 'exclude' ? boot.selfTargetMode : 'warn'),
+  )
 
-  // ── Auto-save settings on change (debounced 1s, placed after all state declarations) ──
+  // ── Auto-save settings on change (debounced 1s, single atomic write) ──
+  // One set_settings call avoids the old concurrent per-key RMW that corrupted settings.json.
   useEffect(() => {
+    if (!settingsReady) return
     if (saveTimeout.current) clearTimeout(saveTimeout.current)
     saveTimeout.current = setTimeout(() => {
-      saveSetting('theme', theme)
-      saveSetting('mouseMode', mouseMode)
-      saveSetting('keyMode', keyMode)
-      saveSetting('mappingHotkey', mappingHotkey)
-      saveSetting('devMode', devMode)
-      saveSetting('selfTargetMode', selfTargetMode)
-      saveSetting('keepFiles', keepFiles)
-      saveSetting('autoSnap', autoSnap)
-      saveSetting('autoStream', autoStream)
-      saveSetting('snapMethod', snapMethod)
-      saveSetting('streamMethod', streamMethod)
-      saveSetting('renderMethod', renderMethod)
-      saveSetting('normalAccent', normalAccent)
-      saveSetting('normalSecondaryAccent', normalSecondaryAccent)
-      saveSetting('devAccent', devAccent)
-      saveSetting('devSecondaryAccent', devSecondaryAccent)
-      saveSetting('locale', locale)
+      hostCall('set_settings', {
+        settings: {
+          theme,
+          mouseMode,
+          keyMode,
+          mappingHotkey,
+          devMode,
+          selfTargetMode,
+          keepFiles,
+          autoSnap,
+          autoStream,
+          snapMethod,
+          streamMethod,
+          renderMethod,
+          normalAccent,
+          normalSecondaryAccent,
+          devAccent,
+          devSecondaryAccent,
+          locale,
+        },
+      }).catch(() => {})
     }, 1000)
     return () => { if (saveTimeout.current) clearTimeout(saveTimeout.current) }
-  }, [theme, mouseMode, keyMode, mappingHotkey, devMode, selfTargetMode,
+  }, [settingsReady, theme, mouseMode, keyMode, mappingHotkey, devMode, selfTargetMode,
       keepFiles, autoSnap, autoStream, snapMethod, streamMethod, renderMethod,
       normalAccent, normalSecondaryAccent, devAccent, devSecondaryAccent, locale])
 
@@ -1185,6 +1224,10 @@ export default function App() {
         dark={resolvedDark}
         onToggleTheme={() => setTheme(resolvedDark ? 'light' : 'dark')}
         devMode={devMode}
+        locale={locale}
+        setLocale={setLocale}
+        isAdmin={isAdmin}
+        onSwitchPermission={switchPermission}
       />
       {/* ── Main content area: left (tab content) + resize divider + right (panels) ── */}
       <div className="flex-1 flex overflow-hidden">

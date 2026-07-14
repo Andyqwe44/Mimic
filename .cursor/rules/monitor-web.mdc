@@ -18,7 +18,9 @@ alwaysApply: false
 
 ## i18n
 
-- 词典：`locales/{en,zh-CN,zh-TW}.json`；入口 `lib/i18n.ts`；持久化 `settings.json` 的 `locale`（经 `set_setting`，非 localStorage）。
+- 词典：`locales/{en,zh-CN,zh-TW}.json`；入口 `lib/i18n.ts`；持久化 AppData `settings.json` 的 `locale`（经 **`set_settings` 整包写入**，非 localStorage；勿再用并发 `set_setting` 刷盘）。
+- TopBar：语言单格下拉（En/简/繁）；权限单格图标切换（User/Shield）；主题图标。与 Settings 同数据源。
+- Boot：`lib/bootSettings.ts` + C++ `__BOOT_SETTINGS__` 注入，首帧无默认蓝闪烁。
 - 插值：**`{var}`**（`i18n.ts` 已设 `prefix:'{'` / `suffix:'}'`）。勿写 `{{var}}`，否则会原样显示花括号。
 - `constants.ts` 里 `STATE_LABEL` / `CAPTURE_MODES.label|desc` / 鼠标键盘 `name` 等存的是 **key**，渲染必须 `t(...)`。
 - 专有名词/缩写（WGC、DXGI、TCP、PostMessage、SendInput、Game Agent Monitor…）可留英文；其余用户可见文案走目标语言。
