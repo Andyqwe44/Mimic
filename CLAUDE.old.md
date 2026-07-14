@@ -1,5 +1,22 @@
 # CLAUDE.md — TicTacToe → General Visual Game AI
 
+## Recent Changes (2026-07-14) — i18n full UI + interpolation / CJK button width
+
+### Full zh-CN / zh-TW UI copy
+- Locale JSON：导航/面板/设置/更新/日志等用户可见文案本地化；保留 WGC/DXGI/TCP/PostMessage 等专有名词与缩写。
+- 硬编码缺口接入 `t()`：`Entire Desktop`（`windowTitle.ts` 显示层）、IP/Port placeholder、日志行数、keep files、拖拽 tip、更新错误文案等。
+- 鼠标模式 `name` 改为 i18n key（后台/半后台/抢占）；键盘短名 PostMsg/SendMsg/Seize 保留。
+
+### Bugs fixed
+- **插值原样显示 `{n}` / `{version}`**：i18next 默认 `{{var}}`，词典用 `{var}` → `i18n.ts` 设 `prefix:'{'` / `suffix:'}'`。
+- **中文 ActionBtn 换行**：`btnAutoSize` 按英文字符数偏窄 → 拉丁=1 / CJK≈2；`whitespace-nowrap`。
+- **关于页**：产品名 + 版本同一行（版本在右），检查更新按钮最右。
+
+### Docs / rules
+- README Features 增 language / i18n；CLAUDE.md UI 摘要；`.cursor/rules/monitor-web.mdc` 补插值与 btn 宽度规则。
+
+---
+
 ## Recent Changes (2026-07-14) — i18n render fix + Cursor rules
 
 ### Fix: STATE_LABEL / CAPTURE_MODES raw i18n keys in UI

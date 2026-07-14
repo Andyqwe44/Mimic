@@ -542,7 +542,7 @@ export function SettingsView({
                         className="sr-only"
                       />
                       <span className="text-xs font-medium text-text-primary">
-                        {m.name} <span className="text-text-muted">({m.eng})</span>
+                        {t(m.name)} <span className="text-text-muted">({m.eng})</span>
                       </span>
                       <span className="ml-auto">
                         <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded ${
@@ -582,7 +582,7 @@ export function SettingsView({
                         className="sr-only"
                       />
                       <span className="text-xs font-medium text-text-primary">
-                        {m.name} <span className="text-text-muted">({m.eng})</span>
+                        {t(m.name)} <span className="text-text-muted">({m.eng})</span>
                       </span>
                       <span className="ml-auto">
                         <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded ${
@@ -866,7 +866,7 @@ export function SettingsView({
               >
                 {[3, 5, 7, 10].map((n) => (
                   <option key={n} value={n}>
-                    {n} files
+                    {t('settings.keep_files_n', { n })}
                   </option>
                 ))}
               </select>
@@ -945,10 +945,10 @@ export function SettingsView({
         title={t('settings.about')}
       >
         <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-sm text-text-primary">{t('settings.game_agent_monitor')}</div>
-              <div className="text-xs text-text-muted">{t('settings.version', { version: appVersion })}</div>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              <span className="text-sm text-text-primary truncate">{t('settings.game_agent_monitor')}</span>
+              <span className="text-xs text-text-muted shrink-0">{t('settings.version', { version: appVersion })}</span>
             </div>
             <ActionBtn
               icon={hasUpdate
@@ -958,6 +958,7 @@ export function SettingsView({
               title={hasUpdate ? t('settings.check_update_latest_tip') : t('settings.check_update_tip')}
               variant={hasUpdate ? 'primary' : 'outline'}
               onClick={onCheckUpdate || (() => addLog('[Action] check update'))}
+              className="shrink-0"
             />
           </div>
           <div className="border-t border-border pt-2 flex items-center justify-between">

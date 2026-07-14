@@ -27,19 +27,29 @@ export const H = {
 } as const
 
 // ── ActionBtn widths (golden-ratio scale, all h-7) ──
+// Auto-size uses visual width units: Latin=1, CJK/fullwidth≈2 (中文约两倍宽).
 export const BTN_SIZE_CLASS: Record<string, string> = {
-  xs: 'w-16',        // 64px  — ≤3 chars
-  sm: 'w-20',        // 80px  — 4–6 chars
-  md: 'w-[104px]',   // 104px — 7–9 chars
-  lg: 'w-[132px]',   // 132px — 10–14 chars
-  xl: 'w-[168px]',   // 168px — 15+ chars
+  xs: 'w-16',        // 64px  — ≤3 units
+  sm: 'w-20',        // 80px  — 4–6 units
+  md: 'w-[104px]',   // 104px — 7 units
+  lg: 'w-[132px]',   // 132px — 8–14 units (e.g. 检查更新=8)
+  xl: 'w-[168px]',   // 168px — 15+ units
+}
+
+/** Approximate display width: CJK / fullwidth count as 2 Latin units. */
+export function btnLabelUnits(label: string): number {
+  let n = 0
+  for (const ch of label) {
+    n += /[\u2e80-\u9fff\uf900-\ufaff\ufe30-\ufe4f\uff00-\uffef]/.test(ch) ? 2 : 1
+  }
+  return n
 }
 
 export function btnAutoSize(label: string): string {
-  const n = label.length
+  const n = btnLabelUnits(label)
   if (n <= 3) return 'xs'
   if (n <= 6) return 'sm'
-  if (n <= 9) return 'md'
+  if (n <= 7) return 'md'
   if (n <= 14) return 'lg'
   return 'xl'
 }

@@ -41,6 +41,12 @@
     "window_title_tip": "Currently selected target window (read-only, use Select to change)",
     "ip_tip": "AI model server IP address",
     "port_tip": "Port number",
+    "ip_placeholder": "IP Address",
+    "port_placeholder": "Port",
+    "entire_desktop": "Entire Desktop",
+    "entire_desktop_n": "Entire Desktop (D{n})",
+    "category_desktop": "Desktop",
+    "category_window": "Window",
     "minimized_warning": "Window is minimized. {method} cannot capture. Switch to WGC or restore the window.",
     "pin_tip": "Pin panel — exclude from auto-layout",
     "unpin_tip": "Unpin panel — allow auto-layout adjustment"
@@ -63,6 +69,8 @@
     "no_logs_yet": "No logs yet",
     "no_history": "No history files found",
     "click_to_load": "click to load",
+    "lines_count": "{n} lines",
+    "load_failed": "(failed to load)",
     "scroll_bottom": "Scroll to bottom",
     "already_bottom": "Already at bottom",
     "copy_all": "Copy all logs",
@@ -89,7 +97,7 @@
     "select_remote_tip": "Select: {title} (will switch to Desktop {n})",
     "back_tip": "Back to window selection",
     "mode_description": "Select the current state of the target window. The system will recommend the optimal capture method:",
-    "footer_summary": "{items} items — {desks} desktop{deskPlural}, {wins} windows"
+    "footer_summary": "{items} items — {desks} desktops, {wins} windows"
   },
 
   "settings": {
@@ -160,6 +168,7 @@
 
     "keep_files": "Keep files",
     "keep_files_tip": "Number of historical log files shown in Log panel",
+    "keep_files_n": "{n} files",
 
     "dev_mode": "Dev mode",
     "dev_mode_tip": "Developer mode — force red/hacker-green theme, unlock frame dump features",
@@ -224,6 +233,8 @@
     "error_text": "Update check failed",
     "error_fallback": "Unable to connect to update server. Please try again later.",
     "current_version": "Current version v{version}",
+    "needs_full_installer": "A full installer is required (update mechanism incompatible). Please download the latest setup from Gitee.",
+    "unknown_error": "Unknown error",
 
     "full_package_hint": "This is a full update (download all files)",
     "this_update": "This update",
@@ -404,6 +415,7 @@
 
     "ui_demos": "UI Demos",
     "ui_demos_desc": "Pure frontend mock data, no backend calls. Preview UI states that are hard to trigger manually.",
+    "ui_demos_agent": "Agent / Connection",
 
     "demo_checking": "Checking",
     "demo_latest": "Up to date",
@@ -451,5 +463,10 @@
   "theme": {
     "switch_light": "Switch to light theme",
     "switch_dark": "Switch to dark theme"
+  },
+
+  "app": {
+    "resize_expand": "Drag right to expand the panel",
+    "resize_drag": "Drag to resize; drag all the way right to collapse"
   }
 }

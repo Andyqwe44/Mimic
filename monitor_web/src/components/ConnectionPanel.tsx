@@ -11,6 +11,7 @@ import {
   STATE_LABEL,
   cantCaptureMinimized,
 } from '../lib/constants'
+import { DESKTOP_TITLE, displayTargetTitle, isDesktopTitle } from '../lib/windowTitle'
 import { useTranslation } from 'react-i18next'
 import type { WindowInfo } from '../lib/types'
 
@@ -49,10 +50,10 @@ export function ConnectionPanel({
 
   // ── Local state ──
   const [pickerOpen, setPickerOpen] = useState(false)
-  const [selTitle, setSelTitle] = useState(' Entire Desktop')
+  const [selTitle, setSelTitle] = useState(DESKTOP_TITLE)
   const [ip, setIp] = useState('127.0.0.1')
   const [port, setPort] = useState('9999')
-  const isDesktop = selTitle === ' Entire Desktop'
+  const isDesktop = isDesktopTitle(selTitle) || selWin?.category === 'desktop' || selWin?.hwnd === 0
 
   // ── Window selection handlers ──
   const handleSelectWindow = (w: WindowInfo) => {
@@ -141,7 +142,7 @@ export function ConnectionPanel({
               <div className="flex items-center gap-1.5">
                 <Tooltip text={t('connection.window_title_tip')}>
                   <input
-                    value={selTitle}
+                    value={displayTargetTitle(selTitle, t)}
                     readOnly
                     placeholder={t('connection.window_title')}
                     className="w-36 h-7 rounded-lg border border-border bg-bg-primary px-2 text-xs outline-none cursor-default text-text-muted truncate"
@@ -152,7 +153,7 @@ export function ConnectionPanel({
                     <button
                       onClick={() => {
                         onDisconnect()
-                        setSelTitle(' Entire Desktop')
+                        setSelTitle(DESKTOP_TITLE)
                       }}
                       className="h-7 w-7 flex items-center justify-center rounded-md bg-accent-secondary/10 hover:bg-accent-secondary/20 text-accent-secondary border border-accent-secondary/20 transition-colors shrink-0"
                     >
@@ -184,7 +185,7 @@ export function ConnectionPanel({
                       if (b?.trim()) setPort(b.trim())
                     } else setIp(v)
                   }}
-                  placeholder="IP Address"
+                  placeholder={t('connection.ip_placeholder')}
                   className="w-[184px] h-7 rounded-lg border border-border bg-bg-primary px-2 text-xs text-text-primary outline-none focus:border-accent transition-colors placeholder:text-text-muted"
                 />
               </Tooltip>
@@ -199,7 +200,7 @@ export function ConnectionPanel({
                       if (b?.trim()) setIp(b.trim())
                     } else setPort(v)
                   }}
-                  placeholder="Port"
+                  placeholder={t('connection.port_placeholder')}
                   className="w-20 h-7 rounded-lg border border-border bg-bg-primary px-2 text-xs text-text-primary outline-none focus:border-accent transition-colors placeholder:text-text-muted"
                 />
               </Tooltip>

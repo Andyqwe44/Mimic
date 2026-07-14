@@ -452,8 +452,11 @@ App.tsx (~530 lines) → 11 components:
   TargetPickerModal, ConnectionPanel
   ScreenshotPanel, LogPanel
   SettingsView, MonitorView
-lib/: bridge.ts, types.ts, constants.ts
+lib/: bridge.ts, types.ts, constants.ts, i18n.ts, windowTitle.ts
+locales/: en.json, zh-CN.json, zh-TW.json
 ```
+
+**i18n（摘要）**：Settings → General → Language；`settings.json` 键 `locale`；插值用 `{var}`（非 `{{var}}`）；`ActionBtn` 宽度按拉丁=1 / CJK≈2 单位自动选档。细则 → `.cursor/rules/monitor-web.mdc`；变更史 → `CLAUDE.old.md`。
 
 ---
 

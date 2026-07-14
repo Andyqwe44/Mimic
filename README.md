@@ -123,7 +123,8 @@ type_tag 1 (BGRA): [w:4][h:4][ch:4][reserved:4][pixels: w*h*ch]
 - **Dashboard** — System info, capture pipeline status, update check
 - **Monitor** — Window/desktop capture, streaming preview, FPS counter
 - **Log** — Live in-memory ring buffer + disk log tiles
-- **Settings** — Connection, capture method (snapshot/stream/render), theme, model, log config
+- **Settings** — Connection, capture method (snapshot/stream/render), theme, **language** (en / zh-CN / zh-TW), model, log config
+- **i18n** — UI strings via i18next; locale persisted as `locale` in `%LOCALAPPDATA%\GameAgentMonitor\config\settings.json`
 - **Virtual desktop** — Cross-desktop window enumeration, absolute numbering (Task View order via registry), desktop switching
 - **Window picker** — EnumWindows with search, type filter (All/Desktop/Window), D1/D2 badges, ⚡ for remote-desktop windows
 - **Single-frame** — WGC/GDI multi-method capture with PNG output

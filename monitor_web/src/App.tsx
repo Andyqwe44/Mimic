@@ -18,6 +18,7 @@ import { LoadingScreen } from './components/LoadingScreen'
 import { hostCall, logMgr, addLog, applyTheme, onUpdateProgress, type UpdateProgressMsg } from './lib/bridge'
 import { runSelfTest, sleep, type SelfTestState } from './lib/selftest'
 import { cantCaptureMinimized } from './lib/constants'
+import { DESKTOP_TITLE, displayTargetTitle } from './lib/windowTitle'
 import { setSavedLocale } from './lib/i18n'
 import type { WindowInfo, Rect } from './lib/types'
 
@@ -311,13 +312,13 @@ export default function App() {
         // Manifest schema newer than this client understands — point at full package.
         setUpdateInfo({
           status: 'error', current: info.current || cur, latest: '', name: '', body: '', url: '',
-          error: '需要下载完整安装包（更新机制不兼容），请前往 Gitee 下载最新安装程序。',
+          error: t('update.needs_full_installer'),
         } as any)
         addLog(`[update] full reinstall required — download: ${info.download_url || 'Gitee releases'}`)
       } else if (info?.ok === false) {
         setUpdateInfo({
           status: 'error', current: info.current || cur, latest: '', name: '', body: '', url: '',
-          error: info.error || '未知错误',
+          error: info.error || t('update.unknown_error'),
         } as any)
         addLog(`[update] check failed: ${info?.error || 'unknown'}`)
       } else {
@@ -335,7 +336,7 @@ export default function App() {
       } as any)
       addLog(`[update] check error: ${e?.message || e}`)
     }
-  }, [appVersion])
+  }, [appVersion, t])
 
   // Kick off a download for the given diff. C++ returns immediately and drives
   // the UI via update_progress pushes; the app exits when the updater launches.
@@ -709,7 +710,7 @@ export default function App() {
   const isResizing = useRef(false)
   // ── Selected target window ──
   const [selWindow, setSelWindow] = useState<WindowInfo>({
-    title: ' Entire Desktop',
+    title: DESKTOP_TITLE,
     category: 'desktop',
     hwnd: 0,
   })
@@ -1143,7 +1144,7 @@ export default function App() {
               onDisconnect={() => {
                 if (opStateRef.current === 'streaming') stopStream()
                 setSelWindow({
-                  title: ' Entire Desktop',
+                  title: DESKTOP_TITLE,
                   category: 'desktop',
                   hwnd: 0,
                 })
@@ -1221,7 +1222,7 @@ export default function App() {
           {tab === 'Log' && <LogPanel keepFiles={keepFiles} />}
           {/* ── Bottom status strip ── */}
           <BottomBar
-            selWin={selWindow.title}
+            selWin={displayTargetTitle(selWindow.title, t)}
             snapMethod={snapMethod} streamMethod={streamMethod}
             previewing={previewing} fps={streamFps}
             targetDims={targetDims}
@@ -1234,7 +1235,7 @@ export default function App() {
         {/* ── Resize divider ── */}
         <Tooltip
           text={
-            rightCollapsed ? '向右拖拽展开面板' : '拖拽调整面板宽度，向右拖到底可折叠'
+            rightCollapsed ? t('app.resize_expand') : t('app.resize_drag')
           }
         >
           <div
@@ -1261,7 +1262,7 @@ export default function App() {
                 onDisconnect={() => {
                   if (opStateRef.current === 'streaming') stopStream()
                   setSelWindow({
-                    title: ' Entire Desktop',
+                    title: DESKTOP_TITLE,
                     category: 'desktop',
                     hwnd: 0,
                   })

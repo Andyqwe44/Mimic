@@ -35,6 +35,8 @@ i18n
     debug: false,
     interpolation: {
       escapeValue: false, // React already escapes
+      prefix: '{',        // locales use {var}, not {{var}}
+      suffix: '}',
     },
     detection: {
       order: ['querystring', 'cookie', 'localStorage', 'navigator'],

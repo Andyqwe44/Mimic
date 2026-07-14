@@ -1,6 +1,6 @@
 // ═══ Shared constants ═══
-// Note: `rec` and `desc` fields are i18n keys — use t(item.rec) / t(item.desc) to render.
-// `name` and `eng` are technical identifiers — unchanged across locales.
+// Note: `rec` / `desc` / mouse·keyboard `name` are i18n keys — use t(...).
+// Capture/render `name`+`eng` and keyboard short tags are proper nouns / API abbreviations.
 
 // Collapsible card header (used in 6 places)
 export const COLLAPSIBLE_HEADER =
@@ -53,20 +53,20 @@ export const CAPTURE_MODES = [
 ]
 
 export const MOUSE_MODES = [
-  { v: 'background' as const, name: 'Background', eng: 'PostMessage', rec: 'mouse.background.rec',
+  { v: 'background' as const, name: 'mouse.background.name', eng: 'PostMessage', rec: 'mouse.background.rec',
     desc: 'mouse.background.desc' },
-  { v: 'semi' as const, name: 'Semi', eng: 'SendMsg-Cursor', rec: 'mouse.semi.rec',
+  { v: 'semi' as const, name: 'mouse.semi.name', eng: 'SendMsg-Cursor', rec: 'mouse.semi.rec',
     desc: 'mouse.semi.desc' },
-  { v: 'seize' as const, name: 'Seize', eng: 'SendInput', rec: 'mouse.seize.rec',
+  { v: 'seize' as const, name: 'mouse.seize.name', eng: 'SendInput', rec: 'mouse.seize.rec',
     desc: 'mouse.seize.desc' },
 ]
 
 export const KEYBOARD_MODES = [
-  { v: 'postmsg' as const, name: 'PostMsg', eng: 'PostMessage', rec: 'keyboard.postmsg.rec',
+  { v: 'postmsg' as const, name: 'keyboard.postmsg.name', eng: 'PostMessage', rec: 'keyboard.postmsg.rec',
     desc: 'keyboard.postmsg.desc' },
-  { v: 'sendmsg' as const, name: 'SendMsg', eng: 'WinAPI', rec: 'keyboard.sendmsg.rec',
+  { v: 'sendmsg' as const, name: 'keyboard.sendmsg.name', eng: 'WinAPI', rec: 'keyboard.sendmsg.rec',
     desc: 'keyboard.sendmsg.desc' },
-  { v: 'seize' as const, name: 'Seize', eng: 'SendInput', rec: 'keyboard.seize.rec',
+  { v: 'seize' as const, name: 'keyboard.seize.name', eng: 'SendInput', rec: 'keyboard.seize.rec',
     desc: 'keyboard.seize.desc' },
 ]
 

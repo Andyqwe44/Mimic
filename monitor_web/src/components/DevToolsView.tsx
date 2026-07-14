@@ -415,7 +415,7 @@ export function DevToolsView({
           </div>
 
           {/* ─ Agent demos ─ */}
-          <div className="text-xs font-medium text-accent-secondary mb-1.5">Agent / 连接状态</div>
+          <div className="text-xs font-medium text-accent-secondary mb-1.5">{t('devtools.ui_demos_agent')}</div>
           <div className="flex flex-wrap gap-1.5">
             {([
               [t('devtools.demo_agent_connected'), () => onDevInjectAgent?.(true)],

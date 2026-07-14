@@ -222,7 +222,7 @@ export function LogPanel({
                         .catch(() => {
                           setHistoryFiles((prev) =>
                             prev.map((hf, i) =>
-                              i === fi ? { ...hf, lines: ['(failed to load)'] } : hf,
+                              i === fi ? { ...hf, lines: [t('log.load_failed')] } : hf,
                             ),
                           )
                         })
@@ -243,7 +243,7 @@ export function LogPanel({
                     {f.name}
                   </span>
                   <span className="text-xs text-text-muted shrink-0">
-                    {f.lines.length > 0 ? `${f.lines.length} lines` : t('log.click_to_load')}
+                    {f.lines.length > 0 ? t('log.lines_count', { n: f.lines.length }) : t('log.click_to_load')}
                   </span>
                 </div>
                 <div className="flex items-center gap-0.5">

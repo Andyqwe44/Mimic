@@ -101,7 +101,7 @@ export function ActionBtn({
     <Tooltip text={title}>
       <button
         onClick={onClick}
-        className={`inline-flex items-center justify-center gap-1.5 rounded-md px-2.5 ${H.control} text-xs font-medium transition-all duration-150 ${w} ${className ?? ''} ${
+        className={`inline-flex items-center justify-center gap-1.5 rounded-md px-2.5 ${H.control} text-xs font-medium whitespace-nowrap transition-all duration-150 ${w} ${className ?? ''} ${
           variant === 'primary'
             ? 'bg-accent text-white hover:bg-accent-hover'
             : variant === 'danger'

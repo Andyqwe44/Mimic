@@ -5,6 +5,7 @@ import { Tooltip } from './Toolkit'
 import { useTranslation } from 'react-i18next'
 import { hostCall, addLog } from '../lib/bridge'
 import { CAPTURE_MODES } from '../lib/constants'
+import { DESKTOP_TITLE, displayTargetTitle } from '../lib/windowTitle'
 import type { WindowInfo } from '../lib/types'
 import { useScrollLock } from '../lib/useScrollLock'
 import { MODAL_W } from '../lib/design'
@@ -58,7 +59,7 @@ export function TargetPickerModal({
       addLog(`[Window] loaded ${list.length} entries`)
     } catch {
       setWindows([
-        { title: ' Entire Desktop', category: 'desktop', hwnd: 0 },
+        { title: DESKTOP_TITLE, category: 'desktop', hwnd: 0 },
         { title: 'Tic Tac Toe — main.exe', category: 'window', hwnd: 0 },
         { title: 'Notepad', category: 'window', hwnd: 0 },
         { title: 'Chrome', category: 'window', hwnd: 0 },
@@ -215,8 +216,8 @@ export function TargetPickerModal({
                           self
                             ? t('targetPicker.self_window_tip')
                             : isRemote
-                              ? t('targetPicker.select_remote_tip', { title: w.title, n: winDesktop })
-                              : t('targetPicker.select_tip', { title: w.title })
+                              ? t('targetPicker.select_remote_tip', { title: displayTargetTitle(w.title, t), n: winDesktop })
+                              : t('targetPicker.select_tip', { title: displayTargetTitle(w.title, t) })
                         }
                       >
                         <button
@@ -232,10 +233,14 @@ export function TargetPickerModal({
                           )}
                           <div className="flex-1 min-w-0">
                             <span className="text-xs text-text-primary truncate block">
-                              {w.title}
+                              {displayTargetTitle(w.title, t)}
                             </span>
                             <span className="text-xs text-text-muted capitalize">
-                              {w.category}
+                              {w.category === 'desktop'
+                                ? t('connection.category_desktop')
+                                : w.category === 'window'
+                                  ? t('connection.category_window')
+                                  : w.category}
                             </span>
                           </div>
                           {(w.desktop != null || w.category !== 'desktop') && (
@@ -264,7 +269,6 @@ export function TargetPickerModal({
                 return t('targetPicker.footer_summary', {
                   items: filtered.length,
                   desks: deskCount,
-                  deskPlural: deskCount !== 1 ? 's' : '',
                   wins: windows.filter((w) => w.category === 'window').length,
                 })
               })()}
