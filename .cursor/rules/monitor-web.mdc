@@ -24,6 +24,24 @@ alwaysApply: false
 - 专有名词/缩写（WGC、DXGI、TCP、PostMessage、SendInput、Game Agent Monitor…）可留英文；其余用户可见文案走目标语言。
 - 桌面目标：C++ 仍返回 `" Entire Desktop"`；UI 用 `displayTargetTitle()`（`lib/windowTitle.ts`）本地化显示。
 
+## DevMode overlays（企业级 · 铁律 5）
+
+仿 Android Developer Options：**状态栏只读 SSOT，Demo 只写 overlay**。
+
+```
+displayX = demoX ?? realX
+```
+
+| 层 | 内容 | 关 DevMode |
+|----|------|------------|
+| Overlay | `demoAgentOverride` / `demoUpdateInfo` / `demoSelfTest` | 全部清 null |
+| Capabilities | frame dump、Test Target、真自检 | 关掉 / 中止 |
+| SSOT | `agentConnectedReal` ← `get_agent_status`；真 `updateInfo` | **重检**，不盲回滚 |
+
+- DevTools「界面预览」**禁止** `setAgentConnectedReal` / 真 `setUpdateInfo`；只 `setDemo*`。
+- 假更新弹窗纯前端画，按钮不调 `download_update` / `check_update`。
+- 关 Dev：`leaveDevModeCleanup` = 清 overlay → 关能力 → `refreshAgentStatus()`。
+
 ```tsx
 // ✅
 {t(STATE_LABEL[winState] || winState)}

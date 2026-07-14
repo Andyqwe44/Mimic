@@ -32,5 +32,5 @@ logger/  capture/  input/  monitor_app/  monitor_web/  scripts/  protocol/  mode
 | `monitor_web` | React UI（`hostCall` bridge） |
 | `scripts/` | 全 PowerShell 构建/发布（无 cmd/bash） |
 
-详细构建/发版 → `build-release` 规则；C++ 日志与路由 → `cpp-backend`；前端 → `monitor-web`。
-权威长文仍以根目录 `CLAUDE.md` 为准。
+详细构建/发版 → `build-release` 规则；C++ 日志与路由 → `cpp-backend`；前端（含 **DevMode overlay/SSOT**、i18n）→ `monitor-web`。
+权威长文仍以根目录 `CLAUDE.md` 为准；变更详史 → `CLAUDE.old.md`。

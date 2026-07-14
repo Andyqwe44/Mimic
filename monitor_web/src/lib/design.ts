@@ -54,13 +54,16 @@ export function btnAutoSize(label: string): string {
   return 'xl'
 }
 
-// ── Modal widths ──
+// ── Modal widths / heights ──
 export const MODAL_W = {
   /** UpdateModal, TargetPickerModal */
   picker: 'w-[520px]',
   /** SelfTestModal */
   test: 'w-[540px]',
 } as const
+
+/** Shared modal height — fixed across all UpdateModal statuses (no jump). */
+export const MODAL_H = 'h-[min(560px,85vh)] max-h-[min(560px,85vh)]' as const
 
 // ── Spacing (gap-*, p-*, px-*, py-*) ──
 export const GAP = {
@@ -117,8 +120,8 @@ export const RADIUS = {
 export const RING = 'ring-1 ring-inset ring-border'
 
 // ── Component presets ──
-/** Modal card shell (UpdateModal, TargetPickerModal) */
-export const MODAL_CARD = `${MODAL_W.picker} max-h-[min(560px,85vh)] bg-bg-primary rounded-xl ${RING} flex flex-col shadow-2xl overflow-hidden`
+/** Modal card shell (UpdateModal) — fixed width+height so status changes don't jump */
+export const MODAL_CARD = `${MODAL_W.picker} ${MODAL_H} bg-bg-primary rounded-xl ${RING} flex flex-col shadow-2xl overflow-hidden`
 
 /** Collapsible diff container */
 export const DIFF_CONTAINER = `bg-bg-secondary rounded-lg overflow-hidden`

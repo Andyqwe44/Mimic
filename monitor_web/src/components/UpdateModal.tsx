@@ -5,7 +5,7 @@ import { X, Download, ArrowRight, FileStack, Package, ChevronDown, CheckCircle2,
 import { ActionBtn } from './Toolkit'
 import { addLog, type UpdateProgressMsg } from '../lib/bridge'
 import { useScrollLock } from '../lib/useScrollLock'
-import { MODAL_CARD, DIFF_CONTAINER, DIFF_COL } from '../lib/design'
+import { MODAL_CARD, DIFF_CONTAINER, DIFF_COL, H } from '../lib/design'
 
 // 弹窗状态: 检查中 / 有更新 / 已最新 / 出错. 缺省视为 'update' (向后兼容).
 export type UpdateStatus = 'checking' | 'update' | 'latest' | 'error'
@@ -21,6 +21,8 @@ export interface UpdateInfo {
   message?: string      // server-supplied note (manifest "message")
   mandatory?: boolean   // manifest "mandatory" → hide "Later"
   mode?: string         // 'incremental' | 'full'
+  /** DevTools UI demo — must not persist after leaving Dev mode */
+  _dev?: boolean
   // per-file changes. size = 解压后磁盘占用; dl = 下载流量 (压缩后).
   // dl 缺省时 == size (当前逐文件裸下载, 无压缩; 将来压缩下载填 dl).
   diff?: Array<{ path: string; size?: number; dl?: number }>
@@ -117,11 +119,8 @@ export function UpdateModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* Backdrop */}
       <div className="absolute inset-0 bg-black/60" onClick={canClose ? onClose : undefined} />
-      {/* Card — 宽固定 520 (= Select 弹窗). 有更新态固定高 min(560,85vh) 防下载时跳;
-          检查中/已最新/出错态自适应高 (内容少不留空) */}
-      <div
-        className={`relative ${MODAL_CARD} ${isUpdate ? 'min-h-[min(560px,85vh)]' : ''}`}
-      >
+      {/* Card — 宽高固定 (MODAL_CARD)，各状态同框，切换不跳 */}
+      <div className={`relative ${MODAL_CARD}`}>
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
           <div className="flex items-center gap-2.5">
@@ -138,17 +137,17 @@ export function UpdateModal({
           )}
         </div>
 
-        {/* ── Non-update states: checking / latest / error (居中简卡) ── */}
+        {/* ── Non-update states: checking / latest / error (占满中间区，垂直居中) ── */}
         {status === 'checking' && (
-          <div className="flex flex-col items-center justify-center gap-3 px-5 py-10 text-center">
-            <Loader2 className="w-10 h-10 text-accent animate-spin" />
+          <div className="flex-1 min-h-0 flex flex-col items-center justify-center gap-3 px-5 text-center">
+            <Loader2 className={`${H.iconXl} text-accent animate-spin`} />
             <div className="text-sm text-text-primary">{t('update.checking_text')}</div>
             <div className="text-xs text-text-muted font-mono">{t('update.current_version', { version: info.current })}</div>
           </div>
         )}
         {status === 'latest' && (
-          <div className="flex flex-col items-center justify-center gap-3 px-5 py-10 text-center">
-            <CheckCircle2 className="w-12 h-12 text-accent" />
+          <div className="flex-1 min-h-0 flex flex-col items-center justify-center gap-3 px-5 text-center">
+            <CheckCircle2 className={`${H.icon2xl} text-accent`} />
             <div className="text-sm font-medium text-text-primary">{t('update.latest_text')}</div>
             <span className="px-3 py-1.5 rounded-lg bg-accent/10 ring-1 ring-inset ring-accent/30 text-sm font-mono font-semibold text-accent">
               v{info.current}
@@ -156,8 +155,8 @@ export function UpdateModal({
           </div>
         )}
         {status === 'error' && (
-          <div className="flex flex-col items-center justify-center gap-3 px-5 py-10 text-center">
-            <AlertTriangle className="w-10 h-10 text-error" />
+          <div className="flex-1 min-h-0 flex flex-col items-center justify-center gap-3 px-5 text-center">
+            <AlertTriangle className={`${H.iconXl} text-error`} />
             <div className="text-sm font-medium text-text-primary">{t('update.error_text')}</div>
             <div className="text-xs text-text-secondary leading-relaxed max-w-[380px]">
               {info.error || t('update.error_fallback')}
@@ -306,44 +305,42 @@ export function UpdateModal({
           </div>
         )}
 
-        {/* Progress strip — 仅有更新态渲染; 常驻固定高, idle 空占位, 下载中填充 → 加进度条窗口不跳 */}
-        {isUpdate && (
-          <div className="h-[52px] shrink-0 px-5 flex flex-col justify-center border-t border-border">
-            {downloading && (
-              progress ? (
-                <div className="space-y-1.5">
-                  <div className="text-xs text-text-secondary">
-                    {progress.phase === 'download' && (
-                      <>{t('update.progress_download', { file: progress.file || '...', current: Math.min(progress.current_file, progress.total_files) || 1, total: progress.total_files })}</>
-                    )}
-                    {progress.phase === 'done' && <>{t('update.progress_done')}</>}
-                    {progress.phase === 'error' && (
-                      <span className="text-error">{t('update.progress_error', { file: progress.error_file || progress.file })}</span>
-                    )}
-                  </div>
-                  {progress.phase !== 'error' && (
-                    <div className="h-2 rounded-full bg-bg-tertiary overflow-hidden">
-                      <div
-                        className="h-full bg-accent transition-all duration-100"
-                        style={{
-                          width: progress.total_bytes > 0
-                            ? `${Math.min(100, (progress.done_bytes / progress.total_bytes) * 100)}%`
-                            : progress.total_files > 0
-                              ? `${Math.min(100, (progress.current_file / progress.total_files) * 100)}%`
-                              : '15%',
-                        }}
-                      />
-                    </div>
+        {/* Progress strip — 全状态常驻固定高，idle 空占位 → 检查中→有更新/下载时底栏不跳 */}
+        <div className={`${H.strip} shrink-0 px-5 flex flex-col justify-center border-t border-border`}>
+          {isUpdate && downloading && (
+            progress ? (
+              <div className="space-y-1.5">
+                <div className="text-xs text-text-secondary">
+                  {progress.phase === 'download' && (
+                    <>{t('update.progress_download', { file: progress.file || '...', current: Math.min(progress.current_file, progress.total_files) || 1, total: progress.total_files })}</>
+                  )}
+                  {progress.phase === 'done' && <>{t('update.progress_done')}</>}
+                  {progress.phase === 'error' && (
+                    <span className="text-error">{t('update.progress_error', { file: progress.error_file || progress.file })}</span>
                   )}
                 </div>
-              ) : (
-                <div className="text-xs text-text-muted text-center animate-pulse">
-                  {t('update.progress_preparing')}
-                </div>
-              )
-            )}
-          </div>
-        )}
+                {progress.phase !== 'error' && (
+                  <div className="h-2 rounded-full bg-bg-tertiary overflow-hidden">
+                    <div
+                      className="h-full bg-accent transition-all duration-100"
+                      style={{
+                        width: progress.total_bytes > 0
+                          ? `${Math.min(100, (progress.done_bytes / progress.total_bytes) * 100)}%`
+                          : progress.total_files > 0
+                            ? `${Math.min(100, (progress.current_file / progress.total_files) * 100)}%`
+                            : '15%',
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="text-xs text-text-muted text-center animate-pulse">
+                {t('update.progress_preparing')}
+              </div>
+            )
+          )}
+        </div>
 
         {/* Footer */}
         <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border shrink-0">
