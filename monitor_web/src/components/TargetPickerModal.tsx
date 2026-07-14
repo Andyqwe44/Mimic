@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import { X, Search, ChevronLeft, RefreshCw, MonitorUp, Monitor, MonitorSmartphone } from 'lucide-react'
 import { Tooltip } from './Toolkit'
+import { useTranslation } from 'react-i18next'
 import { hostCall, addLog } from '../lib/bridge'
 import { CAPTURE_MODES } from '../lib/constants'
 import type { WindowInfo } from '../lib/types'
@@ -22,6 +23,7 @@ export function TargetPickerModal({
   onSelectWindow: (w: WindowInfo) => void
   onSelectMode: (method: string, expectedState: string) => void
 }) {
+  const { t } = useTranslation()
   const [page, setPage] = useState<'window' | 'mode'>('window')
   const [animReady, setAnimReady] = useState(false)
   const [search, setSearch] = useState('')
@@ -135,9 +137,9 @@ export function TargetPickerModal({
             <div className="flex items-center justify-between px-4 py-3 border-b border-border">
               <div className="flex items-center gap-2">
                 <MonitorUp className="w-4 h-4 text-accent" />
-                <span className="text-sm font-semibold text-text-primary">Select Target</span>
+                <span className="text-sm font-semibold text-text-primary">{t('targetPicker.select_target')}</span>
               </div>
-              <Tooltip text="关闭">
+              <Tooltip text={t('common.close')}>
                 <button
                   onClick={() => {
                     onClose()
@@ -153,7 +155,7 @@ export function TargetPickerModal({
               {categories.map((c) => (
                 <Tooltip
                   key={c}
-                  text={`筛选: ${c === 'all' ? '全部' : c === 'desktop' ? '桌面' : '窗口'}`}
+                  text={c === 'all' ? t('targetPicker.filter_all') : c === 'desktop' ? t('targetPicker.filter_desktop') : t('targetPicker.filter_window')}
                 >
                   <button
                     onClick={() => {
@@ -163,12 +165,12 @@ export function TargetPickerModal({
                     className={`px-3 py-1 rounded-full text-xs font-medium transition-colors capitalize
                       ${filter === c ? 'bg-accent text-white' : 'bg-bg-tertiary text-text-secondary hover:bg-bg-hover'}`}
                   >
-                    {c === 'all' ? 'All' : c === 'desktop' ? ' Desktop' : ' Windows'}
+                    {c === 'all' ? t('targetPicker.all') : c === 'desktop' ? t('targetPicker.desktop') : t('targetPicker.windows')}
                   </button>
                 </Tooltip>
               ))}
               <div className="flex-1" />
-              <Tooltip text="刷新窗口列表">
+              <Tooltip text={t('targetPicker.refresh')}>
                 <button
                   onClick={() => {
                     loadWindows()
@@ -186,7 +188,7 @@ export function TargetPickerModal({
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search..."
+                  placeholder={t('targetPicker.search')}
                   className="flex-1 bg-transparent text-sm text-text-primary outline-none placeholder:text-text-muted"
                   autoFocus
                 />
@@ -195,7 +197,7 @@ export function TargetPickerModal({
             <div className="flex-1 overflow-y-auto px-2 pb-2">
               {loading && filtered.length === 0 ? (
                 <div className="flex items-center justify-center py-8 text-sm text-text-muted">
-                  Loading...
+                  {t('common.loading')}
                 </div>
               ) : (
                 <div className="grid grid-cols-2 gap-1">
@@ -211,10 +213,10 @@ export function TargetPickerModal({
                         key={`${w.hwnd}-${w.category}`}
                         text={
                           self
-                            ? '自身窗口，禁止捕获'
+                            ? t('targetPicker.self_window_tip')
                             : isRemote
-                              ? `选择: ${w.title}（将切换到 D${winDesktop}）`
-                              : `选择: ${w.title}`
+                              ? t('targetPicker.select_remote_tip', { title: w.title, n: winDesktop })
+                              : t('targetPicker.select_tip', { title: w.title })
                         }
                       >
                         <button
@@ -239,10 +241,8 @@ export function TargetPickerModal({
                           {(w.desktop != null || w.category !== 'desktop') && (
                             <span className="absolute bottom-1 right-1 flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-px rounded-full bg-accent-light text-accent whitespace-nowrap">
                               {isRemote && (
-                                <Tooltip text="需切换桌面">
                                   <span>⚡</span>
-                                </Tooltip>
-                              )}
+                                )}
                               D{winDesktop || '?'}
                             </span>
                           )}
@@ -261,7 +261,12 @@ export function TargetPickerModal({
                     .map((w) => w.desktop || 1),
                 )
                 const deskCount = deskNums.size || 1
-                return `${filtered.length} items — ${deskCount} desktop${deskCount !== 1 ? 's' : ''}, ${windows.filter((w) => w.category === 'window').length} windows`
+                return t('targetPicker.footer_summary', {
+                  items: filtered.length,
+                  desks: deskCount,
+                  deskPlural: deskCount !== 1 ? 's' : '',
+                  wins: windows.filter((w) => w.category === 'window').length,
+                })
               })()}
             </div>
           </div>
@@ -270,7 +275,7 @@ export function TargetPickerModal({
           <div className={`${PICKER_W} flex-shrink-0 flex flex-col`}>
             <div className="flex items-center justify-between px-4 py-3 border-b border-border">
               <div className="flex items-center gap-2">
-                <Tooltip text="返回窗口选择">
+                <Tooltip text={t('targetPicker.back_tip')}>
                   <button
                     onClick={() => setPage('window')}
                     className="p-1 rounded-md hover:bg-bg-hover transition-colors"
@@ -279,9 +284,9 @@ export function TargetPickerModal({
                   </button>
                 </Tooltip>
                 <MonitorUp className="w-4 h-4 text-accent" />
-                <span className="text-sm font-semibold text-text-primary">Capture Mode</span>
+                <span className="text-sm font-semibold text-text-primary">{t('targetPicker.capture_mode')}</span>
               </div>
-              <Tooltip text="关闭">
+              <Tooltip text={t('common.close')}>
                 <button
                   onClick={() => {
                     onClose()
@@ -295,13 +300,13 @@ export function TargetPickerModal({
             </div>
             <div className="p-4 space-y-2">
               <div className="text-xs text-text-muted mb-3">
-                目标:{' '}
+                Target:{' '}
                 <span className="text-text-primary font-medium">
                   {pendingWin?.title || ''}
                 </span>
               </div>
               <div className="text-xs text-text-muted mb-2">
-                请选择目标窗口的当前状态，系统将自动推荐最优捕获方案：
+                {t('targetPicker.mode_description')}
               </div>
               {CAPTURE_MODES.map((m) => (
                 <Tooltip key={m.v} text={m.desc}>

@@ -1,4 +1,6 @@
 // ═══ Shared constants ═══
+// Note: `rec` and `desc` fields are i18n keys — use t(item.rec) / t(item.desc) to render.
+// `name` and `eng` are technical identifiers — unchanged across locales.
 
 // Collapsible card header (used in 6 places)
 export const COLLAPSIBLE_HEADER =
@@ -21,9 +23,10 @@ export const METHODS_NO_MINIMIZED = ['wgc', 'gdi', 'printwindow', 'screenbitblt'
 export const cantCaptureMinimized = (method: string, ws: string) =>
   ws === 'minimized' && METHODS_NO_MINIMIZED.includes(method)
 
+// Values are i18n keys — use t(STATE_LABEL[state]) to render
 export const STATE_LABEL: Record<string, string> = {
-  desktop: '桌面', foreground: '前台', background: '后台',
-  minimized: '最小化', hidden: '隐藏', closed: '已关闭', unknown: '未知',
+  desktop: 'state.desktop', foreground: 'state.foreground', background: 'state.background',
+  minimized: 'state.minimized', hidden: 'state.hidden', closed: 'state.closed', unknown: 'state.unknown',
 }
 
 export const STATE_COLOR: Record<string, string> = {
@@ -33,38 +36,38 @@ export const STATE_COLOR: Record<string, string> = {
 }
 
 export const CAPTURE_METHODS = [
-  { v: 'wgc',  name: 'WGC', eng: 'GPU FramePool', rec: '前台/后台/桌面', desc: 'GPU 加速，支持后台/遮挡窗口，前台后台及桌面首选' },
-  { v: 'dxgi', name: 'DXGI', eng: 'DesktopBlt',   rec: '桌面/最小化', desc: '全桌面 GDI 位图，最小化窗口时唯一可行方案' },
+  { v: 'wgc',  name: 'WGC', eng: 'GPU FramePool', rec: 'capture.wgc.rec', desc: 'capture.wgc.desc' },
+  { v: 'dxgi', name: 'DXGI', eng: 'DesktopBlt',   rec: 'capture.dxgi.rec', desc: 'capture.dxgi.desc' },
 ]
 
 export const RENDER_METHODS = [
-  { v: 'shared', name: 'SharedBuffer', eng: 'Zero-copy COM', rec: '当前', desc: 'C++ COM SharedBuffer → JS ArrayBuffer → Canvas putImageData，零拷贝无编解码' },
-  { v: 'h264',   name: 'H.264',        eng: 'GPU MFT + MSE', rec: '未实现', desc: 'GPU MFT 硬件编码 → fMP4 分片 → MSE → <video> 标签，低延迟高压缩' },
-  { v: 'h265',   name: 'H.265',        eng: 'GPU MFT + MSE', rec: '未实现', desc: 'HEVC 硬件编码，压缩率更高但兼容性有限，需 Windows 11 + HEVC 扩展' },
+  { v: 'shared', name: 'SharedBuffer', eng: 'Zero-copy COM', rec: 'capture.render_shared.rec', desc: 'capture.render_shared.desc' },
+  { v: 'h264',   name: 'H.264',        eng: 'GPU MFT + MSE', rec: 'capture.render_h264.rec', desc: 'capture.render_h264.desc' },
+  { v: 'h265',   name: 'H.265',        eng: 'GPU MFT + MSE', rec: 'capture.render_h265.rec', desc: 'capture.render_h265.desc' },
 ]
 
 export const CAPTURE_MODES = [
-  { v: 'foreground', label: '前台 (Foreground)', desc: '窗口可见且在最前 → 推荐 WGC GPU 加速', method: 'wgc' },
-  { v: 'background', label: '后台 (Background)', desc: '窗口被遮挡但未最小化 → 推荐 WGC (唯一支持后台)', method: 'wgc' },
-  { v: 'minimized',  label: '最小化 (Minimized)',  desc: '窗口已最小化 → 只能用 DesktopGDI 截桌面', method: 'dxgi' },
+  { v: 'foreground', label: 'capture.modes.foreground.label', desc: 'capture.modes.foreground.desc', method: 'wgc' },
+  { v: 'background', label: 'capture.modes.background.label', desc: 'capture.modes.background.desc', method: 'wgc' },
+  { v: 'minimized',  label: 'capture.modes.minimized.label',  desc: 'capture.modes.minimized.desc',  method: 'dxgi' },
 ]
 
 export const MOUSE_MODES = [
-  { v: 'background' as const, name: 'Background', eng: 'PostMessage', rec: '推荐',
-    desc: '全后台，完全不抢鼠标。虚拟指示器 + PostMessage 转发点击，窗口可能乱飞但不影响使用，建议目标窗口最小化' },
-  { v: 'semi' as const, name: 'Semi', eng: 'SendMsg-Cursor', rec: '进阶',
-    desc: '半后台，点击时短暂抢鼠标。虚拟指示器常驻，鼠标移动不抢占，点击瞬间通过 SendInput 定位+点击' },
-  { v: 'seize' as const, name: 'Seize', eng: 'SendInput', rec: '前台',
-    desc: '前台模式，完全抢占鼠标。虚拟指示器 + 实时光标同步，SendInput 合成系统输入，与真实硬件走相同路径' },
+  { v: 'background' as const, name: 'Background', eng: 'PostMessage', rec: 'mouse.background.rec',
+    desc: 'mouse.background.desc' },
+  { v: 'semi' as const, name: 'Semi', eng: 'SendMsg-Cursor', rec: 'mouse.semi.rec',
+    desc: 'mouse.semi.desc' },
+  { v: 'seize' as const, name: 'Seize', eng: 'SendInput', rec: 'mouse.seize.rec',
+    desc: 'mouse.seize.desc' },
 ]
 
 export const KEYBOARD_MODES = [
-  { v: 'postmsg' as const, name: 'PostMsg', eng: 'PostMessage', rec: '推荐',
-    desc: '异步非阻塞，高效稳定。直接向目标窗口队列投递 WM_KEYDOWN/WM_KEYUP 消息' },
-  { v: 'sendmsg' as const, name: 'SendMsg', eng: 'WinAPI', rec: '稳定',
-    desc: 'AttachThreadInput + SendMessage 同步投递。正确更新目标线程输入状态，兼容性好' },
-  { v: 'seize' as const, name: 'Seize', eng: 'SendInput', rec: '前台',
-    desc: 'SendInput API 合成系统键盘输入。需要目标窗口在前台，受 UIPI 限制' },
+  { v: 'postmsg' as const, name: 'PostMsg', eng: 'PostMessage', rec: 'keyboard.postmsg.rec',
+    desc: 'keyboard.postmsg.desc' },
+  { v: 'sendmsg' as const, name: 'SendMsg', eng: 'WinAPI', rec: 'keyboard.sendmsg.rec',
+    desc: 'keyboard.sendmsg.desc' },
+  { v: 'seize' as const, name: 'Seize', eng: 'SendInput', rec: 'keyboard.seize.rec',
+    desc: 'keyboard.seize.desc' },
 ]
 
 export const MOUSE_METHOD: Record<string, string> = {

@@ -3,6 +3,7 @@ import { FileText, Monitor, Settings, Cpu } from 'lucide-react'
 import { ActionBtn, ThemeBtn, Tooltip } from './Toolkit'
 import { addLog } from '../lib/bridge'
 import { Play, Square } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 
 export function TopBar({
   tab,
@@ -23,23 +24,24 @@ export function TopBar({
   onToggleTheme: () => void
   devMode: boolean
 }) {
+  const { t } = useTranslation()
   // ── Tab definitions ──
   const tabs: Array<{ id: 'Monitor' | 'Log' | 'Settings' | 'DevTools'; icon: React.ReactNode; label: string; tip: string }> = [
-    { id: 'Monitor' as const, icon: <Monitor className="w-3.5 h-3.5" />, label: 'Monitor', tip: '实时预览与控制 — 远程操作目标窗口' },
-    { id: 'Log' as const, icon: <FileText className="w-3.5 h-3.5" />, label: 'Log', tip: '查看当前会话与历史日志文件' },
+    { id: 'Monitor' as const, icon: <Monitor className="w-3.5 h-3.5" />, label: t('topbar.monitor'), tip: t('topbar.monitor_tip') },
+    { id: 'Log' as const, icon: <FileText className="w-3.5 h-3.5" />, label: t('topbar.log'), tip: t('topbar.log_tip') },
     {
       id: 'Settings' as const,
       icon: <Settings className="w-3.5 h-3.5" />,
-      label: 'Settings',
-      tip: '配置截图、模型、主题与输入映射',
+      label: t('topbar.settings'),
+      tip: t('topbar.settings_tip'),
     },
   ]
   if (devMode) {
     tabs.push({
       id: 'DevTools' as const,
       icon: <Cpu className="w-3.5 h-3.5" />,
-      label: 'DevTools',
-      tip: '开发人员工具 — Test Target · Self-Test · Frame Dump · UI Demos（与 Dev/Prod 构建版本无关）',
+      label: t('topbar.devtools'),
+      tip: t('topbar.devtools_tip'),
     })
   }
   return (
@@ -67,8 +69,8 @@ export function TopBar({
         {running ? (
           <ActionBtn
             icon={<Square className="w-3.5 h-3.5" />}
-            label="Stop"
-            title="停止所有运行中的任务"
+            label={t('topbar.stop')}
+            title={t('topbar.stop_tip')}
             variant="danger"
             onClick={() => {
               onStop()
@@ -78,8 +80,8 @@ export function TopBar({
         ) : (
           <ActionBtn
             icon={<Play className="w-3.5 h-3.5" />}
-            label="Start"
-            title="启动agent任务"
+            label={t('topbar.start')}
+            title={t('topbar.start_tip')}
             variant="primary"
             onClick={() => {
               onStart()

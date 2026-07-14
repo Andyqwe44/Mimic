@@ -4,6 +4,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { FileText, ChevronDown, ArrowDown, Copy, Check, RefreshCw, Pin } from 'lucide-react'
 import { Tooltip } from './Toolkit'
+import { useTranslation } from 'react-i18next'
 import { logMgr, addLog, hostCall } from '../lib/bridge'
 import { COLLAPSIBLE_HEADER } from '../lib/constants'
 import type { HistoryFile } from '../lib/types'
@@ -23,6 +24,8 @@ export function LogPanel({
   pinned?: boolean
   onTogglePin?: () => void
 }) {
+  const { t } = useTranslation()
+
   // ── Panel state ──
   const [localExpanded, setLocalExpanded] = useState(true)
   const expanded = exp !== undefined ? exp : localExpanded
@@ -109,11 +112,11 @@ export function LogPanel({
           >
             <div className="flex items-center gap-2">
               <FileText className="w-4 h-4 text-accent shrink-0" />
-              <span className="text-sm font-medium text-text-primary">Current Session</span>
+              <span className="text-sm font-medium text-text-primary">{t('log.current_session')}</span>
               <span className="text-xs text-text-muted">({displayLines.length})</span>
             </div>
             <div className="flex items-center gap-0.5">
-              <Tooltip text={scrolledUp ? '滚动到底部' : '已在底部'}>
+              <Tooltip text={scrolledUp ? t('log.scroll_bottom') : t('log.already_bottom')}>
                 <button
                   onClick={(e) => {
                     e.stopPropagation()
@@ -128,7 +131,7 @@ export function LogPanel({
                   <ArrowDown className="w-3.5 h-3.5" />
                 </button>
               </Tooltip>
-              <Tooltip text="复制全部日志">
+              <Tooltip text={t('log.copy_all')}>
                 <button
                   onClick={(e) => {
                     e.stopPropagation()
@@ -162,7 +165,7 @@ export function LogPanel({
               >
                 <div className="min-h-full flex flex-col justify-end space-y-0.5">
                   {displayLines.length === 0 ? (
-                    <div className="text-text-muted text-center py-4">No logs yet</div>
+                    <div className="text-text-muted text-center py-4">{t('log.no_logs_yet')}</div>
                   ) : (
                     displayLines.map((l, i) => {
                       const last = i === displayLines.length - 1
@@ -240,11 +243,11 @@ export function LogPanel({
                     {f.name}
                   </span>
                   <span className="text-xs text-text-muted shrink-0">
-                    {f.lines.length > 0 ? `${f.lines.length} lines` : 'click to load'}
+                    {f.lines.length > 0 ? `${f.lines.length} lines` : t('log.click_to_load')}
                   </span>
                 </div>
                 <div className="flex items-center gap-0.5">
-                  <Tooltip text="刷新文件内容">
+                  <Tooltip text={t('log.refresh_file')}>
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
@@ -269,7 +272,7 @@ export function LogPanel({
                       <RefreshCw className="w-3.5 h-3.5" />
                     </button>
                   </Tooltip>
-                  <Tooltip text={cardsScrolledUp.has(fi) ? '滚动到底部' : '已在底部'}>
+                  <Tooltip text={cardsScrolledUp.has(fi) ? t('log.scroll_bottom') : t('log.already_bottom')}>
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
@@ -282,7 +285,7 @@ export function LogPanel({
                       <ArrowDown className="w-3.5 h-3.5" />
                     </button>
                   </Tooltip>
-                  <Tooltip text="复制文件内容">
+                  <Tooltip text={t('log.copy_file_content')}>
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
@@ -330,7 +333,7 @@ export function LogPanel({
                   >
                     <div className="min-h-full flex flex-col justify-end space-y-0.5">
                       {f.lines.length === 0 ? (
-                        <div className="text-text-muted text-center py-4">Loading...</div>
+                        <div className="text-text-muted text-center py-4">{t('common.loading')}</div>
                       ) : (
                         f.lines.map((l, i) => {
                           const last = i === f.lines.length - 1
@@ -359,7 +362,7 @@ export function LogPanel({
         })}
         {historyFiles.length === 0 && (
           <div className="text-center py-6 text-xs text-text-muted">
-            {entries.length === 0 ? 'No logs yet' : 'No history files found'}
+            {entries.length === 0 ? t('log.no_logs_yet') : t('log.no_history')}
           </div>
         )}
       </div>
@@ -388,11 +391,11 @@ export function LogPanel({
           <span className="w-5 h-5 rounded bg-amber-400/15 flex items-center justify-center shrink-0">
             <FileText className="w-3 h-3 text-amber-400" />
           </span>
-          <span className="text-sm font-medium text-text-primary">Log</span>
+          <span className="text-sm font-medium text-text-primary">{t('log.title')}</span>
           <span className="text-xs text-text-muted">({displayLines.length})</span>
         </div>
         <div className="flex items-center gap-0.5">
-          <Tooltip text={scrolledUp ? '滚动到底部' : '已在底部'}>
+          <Tooltip text={scrolledUp ? t('log.scroll_bottom') : t('log.already_bottom')}>
             <button
               onClick={(e) => {
                 e.stopPropagation()
@@ -407,7 +410,7 @@ export function LogPanel({
               <ArrowDown className="w-3.5 h-3.5" />
             </button>
           </Tooltip>
-          <Tooltip text="复制日志">
+          <Tooltip text={t('log.copy_log')}>
             <button
               onClick={(e) => {
                 e.stopPropagation()
@@ -425,7 +428,7 @@ export function LogPanel({
             </button>
           </Tooltip>
           {pinned !== undefined && onTogglePin && (
-            <Tooltip text={pinned ? '取消固定 — 允许自动布局调整' : '固定面板 — 不受自动布局影响'}>
+            <Tooltip text={pinned ? t('log.unpin_tip') : t('log.pin_tip')}>
               <button
                 onClick={(e) => {
                   e.stopPropagation()
@@ -451,7 +454,7 @@ export function LogPanel({
           <div ref={scrollRef} className="h-[180px] overflow-y-auto p-4">
             {displayLines.length === 0 ? (
               <div className="flex items-center justify-center h-full text-sm text-text-muted">
-                No logs
+                {t('log.no_logs')}
               </div>
             ) : (
               <div className="space-y-1 font-mono text-xs text-text-muted pt-1">

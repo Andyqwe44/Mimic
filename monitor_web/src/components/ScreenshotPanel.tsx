@@ -4,6 +4,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Camera, Play, Square, ChevronDown, Pin } from 'lucide-react'
 import { Tooltip } from './Toolkit'
+import { useTranslation } from 'react-i18next'
 import { COLLAPSIBLE_HEADER, METHOD_SHORT } from '../lib/constants'
 import { addLog } from '../lib/bridge'
 import type { WindowInfo } from '../lib/types'
@@ -48,6 +49,8 @@ export function ScreenshotPanel({
   onFps?: (fps: number) => void
   onDims?: (w: number, h: number) => void
 }) {
+  const { t } = useTranslation()
+
   // ── Canvas state ──
   const [hasContent, setHasContent] = useState(false)
   useEffect(() => {
@@ -181,7 +184,7 @@ export function ScreenshotPanel({
           <span className="w-5 h-5 rounded bg-violet-400/15 flex items-center justify-center shrink-0">
             <Camera className="w-3 h-3 text-violet-400" />
           </span>
-          <span className="text-sm font-medium text-text-primary shrink-0">Screenshot</span>
+          <span className="text-sm font-medium text-text-primary shrink-0">{t('screenshot.title')}</span>
           {capMethod && (
             <span className="text-[11px] font-medium text-accent bg-accent/10 px-1.5 py-0.5 rounded shrink-0">
               {METHOD_SHORT[capMethod] || capMethod.toUpperCase()}
@@ -195,7 +198,7 @@ export function ScreenshotPanel({
           )}
         </div>
         <div className="flex items-center gap-0.5 shrink-0">
-          <Tooltip text="单帧截图">
+          <Tooltip text={t('screenshot.snapshot_tip')}>
             <button
               onClick={(e) => {
                 e.stopPropagation()
@@ -207,7 +210,7 @@ export function ScreenshotPanel({
             </button>
           </Tooltip>
           {previewing ? (
-            <Tooltip text="停止实时预览">
+            <Tooltip text={t('screenshot.stop_preview_tip')}>
               <button
                 onClick={(e) => {
                   e.stopPropagation()
@@ -219,7 +222,7 @@ export function ScreenshotPanel({
               </button>
             </Tooltip>
           ) : (
-            <Tooltip text="开始实时预览">
+            <Tooltip text={t('screenshot.start_preview_tip')}>
               <button
                 onClick={(e) => {
                   e.stopPropagation()
@@ -231,7 +234,7 @@ export function ScreenshotPanel({
               </button>
             </Tooltip>
           )}
-          <Tooltip text={pinned ? '取消固定 — 允许自动布局调整' : '固定面板 — 不受自动布局影响'}>
+          <Tooltip text={pinned ? t('screenshot.unpin_tip') : t('screenshot.pin_tip')}>
             <button
               onClick={(e) => {
                 e.stopPropagation()
@@ -261,7 +264,7 @@ export function ScreenshotPanel({
               {canvasEl}
               {!hasContent && (
                 <span className="text-sm text-text-muted">
-                  点击 📷 单帧截图 或 ▶ 实时预览
+                  {t('screenshot.empty_hint')}
                 </span>
               )}
             </div>

@@ -3,6 +3,7 @@ import { useState, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { Moon, Sun } from 'lucide-react'
 import type { ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 import { BTN_SIZE_CLASS, btnAutoSize, H } from '../lib/design'
 
 // ── Tooltip: 300ms delay, portal to body, smart positioning ──
@@ -119,8 +120,9 @@ export function ActionBtn({
 
 // ── ThemeBtn ──
 export function ThemeBtn({ dark, onToggle }: { dark: boolean; onToggle: () => void }) {
+  const { t } = useTranslation()
   return (
-    <Tooltip text={dark ? '切换亮色主题' : '切换暗色主题'}>
+    <Tooltip text={dark ? t('theme.switch_light') : t('theme.switch_dark')}>
       <button
         onClick={onToggle}
         className="p-2 rounded-md hover:bg-bg-hover transition-colors"

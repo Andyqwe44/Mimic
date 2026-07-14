@@ -2,6 +2,7 @@
 // Renders ScreenshotPanel in bare mode, adds toolbar + canvas overlay for
 // mouse/keyboard input mapping. Supports click/dblclick/drag/wheel/keyboard.
 import { useState, useRef, useCallback, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Camera, Play, Square, MousePointer2, Power } from 'lucide-react'
 import { ActionBtn, Tooltip } from './Toolkit'
 import { STATE_LABEL, codeToName, MOUSE_METHOD, KEY_METHOD } from '../lib/constants'
@@ -118,14 +119,17 @@ export function MonitorView({
   selfTargetMode?: 'warn' | 'exclude'
   apiRef?: React.MutableRefObject<MonitorApi | null>
 }) {
+  const { t } = useTranslation()
   const isDesktop = selWin.hwnd === 0
-  const stateLabel = STATE_LABEL[winState] || winState
+  const stateLabel = t(STATE_LABEL[winState] || winState)
 
   // ── Derived input methods from mode ──
   // Desktop (hwnd=0) only supports sendinput — postmessage/winapi need a real window.
   const mM = isDesktop ? 'sendinput' : MOUSE_METHOD[mouseMode ?? 'background']
   const kM = isDesktop ? 'sendinput' : KEY_METHOD[keyMode ?? 'postmsg']
   const sendMove = isDesktop || (mouseMode ?? 'background') === 'seize'   // desktop always sends move
+  const mouseModeShort = mouseMode === 'seize' ? t('monitor.mouse_seize') : mouseMode === 'semi' ? t('monitor.mouse_semi') : t('monitor.mouse_bg')
+  const keyModeShort = keyMode === 'seize' ? t('monitor.key_seize') : keyMode === 'sendmsg' ? t('monitor.key_sendmsg') : t('monitor.key_postmsg')
 
   // ═══ Interaction state ═══
   const [focused, setFocused] = useState(false)    // canvas has keyboard focus
@@ -592,7 +596,7 @@ export function MonitorView({
         {/* Middle: spacer */}
         <span className="flex-1" />
         {/* Input mapping toggle */}
-        <Tooltip text={`输入映射 (${mappingHotkey})`}>
+        <Tooltip text={t('monitor.mapping_tip', { hotkey: mappingHotkey })}>
           <button
             onClick={() => {
               setMappingEnabled(!mappingEnabled)
@@ -605,30 +609,30 @@ export function MonitorView({
             }`}
           >
             <Power className={`w-3 h-3 ${mappingEnabled ? 'text-accent' : 'text-text-muted'}`} />
-            <span>映射</span>
+            <span>{t('monitor.mapping')}</span>
           </button>
         </Tooltip>
         {/* Right: Snapshot → Preview/Stop (right-aligned) */}
         <ActionBtn
           icon={<Camera className="w-3.5 h-3.5" />}
-          label="Snapshot"
-          title="单帧截图"
+          label={t('monitor.snapshot')}
+          title={t('monitor.snapshot_tip')}
           variant="primary"
           onClick={onTakeSnapshot}
         />
         {previewing ? (
           <ActionBtn
             icon={<Square className="w-3.5 h-3.5" />}
-            label="Stop"
-            title="停止实时预览"
+            label={t('monitor.stop')}
+            title={t('monitor.stop_tip')}
             variant="danger"
             onClick={onTogglePreview}
           />
         ) : (
           <ActionBtn
             icon={<Play className="w-3.5 h-3.5" />}
-            label="Preview"
-            title="开始实时预览"
+            label={t('monitor.preview')}
+            title={t('monitor.preview_tip')}
             variant="outline-accent"
             onClick={onTogglePreview}
           />
@@ -706,25 +710,25 @@ export function MonitorView({
             <div className="absolute bottom-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-lg bg-bg-tertiary/90 text-xs text-text-secondary flex items-center gap-1.5 shadow-lg backdrop-blur-sm pointer-events-none z-10">
               <MousePointer2 className={`w-3.5 h-3.5 ${focused ? 'text-accent animate-pulse' : 'text-text-muted'}`} />
               {focused
-                ? `远程控制中 · 鼠标${mouseMode === 'seize' ? 'Seize' : mouseMode === 'semi' ? 'Semi' : 'Bg'} · 键盘${keyMode === 'seize' ? 'Seize' : keyMode === 'sendmsg' ? 'SendMsg' : 'PostMsg'} · Esc 释放`
-                : `悬停移动光标 · 点击控制 · 鼠标${mouseMode === 'seize' ? 'Seize' : mouseMode === 'semi' ? 'Semi' : 'Bg'}`}
+                ? t('monitor.remote_active', { mm: mouseModeShort, km: keyModeShort })
+                : t('monitor.remote_hover', { mm: mouseModeShort })}
             </div>
           )}
           {mouseOn && isDesktop && previewing && mappingEnabled && (
             <div className="absolute bottom-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-lg bg-bg-tertiary/90 text-xs text-text-secondary flex items-center gap-1.5 shadow-lg backdrop-blur-sm pointer-events-none z-10">
               <MousePointer2 className="w-3.5 h-3.5 text-accent" />
-              桌面预览 · SendInput（强制） · {focused ? '点击/键盘已激活' : '点击获取焦点'}
+              {t('monitor.desktop_preview', { state: focused ? t('monitor.desktop_focused') : t('monitor.desktop_unfocused') })}
             </div>
           )}
           {mouseOn && isDesktop && previewing && mappingEnabled && isSelfTarget && selfTargetMode === 'warn' && (
             <div className="absolute top-12 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-lg bg-error/15 text-xs text-error flex items-center gap-1.5 shadow-lg backdrop-blur-sm pointer-events-none z-10">
-              ⚠ 映射目标为 GAM 自身窗口 — 可在 Settings 中切换为「排除窗口」模式
+              {t('monitor.self_target_warn')}
             </div>
           )}
           {mouseOn && !isDesktop && previewing && !mappingEnabled && (
             <div className="absolute bottom-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-lg bg-bg-tertiary/90 text-xs text-text-muted flex items-center gap-1.5 shadow-lg backdrop-blur-sm pointer-events-none z-10">
               <Power className="w-3.5 h-3.5" />
-              预览中 · 按 {mappingHotkey} 或点击「映射」开启控制
+              {t('monitor.preview_no_mapping', { hotkey: mappingHotkey })}
             </div>
           )}
 
@@ -732,9 +736,9 @@ export function MonitorView({
           {!previewing && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div className="text-center space-y-1">
-                <div className="text-sm text-text-muted">No preview active</div>
+                <div className="text-sm text-text-muted">{t('monitor.no_preview')}</div>
                 <div className="text-xs text-text-tertiary">
-                  点击右上角 Preview 开始实时预览
+                  {t('monitor.no_preview_hint')}
                 </div>
               </div>
             </div>

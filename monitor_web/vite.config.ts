@@ -30,6 +30,11 @@ export default defineConfig({
       protocol: 'ws',
       host: 'localhost',
     },
+    // Watch version.h + settings.default.json so frontend picks up changes
+    // without manual dev-server restart (铁律 8: version.h is single source).
+    watch: {
+      ignored: ['!**/monitor_app/src/version.h', '!**/monitor_app/build/config/settings.default.json'],
+    },
   },
 
   clearScreen: false,              // keep Vite log output visible
