@@ -2,6 +2,7 @@
 // NOTE: "DevTools" ≠ "Dev build" — DevTools is the developer-tools panel
 // accessible from both Dev and Prod builds via Settings → Dev mode toggle.
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Cpu, Play, Pencil, FolderOpen, Crosshair } from 'lucide-react'
 import { Tooltip } from './Toolkit'
 import { SettingsCard } from './SettingsView'
@@ -32,6 +33,7 @@ export function DevToolsView({
   onDevInjectSelfTest?: (state: any) => void
   onDevInjectAgent?: (connected: boolean) => void
 }) {
+  const { t } = useTranslation()
   const [testTargetRunning, setTestTargetRunning] = useState(false)
   const [selfTestPerCell, setSelfTestPerCell] = useState(5)
 
@@ -40,18 +42,18 @@ export function DevToolsView({
       {/* ── Test Target Launcher ── */}
       <SettingsCard
         icon={<Play className="w-4 h-4 text-accent-secondary" />}
-        title="Test Target"
+        title={t('devtools.test_target')}
         defaultExpanded={true}
       >
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-sm text-text-primary">GAM Test Target</div>
+              <div className="text-sm text-text-primary">{t('devtools.test_target')}</div>
               <div className="text-xs text-text-muted">
-                启动独立测试窗口，用于验证输入映射
+                {t('devtools.test_target_desc')}
               </div>
             </div>
-            <Tooltip text={testTargetRunning ? '关闭 GAM Test Target 测试窗口' : '打开 GAM Test Target 测试窗口，可被 GAM 捕获并测试鼠标/键盘映射'}>
+            <Tooltip text={testTargetRunning ? t('devtools.test_target_close_tip') : t('devtools.test_target_launch_tip')}>
             <button
               onClick={() => {
                 hostCall('launch_test_target')
@@ -73,7 +75,7 @@ export function DevToolsView({
               }`}
             >
               <Play className={`w-3 h-3 ${testTargetRunning ? 'fill-current' : ''}`} />
-              {testTargetRunning ? 'Close' : 'Launch'}
+              {testTargetRunning ? t('devtools.test_target_close') : t('devtools.test_target_launch')}
             </button>
             </Tooltip>
           </div>
@@ -83,16 +85,16 @@ export function DevToolsView({
       {/* ── Self-Test (mapping calibration) ── */}
       <SettingsCard
         icon={<Crosshair className="w-4 h-4 text-accent-secondary" />}
-        title="Self-Test 映射自检"
+        title={t('devtools.selftest')}
         defaultExpanded={true}
       >
         <div className="space-y-3">
           <div>
             <div className="text-xs text-text-muted mb-2">
-              自动跑完整流程（选窗→预览→映射→密集点击），比对 test_target 反馈校准映射
+              {t('devtools.selftest_desc')}
             </div>
             <div className="flex items-center gap-2">
-              <Tooltip text="每格采样密度（N×N 子网格）。越大越细，用时越久。">
+              <Tooltip text={t('devtools.selftest_density_tip')}>
                 <select
                   value={selfTestPerCell}
                   onChange={(e) => setSelfTestPerCell(Number(e.target.value))}
@@ -100,11 +102,11 @@ export function DevToolsView({
                   className="h-7 rounded-lg border border-border bg-bg-primary px-2 text-xs outline-none focus:border-accent disabled:opacity-50"
                 >
                   {[3, 5, 8].map((n) => (
-                    <option key={n} value={n}>{n}×{n}/格</option>
+                    <option key={n} value={n}>{n}×{n}{t('devtools.selftest_density_unit')}</option>
                   ))}
                 </select>
               </Tooltip>
-              <Tooltip text={selfTestRunning ? '自检进行中…' : '一键自检：复用真实用户操作路径，全窗密集点击并比对反馈'}>
+              <Tooltip text={selfTestRunning ? t('devtools.selftest_running_tip') : t('devtools.selftest_run_tip')}>
                 <button
                   onClick={() => onRunSelfTest?.(selfTestPerCell)}
                   disabled={selfTestRunning}
@@ -115,7 +117,7 @@ export function DevToolsView({
                   }`}
                 >
                   <Crosshair className="w-3 h-3" />
-                  {selfTestRunning ? '运行中' : 'Self-Test'}
+                  {selfTestRunning ? t('devtools.selftest_running') : t('devtools.selftest_run')}
                 </button>
               </Tooltip>
             </div>
@@ -126,18 +128,18 @@ export function DevToolsView({
       {/* ── Frame Dump ── */}
       <SettingsCard
         icon={<Pencil className="w-4 h-4 text-accent-secondary" />}
-        title="Frame Dump / 帧保存"
+        title={t('devtools.frame_dump')}
         defaultExpanded={true}
       >
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-sm text-text-primary">Save single-frame captures</div>
+              <div className="text-sm text-text-primary">{t('devtools.frame_dump_capture')}</div>
               <div className="text-xs text-text-muted">
-                Save each 📷 snapshot as PNG to disk
+                {t('devtools.frame_dump_capture_desc')}
               </div>
             </div>
-            <Tooltip text="开启后每次截图自动保存为 PNG 文件到 Dump dir">
+            <Tooltip text={t('devtools.frame_dump_capture_tip')}>
             <button
               onClick={() => {
                 const v = !saveCaptureFrames
@@ -154,12 +156,12 @@ export function DevToolsView({
           </div>
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-sm text-text-primary">Save live preview frames</div>
+              <div className="text-sm text-text-primary">{t('devtools.frame_dump_stream')}</div>
               <div className="text-xs text-text-muted">
-                Save each ▶ preview frame as PNG to disk
+                {t('devtools.frame_dump_stream_desc')}
               </div>
             </div>
-            <Tooltip text="开启后每次预览帧自动保存为 PNG 文件到 Dump dir（注意磁盘空间）">
+            <Tooltip text={t('devtools.frame_dump_stream_tip')}>
             <button
               onClick={() => {
                 const v = !saveStreamFrames
@@ -175,15 +177,15 @@ export function DevToolsView({
             </Tooltip>
           </div>
           <div className="flex items-center gap-2">
-            <label className="text-sm text-text-secondary w-24 shrink-0">Dump dir</label>
-            <Tooltip text="帧保存路径" className="flex-1 min-w-0">
+            <label className="text-sm text-text-secondary w-24 shrink-0">{t('devtools.frame_dump_dir')}</label>
+            <Tooltip text={t('devtools.frame_dump_dir_tip')} className="flex-1 min-w-0">
               <input
-                value={frameDumpDir || '(not set)'}
+                value={frameDumpDir || t('devtools.frame_dump_not_set')}
                 readOnly
                 className="w-full h-7 rounded-lg border border-border bg-bg-primary px-3 text-sm text-text-muted outline-none cursor-default font-mono text-xs truncate"
               />
             </Tooltip>
-            <Tooltip text="选择保存目录">
+            <Tooltip text={t('devtools.frame_dump_pick_dir_tip')}>
               <button
                 onClick={async () => {
                   try {
@@ -204,7 +206,7 @@ export function DevToolsView({
                 <Pencil className="w-4 h-4" />
               </button>
             </Tooltip>
-            <Tooltip text="在资源管理器中打开保存目录">
+            <Tooltip text={t('devtools.frame_dump_open_dir_tip')}>
               <button
                 onClick={() => {
                   if (frameDumpDir)
@@ -222,21 +224,21 @@ export function DevToolsView({
       {/* ── Misc ── */}
       <SettingsCard
         icon={<Cpu className="w-4 h-4 text-accent-secondary" />}
-        title="Misc / 杂项"
+        title={t('devtools.misc')}
         defaultExpanded={true}
       >
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-sm text-text-primary">预览骨架屏</div>
-              <div className="text-xs text-text-muted">显示启动骨架屏，3 秒后自动消失</div>
+              <div className="text-sm text-text-primary">{t('devtools.misc_skeleton')}</div>
+              <div className="text-xs text-text-muted">{t('devtools.misc_skeleton_desc')}</div>
             </div>
-            <Tooltip text="预览应用启动时的骨架屏效果，3 秒后自动关闭">
+            <Tooltip text={t('devtools.misc_skeleton_tip')}>
               <button
                 onClick={() => onPreviewSkeleton?.()}
                 className="px-3 h-7 rounded-lg text-xs bg-bg-tertiary hover:opacity-80 text-text-primary transition-opacity"
               >
-                预览 (3s)
+                {t('devtools.misc_skeleton_btn')}
               </button>
             </Tooltip>
           </div>
@@ -246,27 +248,27 @@ export function DevToolsView({
       {/* ── UI Demos ── */}
       <SettingsCard
         icon={<Cpu className="w-4 h-4 text-accent-secondary" />}
-        title="UI Demos / 界面预览"
+        title={t('devtools.ui_demos')}
         defaultExpanded={true}
       >
         <div className="space-y-3">
           <div className="text-xs text-text-muted">
-            纯前端假数据，不调后端。用于预览难以手动触发的 UI 状态。
+            {t('devtools.ui_demos_desc')}
           </div>
 
           {/* ─ Update Modal demos ─ */}
           <div className="text-xs font-medium text-accent-secondary mb-1.5">Update Modal</div>
           <div className="flex flex-wrap gap-1.5 mb-3">
             {([
-              ['正在检查', () => onDevInjectUpdate?.({
+              [t('devtools.demo_checking'), () => onDevInjectUpdate?.({
                 status: 'checking', current: appVersion.replace(/^v/, ''),
                 latest: '', name: '', body: '', url: '', _dev: true,
               })],
-              ['已是最新', () => onDevInjectUpdate?.({
+              [t('devtools.demo_latest'), () => onDevInjectUpdate?.({
                 status: 'latest', current: appVersion.replace(/^v/, ''),
                 latest: appVersion.replace(/^v/, ''), name: '', body: '', url: '', _dev: true,
               })],
-              ['发现更新', () => {
+              [t('devtools.demo_update'), () => {
                 const cur = appVersion.replace(/^v/, '')
                 onDevInjectUpdate?.({
                   status: 'update', current: cur, latest: '9.9.99',
@@ -286,7 +288,7 @@ export function DevToolsView({
                   mandatory: false, mode: 'incremental', _dev: true,
                 })
               }],
-              ['检查失败', () => onDevInjectUpdate?.({
+              [t('devtools.demo_error'), () => onDevInjectUpdate?.({
                 status: 'error', current: appVersion.replace(/^v/, ''),
                 latest: '', name: '', body: '', url: '',
                 error: '无法连接更新服务器 (模拟错误)\n请检查网络连接后重试。',
@@ -301,7 +303,7 @@ export function DevToolsView({
           </div>
           <div className="flex flex-wrap gap-1.5 mb-3">
             {([
-              ['强制更新', () => {
+              [t('devtools.demo_mandatory'), () => {
                 const cur = appVersion.replace(/^v/, '')
                 onDevInjectUpdate?.({
                   status: 'update', current: cur, latest: '9.9.99',
@@ -311,7 +313,7 @@ export function DevToolsView({
                   mandatory: false, mode: 'incremental', _dev: true,
                 })
               }],
-              ['全量更新', () => {
+              [t('devtools.demo_full'), () => {
                 const cur = appVersion.replace(/^v/, '')
                 onDevInjectUpdate?.({
                   status: 'update', current: cur, latest: '9.9.99',
@@ -341,9 +343,9 @@ export function DevToolsView({
                   message: '版本跨度较大，需完整下载全部文件。', mandatory: false, mode: 'full', _dev: true,
                 })
               }],
-              ['下载进度', () => onDevInjectDownload?.('download')],
-              ['下载失败', () => onDevInjectDownload?.('error')],
-              ['续传(有残留)', () => {
+              [t('devtools.demo_download'), () => onDevInjectDownload?.('download')],
+              [t('devtools.demo_download_fail'), () => onDevInjectDownload?.('error')],
+              [t('devtools.demo_resume'), () => {
                 const cur = appVersion.replace(/^v/, '')
                 const fakeDiff = [
                   { path: 'bin/monitor_app.exe', size: 524288, dl: 491520 },
@@ -379,8 +381,8 @@ export function DevToolsView({
           <div className="text-xs font-medium text-accent-secondary mb-1.5">Self-Test Modal</div>
           <div className="flex flex-wrap gap-1.5 mb-3">
             {([
-              ['自检运行中', () => onDevInjectSelfTest?.({ phase: 'running', done: 312, total: 625 })],
-              ['自检完成(热力图)', () => {
+              [t('devtools.demo_selftest_running'), () => onDevInjectSelfTest?.({ phase: 'running', done: 312, total: 625 })],
+              [t('devtools.demo_selftest_done'), () => {
                 const grid = 5
                 const cells: number[][] = []
                 const cellCounts: number[][] = []
@@ -403,7 +405,7 @@ export function DevToolsView({
                   },
                 })
               }],
-              ['自检错误', () => onDevInjectSelfTest?.({ phase: 'error', error: 'test_target 连接超时 (模拟)' })],
+              [t('devtools.demo_selftest_error'), () => onDevInjectSelfTest?.({ phase: 'error', error: 'test_target 连接超时 (模拟)' })],
             ] as [string, () => void][]).map(([label, fn]) => (
               <button key={label} onClick={fn}
                 className="px-2.5 h-7 rounded-md text-[11px] font-medium bg-accent-secondary/10 text-accent-secondary hover:bg-accent-secondary/20 border border-accent-secondary/20 transition-colors">
@@ -416,8 +418,8 @@ export function DevToolsView({
           <div className="text-xs font-medium text-accent-secondary mb-1.5">Agent / 连接状态</div>
           <div className="flex flex-wrap gap-1.5">
             {([
-              ['Agent 已连接', () => onDevInjectAgent?.(true)],
-              ['Agent 断开', () => onDevInjectAgent?.(false)],
+              [t('devtools.demo_agent_connected'), () => onDevInjectAgent?.(true)],
+              [t('devtools.demo_agent_disconnected'), () => onDevInjectAgent?.(false)],
             ] as [string, () => void][]).map(([label, fn]) => (
               <button key={label} onClick={fn}
                 className="px-2.5 h-7 rounded-md text-[11px] font-medium bg-accent-secondary/10 text-accent-secondary hover:bg-accent-secondary/20 border border-accent-secondary/20 transition-colors">

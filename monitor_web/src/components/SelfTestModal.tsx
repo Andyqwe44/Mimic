@@ -1,4 +1,5 @@
 // ═══ Self-Test report modal — mapping calibration results ═══
+import { useTranslation } from 'react-i18next'
 import { X, Crosshair, AlertTriangle } from 'lucide-react'
 import type { SelfTestState, SelfTestSummary } from '../lib/selftest'
 import { useScrollLock } from '../lib/useScrollLock'
@@ -57,6 +58,7 @@ export function SelfTestModal({
   // Lock body scroll while modal is visible (must be before early return)
   const modalActive = state.phase !== 'idle'
   useScrollLock(modalActive)
+  const { t } = useTranslation()
 
   if (state.phase === 'idle') return null
 
@@ -66,7 +68,7 @@ export function SelfTestModal({
         {/* Header */}
         <div className="flex items-center gap-2 mb-4">
           <Crosshair className="w-4 h-4 text-accent" />
-          <span className="text-sm font-semibold text-text-primary">映射自检 · Self-Test</span>
+          <span className="text-sm font-semibold text-text-primary">{t('selftest.title')}</span>
           <span className="flex-1" />
           {state.phase !== 'running' && (
             <button
@@ -82,7 +84,7 @@ export function SelfTestModal({
         {state.phase === 'running' && (
           <div className="space-y-3">
             <div className="text-sm text-text-secondary">
-              正在扫描点击并比对反馈… {state.done}/{state.total || '?'}
+              {t('selftest.running', { done: state.done, total: state.total || '?' })}
             </div>
             <div className="h-2 rounded-full bg-bg-tertiary overflow-hidden">
               <div
@@ -95,7 +97,7 @@ export function SelfTestModal({
                 onClick={onAbort}
                 className="px-3 h-8 rounded-md text-xs font-medium border border-error/40 text-error hover:bg-error/10 transition-colors"
               >
-                中止
+                {t('selftest.abort')}
               </button>
             </div>
           </div>
@@ -106,14 +108,14 @@ export function SelfTestModal({
           <div className="space-y-3">
             <div className="flex items-start gap-2 text-sm text-error">
               <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-              <span>自检失败：{state.error}</span>
+              <span>{t('selftest.error_prefix', { error: state.error })}</span>
             </div>
             <div className="flex justify-end">
               <button
                 onClick={onClose}
                 className="px-3 h-8 rounded-md text-xs font-medium border border-border text-text-secondary hover:bg-bg-hover transition-colors"
               >
-                关闭
+                {t('selftest.close')}
               </button>
             </div>
           </div>
@@ -126,29 +128,29 @@ export function SelfTestModal({
           return (
             <div className="space-y-4">
               {s.aborted && (
-                <div className="text-xs text-accent-secondary">⚠ 已中止 — 结果为部分样本</div>
+                <div className="text-xs text-accent-secondary">{t('selftest.aborted_note')}</div>
               )}
               {/* Stats */}
               <div className="grid grid-cols-3 gap-2">
-                <Stat label="样本" value={`${s.total}`} />
+                <Stat label={t('selftest.stat_samples')} value={`${s.total}`} />
                 <Stat
-                  label="收到反馈"
+                  label={t('selftest.stat_received')}
                   value={`${s.received} (${pct(s.received, s.total)})`}
                   tone={s.received === s.total ? 'text-success' : 'text-error'}
                 />
                 <Stat
-                  label="格子命中匹配"
+                  label={t('selftest.stat_cell_match')}
                   value={pct(s.cellMatch, s.total)}
                   tone={s.cellMatch === s.total ? 'text-success' : 'text-accent-secondary'}
                 />
-                <Stat label="HIT/MISS 匹配" value={pct(s.hitMatch, s.total)} />
+                <Stat label={t('selftest.stat_hit_match')} value={pct(s.hitMatch, s.total)} />
                 <Stat
-                  label="偏移向量 px"
+                  label={t('selftest.stat_offset')}
                   value={`(${s.meanDx.toFixed(1)}, ${s.meanDy.toFixed(1)})`}
                   tone={offsetTone}
                 />
                 <Stat
-                  label="误差 均值/最大"
+                  label={t('selftest.stat_error')}
                   value={`${s.meanAbs.toFixed(1)}/${s.maxAbs.toFixed(1)}`}
                   tone={offsetTone}
                 />
@@ -157,20 +159,20 @@ export function SelfTestModal({
               {/* Heatmap */}
               <div>
                 <div className="text-xs text-text-muted mb-2">
-                  格子命中率热力图（预期格 vs 实收格）
+                  {t('selftest.heatmap_title')}
                 </div>
                 <Heatmap summary={s} />
               </div>
 
               {/* Diagnosis hint */}
               <div className="text-[11px] text-text-muted leading-relaxed border-t border-border pt-3">
-                {s.received < s.total && <div>• 有未收到反馈的点 → 输入转发链路可能中断（检查鼠标模式/目标窗口）</div>}
-                {s.meanAbs > 4 && <div>• 平均像素误差偏大 → 可能存在坐标偏移/缩放/DPI 不匹配</div>}
+                {s.received < s.total && <div>{t('selftest.diag_missed')}</div>}
+                {s.meanAbs > 4 && <div>{t('selftest.diag_large_error')}</div>}
                 {Math.abs(s.meanDx) > 3 || Math.abs(s.meanDy) > 3 ? (
-                  <div>• 存在系统性偏移 ({s.meanDx.toFixed(1)},{s.meanDy.toFixed(1)})px → 常量偏移，建议校准原点</div>
+                  <div>{t('selftest.diag_systematic', { dx: s.meanDx.toFixed(1), dy: s.meanDy.toFixed(1) })}</div>
                 ) : null}
                 {s.received === s.total && s.cellMatch === s.total && s.meanAbs <= 1.5 && (
-                  <div className="text-success">• 映射精确，全部命中预期格，像素误差在取整范围内 ✓</div>
+                  <div className="text-success">{t('selftest.diag_perfect')}</div>
                 )}
               </div>
 
@@ -179,7 +181,7 @@ export function SelfTestModal({
                   onClick={onClose}
                   className="px-3 h-8 rounded-md text-xs font-medium border border-border text-text-secondary hover:bg-bg-hover transition-colors"
                 >
-                  关闭
+                  {t('selftest.close')}
                 </button>
               </div>
             </div>

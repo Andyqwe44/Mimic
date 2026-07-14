@@ -11,6 +11,7 @@ import {
   STATE_LABEL,
   cantCaptureMinimized,
 } from '../lib/constants'
+import { useTranslation } from 'react-i18next'
 import type { WindowInfo } from '../lib/types'
 
 export function ConnectionPanel({
@@ -44,6 +45,8 @@ export function ConnectionPanel({
   pinned?: boolean
   onTogglePin?: () => void
 }) {
+  const { t } = useTranslation()
+
   // ── Local state ──
   const [pickerOpen, setPickerOpen] = useState(false)
   const [selTitle, setSelTitle] = useState(' Entire Desktop')
@@ -94,7 +97,7 @@ export function ConnectionPanel({
           <span className="w-5 h-5 rounded bg-blue-400/15 flex items-center justify-center shrink-0">
             <MonitorUp className="w-3 h-3 text-blue-400" />
           </span>
-          <span className="text-sm font-medium text-text-primary shrink-0">Connection</span>
+          <span className="text-sm font-medium text-text-primary shrink-0">{t('connection.title')}</span>
           <span className="text-[11px] font-medium text-accent bg-accent/10 px-1.5 py-0.5 rounded shrink-0">
             {STATE_LABEL[winState] || winState}
           </span>
@@ -105,7 +108,7 @@ export function ConnectionPanel({
         <div className="flex items-center gap-2 ml-2">
           {cantCapture && <span className="text-xs text-error shrink-0">⚠</span>}
           {onTogglePin && (
-            <Tooltip text={pinned ? '取消固定 — 允许自动布局调整' : '固定面板 — 不受自动布局影响'}>
+            <Tooltip text={pinned ? t('connection.unpin_tip') : t('connection.pin_tip')}>
               <button
                 onClick={(e) => {
                   e.stopPropagation()
@@ -131,22 +134,21 @@ export function ConnectionPanel({
           <div className="max-h-[360px] overflow-y-auto p-3 space-y-2">
             {cantCapture && (
               <div className="text-xs text-error bg-red-500/10 rounded-lg px-2 py-1.5">
-                窗口已最小化，{streamMethod.toUpperCase()}{' '}
-                无法截取。请切换为 WGC 或将窗口恢复前台。
+                {t('connection.minimized_warning', { method: streamMethod.toUpperCase() })}
               </div>
             )}
             <div className="flex justify-between">
               <div className="flex items-center gap-1.5">
-                <Tooltip text="已选择的目标窗口（只读，请用Select选择）">
+                <Tooltip text={t('connection.window_title_tip')}>
                   <input
                     value={selTitle}
                     readOnly
-                    placeholder="Window Title"
+                    placeholder={t('connection.window_title')}
                     className="w-36 h-7 rounded-lg border border-border bg-bg-primary px-2 text-xs outline-none cursor-default text-text-muted truncate"
                   />
                 </Tooltip>
                 {onDisconnect && (
-                  <Tooltip text="断开当前窗口连接，回到桌面">
+                  <Tooltip text={t('connection.disconnect_tip')}>
                     <button
                       onClick={() => {
                         onDisconnect()
@@ -161,8 +163,8 @@ export function ConnectionPanel({
               </div>
               <ActionBtn
                 icon={<MonitorUp className="w-3.5 h-3.5" />}
-                label="Select"
-                title="选择要捕获的窗口或桌面"
+                label={t('connection.select')}
+                title={t('connection.select_tip')}
                 variant="primary"
                 onClick={() => {
                   setPickerOpen(true)
@@ -171,7 +173,7 @@ export function ConnectionPanel({
               />
             </div>
             <div className="flex justify-between">
-              <Tooltip text="AI模型服务器IP地址">
+              <Tooltip text={t('connection.ip_tip')}>
                 <input
                   value={ip}
                   onChange={(e) => {
@@ -186,7 +188,7 @@ export function ConnectionPanel({
                   className="w-[184px] h-7 rounded-lg border border-border bg-bg-primary px-2 text-xs text-text-primary outline-none focus:border-accent transition-colors placeholder:text-text-muted"
                 />
               </Tooltip>
-              <Tooltip text="Port端口号">
+              <Tooltip text={t('connection.port_tip')}>
                 <input
                   value={port}
                   onChange={(e) => {

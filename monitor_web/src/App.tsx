@@ -2,6 +2,7 @@
 // Orchestrates: tab routing, right-panel layout, capture state machine,
 // theme, pin lock, window polling, and resize handling.
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
 import { TopBar } from './components/TopBar'
 import { BottomBar } from './components/BottomBar'
 import { Tooltip } from './components/Toolkit'
@@ -17,6 +18,7 @@ import { LoadingScreen } from './components/LoadingScreen'
 import { hostCall, logMgr, addLog, applyTheme, onUpdateProgress, type UpdateProgressMsg } from './lib/bridge'
 import { runSelfTest, sleep, type SelfTestState } from './lib/selftest'
 import { cantCaptureMinimized } from './lib/constants'
+import { setSavedLocale } from './lib/i18n'
 import type { WindowInfo, Rect } from './lib/types'
 
 // ── Layout constants ──
@@ -29,6 +31,8 @@ const DEFAULT_RIGHT_WIDTH = 324
 const SPLASH_TEST_MS = 0
 
 export default function App() {
+  const { t, i18n } = useTranslation()
+
   // ═══ UI state ═══
   const [tab, setTab] = useState<'Monitor' | 'Log' | 'Settings' | 'DevTools'>('Settings')
   const [running, setRunning] = useState(false)
@@ -117,6 +121,15 @@ export default function App() {
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('light')
   const [systemDark, setSystemDark] = useState(false)
   const resolvedDark = theme === 'system' ? systemDark : theme === 'dark'
+
+  // ═══ Locale ═══
+  const [locale, setLocaleState] = useState(i18n.language || 'zh-CN')
+  const setLocale = useCallback((l: string) => {
+    setLocaleState(l)
+    i18n.changeLanguage(l)
+    setSavedLocale(l)
+    addLog(`[Lang] ${l}`)
+  }, [i18n])
 
   // ── Listen for OS-level dark mode changes ──
   useEffect(() => {
@@ -413,6 +426,11 @@ export default function App() {
       if (s.normalSecondaryAccent) setNormalSecondaryAccentState(s.normalSecondaryAccent)
       if (s.devAccent) setDevAccentState(s.devAccent)
       if (s.devSecondaryAccent) setDevSecondaryAccentState(s.devSecondaryAccent)
+      if (s.locale) {
+        setLocaleState(s.locale)
+        i18n.changeLanguage(s.locale)
+        setSavedLocale(s.locale)
+      }
       addLog('[settings] loaded')
     }).catch(() => {})
   }, [])
@@ -780,11 +798,12 @@ export default function App() {
       saveSetting('normalSecondaryAccent', normalSecondaryAccent)
       saveSetting('devAccent', devAccent)
       saveSetting('devSecondaryAccent', devSecondaryAccent)
+      saveSetting('locale', locale)
     }, 1000)
     return () => { if (saveTimeout.current) clearTimeout(saveTimeout.current) }
   }, [theme, mouseMode, keyMode, mappingHotkey, devMode, selfTargetMode,
       keepFiles, autoSnap, autoStream, snapMethod, streamMethod, renderMethod,
-      normalAccent, normalSecondaryAccent, devAccent, devSecondaryAccent])
+      normalAccent, normalSecondaryAccent, devAccent, devSecondaryAccent, locale])
 
   // ── Load screen info for aspect ratio + self-target detection ──
   useEffect(() => {
@@ -1113,6 +1132,7 @@ export default function App() {
               devAccent={devAccent} setDevAccentState={setDevAccentState}
               devSecondaryAccent={devSecondaryAccent} setDevSecondaryAccentState={setDevSecondaryAccentState}
               accent={accent} secondaryAccent={secondaryAccent}
+              locale={locale} setLocale={setLocale}
               selWin={selWindow} winState={winState}
               expectedCaptureState={expectedCaptureState}
               setExpectedCaptureState={setExpectedCaptureState}

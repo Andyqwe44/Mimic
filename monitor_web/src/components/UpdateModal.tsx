@@ -1,5 +1,6 @@
 // ═══ UpdateModal — check result: update available / already latest / checking / error ═══
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { X, Download, ArrowRight, FileStack, Package, ChevronDown, CheckCircle2, AlertTriangle, Loader2, RotateCcw } from 'lucide-react'
 import { ActionBtn } from './Toolkit'
 import { addLog, type UpdateProgressMsg } from '../lib/bridge'
@@ -43,30 +44,30 @@ function fmtSize(b: number): string {
 }
 
 // path → 友好功能名 (徽章). install 根目录相对路径分类.
-function fileRole(path: string): { label: string; core: boolean } {
+function fileRole(path: string, t: (key: string) => string): { label: string; core: boolean } {
   const p = path.toLowerCase()
   const base = p.split('/').pop() || p
-  if (base === 'monitor_app.exe') return { label: '主程序', core: true }
-  if (base.startsWith('updater')) return { label: '更新器', core: true }
-  if (base === 'version.json') return { label: '清单', core: true }
-  if (base.startsWith('logger')) return { label: '日志', core: false }
-  if (base.startsWith('capture')) return { label: '捕获', core: false }
-  if (base.startsWith('input')) return { label: '输入', core: false }
-  if (p.startsWith('frontend/')) return { label: '界面', core: false }
-  if (p.startsWith('config/')) return { label: '配置', core: false }
-  return { label: '文件', core: false }
+  if (base === 'monitor_app.exe') return { label: t('update.file_roles.main_exe'), core: true }
+  if (base.startsWith('updater')) return { label: t('update.file_roles.updater'), core: true }
+  if (base === 'version.json') return { label: t('update.file_roles.manifest'), core: true }
+  if (base.startsWith('logger')) return { label: t('update.file_roles.logger'), core: false }
+  if (base.startsWith('capture')) return { label: t('update.file_roles.capture'), core: false }
+  if (base.startsWith('input')) return { label: t('update.file_roles.input'), core: false }
+  if (p.startsWith('frontend/')) return { label: t('update.file_roles.frontend'), core: false }
+  if (p.startsWith('config/')) return { label: t('update.file_roles.config'), core: false }
+  return { label: t('update.file_roles.file'), core: false }
 }
 
 // 下载流量 (dl 优先, 缺省回退到解压大小).
 const traffic = (f: { size?: number; dl?: number }) => f.dl ?? f.size ?? 0
 
 // Header 标题 + 图标随状态变.
-function headerFor(status: UpdateStatus) {
+function headerFor(status: UpdateStatus, t: (key: string) => string) {
   switch (status) {
-    case 'checking': return { title: '检查更新', icon: <Loader2 className="w-5 h-5 text-accent animate-spin" /> }
-    case 'latest':   return { title: '已是最新', icon: <CheckCircle2 className="w-5 h-5 text-accent" /> }
-    case 'error':    return { title: '检查失败', icon: <AlertTriangle className="w-5 h-5 text-error" /> }
-    default:         return { title: '发现新版本', icon: <Download className="w-5 h-5 text-accent" /> }
+    case 'checking': return { title: t('update.checking'), icon: <Loader2 className="w-5 h-5 text-accent animate-spin" /> }
+    case 'latest':   return { title: t('update.latest'), icon: <CheckCircle2 className="w-5 h-5 text-accent" /> }
+    case 'error':    return { title: t('update.error'), icon: <AlertTriangle className="w-5 h-5 text-error" /> }
+    default:         return { title: t('update.update_available'), icon: <Download className="w-5 h-5 text-accent" /> }
   }
 }
 
@@ -92,9 +93,11 @@ export function UpdateModal({
   // Lock body scroll while modal is mounted
   useScrollLock()
 
+  const { t } = useTranslation()
+
   const status: UpdateStatus = info.status ?? 'update'
   const isUpdate = status === 'update'
-  const hdr = headerFor(status)
+  const hdr = headerFor(status, t)
 
   const diff = info.diff || []
   const nFiles = diff.length
@@ -139,14 +142,14 @@ export function UpdateModal({
         {status === 'checking' && (
           <div className="flex flex-col items-center justify-center gap-3 px-5 py-10 text-center">
             <Loader2 className="w-10 h-10 text-accent animate-spin" />
-            <div className="text-sm text-text-primary">正在检查更新…</div>
-            <div className="text-xs text-text-muted font-mono">当前版本 v{info.current}</div>
+            <div className="text-sm text-text-primary">{t('update.checking_text')}</div>
+            <div className="text-xs text-text-muted font-mono">{t('update.current_version', { version: info.current })}</div>
           </div>
         )}
         {status === 'latest' && (
           <div className="flex flex-col items-center justify-center gap-3 px-5 py-10 text-center">
             <CheckCircle2 className="w-12 h-12 text-accent" />
-            <div className="text-sm font-medium text-text-primary">当前已是最新版本</div>
+            <div className="text-sm font-medium text-text-primary">{t('update.latest_text')}</div>
             <span className="px-3 py-1.5 rounded-lg bg-accent/10 ring-1 ring-inset ring-accent/30 text-sm font-mono font-semibold text-accent">
               v{info.current}
             </span>
@@ -155,11 +158,11 @@ export function UpdateModal({
         {status === 'error' && (
           <div className="flex flex-col items-center justify-center gap-3 px-5 py-10 text-center">
             <AlertTriangle className="w-10 h-10 text-error" />
-            <div className="text-sm font-medium text-text-primary">检查更新失败</div>
+            <div className="text-sm font-medium text-text-primary">{t('update.error_text')}</div>
             <div className="text-xs text-text-secondary leading-relaxed max-w-[380px]">
-              {info.error || '无法连接更新服务器，请稍后重试'}
+              {info.error || t('update.error_fallback')}
             </div>
-            <div className="text-xs text-text-muted font-mono">当前版本 v{info.current}</div>
+            <div className="text-xs text-text-muted font-mono">{t('update.current_version', { version: info.current })}</div>
           </div>
         )}
 
@@ -191,11 +194,15 @@ export function UpdateModal({
                   <RotateCcw className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />
                   <div className="flex-1 min-w-0">
                     <div className="text-xs font-medium text-amber-600 dark:text-amber-400 mb-1">
-                      检测到未完成的下载
+                      {t('update.resume_banner')}
                     </div>
                     <div className="text-xs text-text-secondary leading-relaxed">
-                      已完成 {ss.done_files}/{ss.total_files} 个文件（{fmtSize(ss.done_bytes)} / {fmtSize(ss.total_bytes)}）—
-                      选择「继续下载」将跳过已完成部分，仅下载剩余文件。
+                      {t('update.resume_detail', {
+                        done: ss.done_files,
+                        total: ss.total_files,
+                        doneSize: fmtSize(ss.done_bytes),
+                        totalSize: fmtSize(ss.total_bytes),
+                      })}
                     </div>
                   </div>
                 </div>
@@ -205,7 +212,7 @@ export function UpdateModal({
             {/* Full-package hint */}
             {serverFull && (
               <div className="text-xs text-text-secondary text-center">
-                本次为完整更新（下载全部文件）
+                {t('update.full_package_hint')}
               </div>
             )}
 
@@ -235,19 +242,19 @@ export function UpdateModal({
                   className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-bg-tertiary/50 transition-colors text-left"
                 >
                   <span className="flex-1 min-w-0 text-xs text-text-secondary truncate">
-                    本次更新 · <span className="font-medium text-text-primary">{nPending}</span> 个文件
+                    {t('update.this_update')} · <span className="font-medium text-text-primary">{t('update.files', { n: nPending })}</span>
                     {hasResume && nPending < nFiles && (
-                      <span className="text-text-muted">（已完成 {nFiles - nPending} 个）</span>
+                      <span className="text-text-muted">{t('update.completed_n', { n: nFiles - nPending })}</span>
                     )}
                   </span>
                   {/* 解压总计 — label+number same line */}
                   <span className={`${DIFF_COL.num} shrink-0 text-right text-xs tabular-nums leading-tight`}>
-                    <span className="text-text-muted">解压 </span>
+                    <span className="text-text-muted">{t('update.extract')} </span>
                     <span className="font-mono font-medium text-text-primary">{fmtSize(totalSize)}</span>
                   </span>
                   {/* 流量总计 — label+number same line */}
                   <span className={`${DIFF_COL.num} shrink-0 text-right text-xs tabular-nums leading-tight`}>
-                    <span className="text-text-muted">流量 </span>
+                    <span className="text-text-muted">{t('update.traffic')} </span>
                     <span className="font-mono font-medium text-accent">{fmtSize(totalDl)}</span>
                   </span>
                   {/* chevron — vertically centered, no caption trick needed */}
@@ -262,7 +269,7 @@ export function UpdateModal({
                 {expanded && (
                   <div className="max-h-44 overflow-y-auto border-t border-border/60 divide-y divide-border/40">
                     {diff.map((f, i) => {
-                      const role = fileRole(f.path)
+                      const role = fileRole(f.path, t)
                       const isDone = ss?.done_paths?.includes(f.path)
                       return (
                         <div key={i} className={`flex items-center gap-2 px-3 py-1.5 ${isDone ? 'opacity-50' : ''}`}>
@@ -307,11 +314,11 @@ export function UpdateModal({
                 <div className="space-y-1.5">
                   <div className="text-xs text-text-secondary">
                     {progress.phase === 'download' && (
-                      <>正在下载 {progress.file || '...'} ({Math.min(progress.current_file, progress.total_files) || 1}/{progress.total_files})</>
+                      <>{t('update.progress_download', { file: progress.file || '...', current: Math.min(progress.current_file, progress.total_files) || 1, total: progress.total_files })}</>
                     )}
-                    {progress.phase === 'done' && <>下载完成，正在重启安装…</>}
+                    {progress.phase === 'done' && <>{t('update.progress_done')}</>}
                     {progress.phase === 'error' && (
-                      <span className="text-error">下载失败：{progress.error_file || progress.file}</span>
+                      <span className="text-error">{t('update.progress_error', { file: progress.error_file || progress.file })}</span>
                     )}
                   </div>
                   {progress.phase !== 'error' && (
@@ -331,7 +338,7 @@ export function UpdateModal({
                 </div>
               ) : (
                 <div className="text-xs text-text-muted text-center animate-pulse">
-                  正在准备下载…
+                  {t('update.progress_preparing')}
                 </div>
               )
             )}
@@ -344,8 +351,8 @@ export function UpdateModal({
             <>
               {!info.mandatory && (
                 <ActionBtn
-                  label="稍后"
-                  title="稍后再更新"
+                  label={t('update.later')}
+                  title={t('update.later_tip')}
                   icon={<X className="w-3.5 h-3.5" />}
                   variant="outline"
                   size="sm"
@@ -358,8 +365,8 @@ export function UpdateModal({
               {/* 重新下载 — clear staging then full download. Shown when resumable. */}
               {hasResume && onClearAndDownload && (
                 <ActionBtn
-                  label="重新下载"
-                  title="放弃已下载文件，从头下载全部"
+                  label={t('update.re_download')}
+                  title={t('update.re_download_tip')}
                   icon={<RotateCcw className="w-3.5 h-3.5" />}
                   variant="outline"
                   size="lg"
@@ -372,8 +379,8 @@ export function UpdateModal({
               {/* 全量更新 — 强制重下全部文件. serverFull 时增量按钮即全量, 隐藏此按钮避免重复 */}
               {!hasResume && !downloading && onForceUpdate && !serverFull && (
                 <ActionBtn
-                  label="全量更新"
-                  title="强制下载全部文件（逐文件覆盖，用于本地文件损坏或增量疑漏）"
+                  label={t('update.force_update')}
+                  title={t('update.force_update_tip')}
                   icon={<Package className="w-3.5 h-3.5" />}
                   variant="outline"
                   size="lg"
@@ -385,8 +392,8 @@ export function UpdateModal({
               )}
               {/* 增量更新 / 继续下载 (primary) — auto-skips staging files via sha256 */}
               <ActionBtn
-                label={downloading ? '安装中…' : hasResume ? '继续下载' : serverFull ? '全量更新' : '增量更新'}
-                title={hasResume ? '跳过已完成文件，仅下载剩余' : serverFull ? '下载全部文件并安装' : '只下载变化的文件并安装'}
+                label={downloading ? t('update.installing') : hasResume ? t('update.continue_download') : serverFull ? t('update.force_update') : t('update.incremental')}
+                title={hasResume ? t('update.continue_download_tip') : serverFull ? t('update.force_update_tip') : t('update.incremental_tip')}
                 icon={hasResume ? <RotateCcw className="w-3.5 h-3.5" /> : serverFull ? <Package className="w-3.5 h-3.5" /> : <FileStack className="w-3.5 h-3.5" />}
                 variant="primary"
                 size="lg"
@@ -398,8 +405,8 @@ export function UpdateModal({
             </>
           ) : status === 'checking' ? (
             <ActionBtn
-              label="取消"
-              title="取消检查"
+              label={t('common.cancel')}
+              title={t('common.cancel')}
               icon={<X className="w-3.5 h-3.5" />}
               variant="outline"
               size="sm"
@@ -408,8 +415,8 @@ export function UpdateModal({
           ) : (
             /* latest / error — 单个关闭按钮 */
             <ActionBtn
-              label="知道了"
-              title="关闭"
+              label={t('update.got_it')}
+              title={t('update.got_it_tip')}
               icon={<CheckCircle2 className="w-3.5 h-3.5" />}
               variant="primary"
               size="sm"

@@ -1,0 +1,455 @@
+{
+  "common": {
+    "cancel": "取消",
+    "close": "關閉",
+    "ok": "確定",
+    "loading": "載入中…",
+    "not_implemented": "未實作",
+    "default": "預設",
+    "ready": "就緒"
+  },
+
+  "topbar": {
+    "monitor": "Monitor",
+    "monitor_tip": "即時預覽與控制 — 遠端操作目標視窗",
+    "log": "Log",
+    "log_tip": "檢視當前工作階段與歷史日誌檔",
+    "settings": "Settings",
+    "settings_tip": "設定截圖、模型、主題與輸入映射",
+    "devtools": "DevTools",
+    "devtools_tip": "開發人員工具 — Test Target · Self-Test · Frame Dump · UI Demos",
+    "start": "Start",
+    "start_tip": "啟動 agent 任務",
+    "stop": "Stop",
+    "stop_tip": "停止所有執行中的任務"
+  },
+
+  "bottombar": {
+    "tcp": "TCP :9999",
+    "agent_online": "Agent 線上",
+    "waiting_connection": "等待連線",
+    "update": "Update",
+    "update_title": "Update available — click to install"
+  },
+
+  "connection": {
+    "title": "Connection",
+    "select": "Select",
+    "select_tip": "選擇要擷取的視窗或桌面",
+    "disconnect_tip": "中斷目前視窗連線，回到桌面",
+    "window_title": "Window Title",
+    "window_title_tip": "已選擇的目標視窗（唯讀，請用 Select 選擇）",
+    "ip_tip": "AI 模型伺服器 IP 位址",
+    "port_tip": "Port 埠號",
+    "minimized_warning": "視窗已最小化，{method} 無法截取。請切換為 WGC 或將視窗恢復至前景。",
+    "pin_tip": "固定面板 — 不受自動佈局影響",
+    "unpin_tip": "取消固定 — 允許自動佈局調整"
+  },
+
+  "screenshot": {
+    "title": "Screenshot",
+    "snapshot_tip": "單幀截圖",
+    "stop_preview_tip": "停止即時預覽",
+    "start_preview_tip": "開始即時預覽",
+    "pin_tip": "固定面板 — 不受自動佈局影響",
+    "unpin_tip": "取消固定 — 允許自動佈局調整",
+    "empty_hint": "點擊 📷 單幀截圖 或 ▶ 即時預覽"
+  },
+
+  "log": {
+    "title": "Log",
+    "current_session": "Current Session",
+    "no_logs": "No logs",
+    "no_logs_yet": "No logs yet",
+    "no_history": "No history files found",
+    "click_to_load": "click to load",
+    "scroll_bottom": "捲動到底部",
+    "already_bottom": "已在底部",
+    "copy_all": "複製全部日誌",
+    "copy_log": "複製日誌",
+    "copy_file_content": "複製檔案內容",
+    "refresh_file": "重新整理檔案內容",
+    "pin_tip": "固定面板 — 不受自動佈局影響",
+    "unpin_tip": "取消固定 — 允許自動佈局調整"
+  },
+
+  "targetPicker": {
+    "select_target": "Select Target",
+    "capture_mode": "Capture Mode",
+    "search": "Search...",
+    "filter_all": "篩選: 全部",
+    "filter_desktop": "篩選: 桌面",
+    "filter_window": "篩選: 視窗",
+    "all": "All",
+    "desktop": " Desktop",
+    "windows": " Windows",
+    "refresh": "重新整理視窗列表",
+    "self_window_tip": "自身視窗，禁止擷取",
+    "select_tip": "選擇: {title}",
+    "select_remote_tip": "選擇: {title}（將切換到 D{n}）",
+    "back_tip": "返回視窗選擇",
+    "mode_description": "請選擇目標視窗的目前狀態，系統將自動推薦最佳擷取方案：",
+    "footer_summary": "{items} items — {desks} desktop{deskPlural}, {wins} windows"
+  },
+
+  "settings": {
+    "capture": "Capture",
+    "snapshot": "Snapshot",
+    "snapshot_auto": "Auto",
+    "snapshot_auto_tip": "自動根據視窗狀態選擇截圖方式：前景/背景→WGC，桌面/最小化→DXGI",
+    "stream": "Stream",
+    "stream_auto": "Auto",
+    "stream_auto_tip": "自動選擇串流傳輸方式（目前僅 WGC 支援即時串流）",
+    "dxgi_stream_tip": "DXGI 串流未實作，僅 WGC 支援即時預覽",
+    "render_method": "Render Method",
+    "mouse_mode": "Mouse Mode",
+    "mouse_hint": "虛擬指示器常駐 — 不影響本機滑鼠使用",
+    "keyboard_mode": "Keyboard Mode",
+    "keyboard_hint": "點擊預覽畫面取得焦點後，鍵盤輸入轉發到目標視窗",
+    "keyboard_note1": "• 一般按鍵 — {keydown} / {keyup}",
+    "keyboard_note2": "• 組合鍵 — 自動識別（Ctrl+C 等，Ctrl 先按下再按 C）",
+    "keyboard_note3": "• {esc} 或外部點擊 → 釋放焦點，自動放開所有已按下按鍵",
+    "self_target": "自指規避",
+    "self_target_hint": "桌面擷取時，映射座標可能落在 GAM 自身視窗",
+    "self_target_warn": "紅色警告",
+    "self_target_warn_eng": "Visual Warning",
+    "self_target_warn_desc": "游標移至 GAM 視窗區域時變紅並彈出警告 — 簡單安全",
+    "self_target_exclude": "排除視窗",
+    "self_target_exclude_eng": "Exclude from Capture",
+    "self_target_exclude_desc": "桌面擷取畫面中隱藏 GAM 視窗 — 需要 Windows 10 2004+",
+    "self_target_warn_badge": "預設",
+    "self_target_exclude_badge": "Win10+",
+
+    "model": "Model",
+    "model_desc": "Base model + fine-tuning adapter for game-specific AI.",
+    "model_base": "Model",
+    "model_base_tip": "基礎視覺模型",
+    "model_adapter": "Adapter",
+    "model_adapter_tip": "遊戲微調權重",
+
+    "general": "General",
+    "permission": "執行權限",
+    "permission_normal": "一般",
+    "permission_admin": "系統管理員",
+    "permission_normal_tip": "一般使用者權限（預設）— 操作一般程式足夠，無 UAC 打擾",
+    "permission_admin_tip": "系統管理員權限 — 可操作以管理員執行的目標；點擊觸發 UAC 並重啟程式",
+    "permission_current": "目前: {level}",
+    "permission_current_normal": "一般",
+    "permission_current_admin": "系統管理員",
+
+    "theme": "Theme",
+    "theme_light": "Light",
+    "theme_dark": "Dark",
+    "theme_system": "System",
+    "theme_light_tip": "亮色主題 — 白底黑字",
+    "theme_dark_tip": "暗色主題 — VSCode 風格深藍灰",
+    "theme_system_tip": "跟隨系統 — 自動切換亮暗",
+
+    "accent": "Accent",
+    "theme_names": ["Ocean", "Twilight", "Lagoon", "Sunset", "Orchid", "Mint", "Nebula", "Dev"],
+
+    "language": "語言 / Language",
+    "language_en": "English",
+    "language_zh_cn": "简体中文",
+    "language_zh_tw": "繁體中文",
+
+    "log_dir": "Log dir",
+    "log_dir_tip": "日誌檔存放路徑",
+    "change_log_dir_tip": "修改日誌目錄",
+    "open_log_dir_tip": "在檔案總管中開啟日誌目錄",
+
+    "keep_files": "Keep files",
+    "keep_files_tip": "Log 選單中顯示的歷史日誌檔數量",
+
+    "dev_mode": "Dev mode",
+    "dev_mode_tip": "開發者模式 — 強制紅色/駭客綠主題，解鎖幀儲存功能",
+
+    "mapping_key": "Mapping key",
+    "press_keys": "Press keys...",
+    "mapping_key_tip": "目前快捷鍵，點擊 Change 可修改",
+    "change_mapping_tip": "點擊後按下新快捷鍵，放開所有按鍵確認",
+    "cancel_mapping": "Cancel",
+    "change_mapping": "Change",
+    "modifier_only": "⚠ 純修飾鍵",
+    "modifier_only_tip": "快捷鍵僅含修飾鍵（Ctrl/Alt/Shift/Win），可能與系統快捷鍵衝突。建議加入至少一個非修飾鍵，如字母、數字或 F1-F12。",
+    "hotkey_indicator_tip": "快捷鍵觸發指示器 — 按下快捷鍵時閃爍綠光",
+
+    "about": "About",
+    "game_agent_monitor": "Game Agent Monitor",
+    "version": "Version {version}",
+    "check_update": "Check Update",
+    "check_update_latest": "Update Available",
+    "check_update_latest_tip": "新版本可用，點擊安裝",
+    "check_update_tip": "檢查新版本",
+    "gitee_tip": "在瀏覽器中開啟專案 Gitee 頁面",
+    "star_tip": "給專案點 Star 支持開發",
+    "star_github": "Star on GitHub",
+    "tech_stack": "C++ WebView2 · React · Tailwind · DXGI · WGC"
+  },
+
+  "monitor": {
+    "mapping": "映射",
+    "mapping_tip": "輸入映射 ({hotkey})",
+    "snapshot": "Snapshot",
+    "snapshot_tip": "單幀截圖",
+    "stop": "Stop",
+    "stop_tip": "停止即時預覽",
+    "preview": "Preview",
+    "preview_tip": "開始即時預覽",
+    "no_preview": "No preview active",
+    "no_preview_hint": "點擊右上角 Preview 開始即時預覽",
+    "remote_active": "遠端控制中 · 滑鼠{mm} · 鍵盤{km} · Esc 釋放",
+    "remote_hover": "懸停移動游標 · 點擊控制 · 滑鼠{mm}",
+    "desktop_preview": "桌面預覽 · SendInput（強制） · {state}",
+    "desktop_focused": "點擊/鍵盤已啟用",
+    "desktop_unfocused": "點擊取得焦點",
+    "self_target_warn": "⚠ 映射目標為 GAM 自身視窗 — 可在 Settings 中切換為「排除視窗」模式",
+    "preview_no_mapping": "預覽中 · 按 {hotkey} 或點擊「映射」啟用控制",
+    "mouse_seize": "Seize",
+    "mouse_semi": "Semi",
+    "mouse_bg": "Bg",
+    "key_seize": "Seize",
+    "key_sendmsg": "SendMsg",
+    "key_postmsg": "PostMsg"
+  },
+
+  "update": {
+    "checking": "檢查更新",
+    "latest": "已是最新",
+    "error": "檢查失敗",
+    "update_available": "發現新版本",
+
+    "checking_text": "正在檢查更新…",
+    "latest_text": "目前已是最新版本",
+    "error_text": "檢查更新失敗",
+    "error_fallback": "無法連線更新伺服器，請稍後重試",
+    "current_version": "目前版本 v{version}",
+
+    "full_package_hint": "本次為完整更新（下載全部檔案）",
+    "this_update": "本次更新",
+    "files": "{n} 個檔案",
+    "completed_n": "（已完成 {n} 個）",
+    "extract": "解壓",
+    "traffic": "流量",
+
+    "resume_banner": "偵測到未完成的下載",
+    "resume_detail": "已完成 {done}/{total} 個檔案（{doneSize} / {totalSize}）— 選擇「繼續下載」將跳過已完成部分，僅下載剩餘檔案。",
+
+    "file_roles": {
+      "main_exe": "主程式",
+      "updater": "更新器",
+      "manifest": "清單",
+      "logger": "日誌",
+      "capture": "擷取",
+      "input": "輸入",
+      "frontend": "介面",
+      "config": "設定",
+      "file": "檔案"
+    },
+
+    "progress_download": "正在下載 {file}（{current}/{total}）",
+    "progress_done": "下載完成，正在重啟安裝…",
+    "progress_error": "下載失敗：{file}",
+    "progress_preparing": "正在準備下載…",
+
+    "later": "稍後",
+    "later_tip": "稍後再更新",
+    "re_download": "重新下載",
+    "re_download_tip": "放棄已下載檔案，從頭下載全部",
+    "force_update": "全量更新",
+    "force_update_tip": "強制下載全部檔案（逐檔覆蓋，用於本機檔案損壞或增量疑漏）",
+    "incremental": "增量更新",
+    "incremental_tip": "只下載變更的檔案並安裝",
+    "continue_download": "繼續下載",
+    "continue_download_tip": "跳過已完成檔案，僅下載剩餘",
+    "installing": "安裝中…",
+    "got_it": "知道了",
+    "got_it_tip": "關閉"
+  },
+
+  "state": {
+    "desktop": "桌面",
+    "foreground": "前景",
+    "background": "背景",
+    "minimized": "最小化",
+    "hidden": "隱藏",
+    "closed": "已關閉",
+    "unknown": "未知"
+  },
+
+  "capture": {
+    "wgc": {
+      "name": "WGC",
+      "eng": "GPU FramePool",
+      "rec": "前景/背景/桌面",
+      "desc": "GPU 加速，支援背景/遮擋視窗，前景背景及桌面首選"
+    },
+    "dxgi": {
+      "name": "DXGI",
+      "eng": "DesktopBlt",
+      "rec": "桌面/最小化",
+      "desc": "全桌面 GDI 位圖，最小化視窗時唯一可行方案"
+    },
+    "render_shared": {
+      "name": "SharedBuffer",
+      "eng": "Zero-copy COM",
+      "rec": "目前",
+      "desc": "C++ COM SharedBuffer → JS ArrayBuffer → Canvas putImageData，零拷貝無編解碼"
+    },
+    "render_h264": {
+      "name": "H.264",
+      "eng": "GPU MFT + MSE",
+      "rec": "未實作",
+      "desc": "GPU MFT 硬體編碼 → fMP4 分片 → MSE → <video> 標籤，低延遲高壓縮"
+    },
+    "render_h265": {
+      "name": "H.265",
+      "eng": "GPU MFT + MSE",
+      "rec": "未實作",
+      "desc": "HEVC 硬體編碼，壓縮率更高但相容性有限，需 Windows 11 + HEVC 擴充"
+    },
+    "modes": {
+      "foreground": {
+        "label": "前景 (Foreground)",
+        "desc": "視窗可見且在最前 → 推薦 WGC GPU 加速"
+      },
+      "background": {
+        "label": "背景 (Background)",
+        "desc": "視窗被遮擋但未最小化 → 推薦 WGC (唯一支援背景)"
+      },
+      "minimized": {
+        "label": "最小化 (Minimized)",
+        "desc": "視窗已最小化 → 只能用 DesktopGDI 截桌面"
+      }
+    }
+  },
+
+  "mouse": {
+    "background": {
+      "name": "Background",
+      "eng": "PostMessage",
+      "rec": "推薦",
+      "desc": "全背景，完全不搶滑鼠。虛擬指示器 + PostMessage 轉發點擊，視窗可能亂飛但不影響使用，建議目標視窗最小化"
+    },
+    "semi": {
+      "name": "Semi",
+      "eng": "SendMsg-Cursor",
+      "rec": "進階",
+      "desc": "半背景，點擊時短暫搶滑鼠。虛擬指示器常駐，滑鼠移動不搶佔，點擊瞬間透過 SendInput 定位+點擊"
+    },
+    "seize": {
+      "name": "Seize",
+      "eng": "SendInput",
+      "rec": "前景",
+      "desc": "前景模式，完全搶佔滑鼠。虛擬指示器 + 即時游標同步，SendInput 合成系統輸入，與真實硬體走相同路徑"
+    }
+  },
+
+  "keyboard": {
+    "postmsg": {
+      "name": "PostMsg",
+      "eng": "PostMessage",
+      "rec": "推薦",
+      "desc": "非同步非阻塞，高效穩定。直接向目標視窗佇列投遞 WM_KEYDOWN/WM_KEYUP 訊息"
+    },
+    "sendmsg": {
+      "name": "SendMsg",
+      "eng": "WinAPI",
+      "rec": "穩定",
+      "desc": "AttachThreadInput + SendMessage 同步投遞。正確更新目標執行緒輸入狀態，相容性好"
+    },
+    "seize": {
+      "name": "Seize",
+      "eng": "SendInput",
+      "rec": "前景",
+      "desc": "SendInput API 合成系統鍵盤輸入。需要目標視窗在前景，受 UIPI 限制"
+    }
+  },
+
+  "devtools": {
+    "test_target": "Test Target",
+    "test_target_desc": "啟動獨立測試視窗，用於驗證輸入映射",
+    "test_target_launch": "Launch",
+    "test_target_close": "Close",
+    "test_target_launch_tip": "開啟 GAM Test Target 測試視窗，可被 GAM 擷取並測試滑鼠/鍵盤映射",
+    "test_target_close_tip": "關閉 GAM Test Target 測試視窗",
+
+    "selftest": "Self-Test 映射自檢",
+    "selftest_desc": "自動跑完整流程（選窗→預覽→映射→密集點擊），比對 test_target 回饋校準映射",
+    "selftest_density_tip": "每格採樣密度（N×N 子網格）。越大越細，用時越久。",
+    "selftest_density_unit": "/格",
+    "selftest_run": "Self-Test",
+    "selftest_running": "執行中",
+    "selftest_run_tip": "一鍵自檢：復用真實使用者操作路徑，全窗密集點擊並比對回饋",
+    "selftest_running_tip": "自檢進行中…",
+
+    "frame_dump": "Frame Dump / 幀儲存",
+    "frame_dump_capture": "Save single-frame captures",
+    "frame_dump_capture_desc": "Save each 📷 snapshot as PNG to disk",
+    "frame_dump_capture_tip": "開啟後每次截圖自動儲存為 PNG 檔案到 Dump dir",
+    "frame_dump_stream": "Save live preview frames",
+    "frame_dump_stream_desc": "Save each ▶ preview frame as PNG to disk",
+    "frame_dump_stream_tip": "開啟後每次預覽幀自動儲存為 PNG 檔案到 Dump dir（注意磁碟空間）",
+    "frame_dump_dir": "Dump dir",
+    "frame_dump_not_set": "(not set)",
+    "frame_dump_dir_tip": "幀儲存路徑",
+    "frame_dump_pick_dir_tip": "選擇儲存目錄",
+    "frame_dump_open_dir_tip": "在檔案總管中開啟儲存目錄",
+
+    "misc": "Misc / 雜項",
+    "misc_skeleton": "預覽骨架屏",
+    "misc_skeleton_desc": "顯示啟動骨架屏，3 秒後自動消失",
+    "misc_skeleton_tip": "預覽應用啟動時的骨架屏效果，3 秒後自動關閉",
+    "misc_skeleton_btn": "預覽 (3s)",
+
+    "ui_demos": "UI Demos / 介面預覽",
+    "ui_demos_desc": "純前端假資料，不呼叫後端。用於預覽難以手動觸發的 UI 狀態。",
+
+    "demo_checking": "正在檢查",
+    "demo_latest": "已是最新",
+    "demo_update": "發現更新",
+    "demo_error": "檢查失敗",
+    "demo_mandatory": "強制更新",
+    "demo_full": "全量更新",
+    "demo_download": "下載進度",
+    "demo_download_fail": "下載失敗",
+    "demo_resume": "續傳(有殘留)",
+
+    "demo_selftest_running": "自檢執行中",
+    "demo_selftest_done": "自檢完成(熱力圖)",
+    "demo_selftest_error": "自檢錯誤",
+
+    "demo_agent_connected": "Agent 已連線",
+    "demo_agent_disconnected": "Agent 斷開"
+  },
+
+  "selftest": {
+    "title": "映射自檢 · Self-Test",
+    "running": "正在掃描點擊並比對回饋… {done}/{total}",
+    "abort": "中止",
+    "close": "關閉",
+    "error_prefix": "自檢失敗：{error}",
+    "aborted_note": "⚠ 已中止 — 結果為部分樣本",
+    "stat_samples": "樣本",
+    "stat_received": "收到回饋",
+    "stat_cell_match": "格子命中匹配",
+    "stat_hit_match": "HIT/MISS 匹配",
+    "stat_offset": "偏移向量 px",
+    "stat_error": "誤差 均值/最大",
+    "heatmap_title": "格子命中率熱力圖（預期格 vs 實收格）",
+    "diag_missed": "• 有未收到回饋的點 → 輸入轉發鏈路可能中斷（檢查滑鼠模式/目標視窗）",
+    "diag_large_error": "• 平均像素誤差偏大 → 可能存在座標偏移/縮放/DPI 不匹配",
+    "diag_systematic": "• 存在系統性偏移 ({dx},{dy})px → 常數偏移，建議校準原點",
+    "diag_perfect": "• 映射精確，全部命中預期格，像素誤差在取整範圍內 ✓"
+  },
+
+  "loading": {
+    "app_name": "Game Agent Monitor",
+    "loading": "載入中…"
+  },
+
+  "theme": {
+    "switch_light": "切換亮色主題",
+    "switch_dark": "切換暗色主題"
+  }
+}

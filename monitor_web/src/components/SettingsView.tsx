@@ -1,5 +1,6 @@
 // ═══ Settings View ───
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Camera, Play, Cpu, Sun, RefreshCw, ChevronDown,
   Monitor, MousePointer2, Keyboard, Pencil, FolderOpen,
@@ -74,6 +75,7 @@ export function SettingsCard({
 
 // ── Status Bar ──
 function StatusBar({ screen, appVersion }: { screen: string; appVersion: string }) {
+  const { t } = useTranslation()
   return (
     <div className="flex items-center gap-4 px-4 py-2.5 bg-bg-secondary rounded-xl ring-1 ring-inset ring-border text-xs text-text-secondary">
       <span className="flex items-center gap-1.5">
@@ -88,10 +90,10 @@ function StatusBar({ screen, appVersion }: { screen: string; appVersion: string 
       <span className="text-border">|</span>
       <span className="flex items-center gap-1.5">
         <span className="w-2 h-2 rounded-full bg-success" />
-        Ready
+        {t('common.ready')}
       </span>
       <span className="flex-1" />
-      <span className="text-text-muted hidden sm:inline">Game Agent Monitor</span>
+      <span className="text-text-muted hidden sm:inline">{t('settings.game_agent_monitor')}</span>
     </div>
   )
 }
@@ -115,6 +117,7 @@ export function SettingsView({
   devAccent, setDevAccentState,
   devSecondaryAccent, setDevSecondaryAccentState,
   accent, secondaryAccent: _secondaryAccent,
+  locale, setLocale,
   onCheckUpdate,
   hasUpdate,
   isAdmin,
@@ -141,11 +144,13 @@ export function SettingsView({
   devAccent: string; setDevAccentState: (c: string) => void
   devSecondaryAccent: string; setDevSecondaryAccentState: (c: string) => void
   accent: string; secondaryAccent: string
+  locale: string; setLocale: (l: string) => void
   onCheckUpdate?: () => void
   hasUpdate?: boolean
   isAdmin?: boolean
   onSwitchPermission?: (toAdmin: boolean) => void
 }) {
+  const { t } = useTranslation()
   const themePairs = [
     ['#3B82F6', '#F97316'], // Ocean — blue + orange
     ['#6366F1', '#EAB308'], // Twilight — indigo + yellow
@@ -156,7 +161,7 @@ export function SettingsView({
     ['#3B82F6', '#8B5CF6'], // Nebula — blue + violet
     ['#EF4444', '#22C55E'], // Dev ⚡ — red danger + hacker green
   ]
-  const themeNames = ['Ocean', 'Twilight', 'Lagoon', 'Sunset', 'Orchid', 'Mint', 'Nebula', 'Dev']
+  const themeNames = t('settings.theme_names', { returnObjects: true }) as unknown as string[]
   // Sync accent-hover whenever accent changes
   useEffect(() => {
     document.documentElement.style.setProperty('--color-accent-hover', darken(accent, 15))
@@ -172,8 +177,6 @@ export function SettingsView({
   const savedComboRef = useRef(mappingHotkey)             // pre-recording value for cancel
 
   // ── Modifier-only warning ──
-  // Check if current hotkey consists solely of modifier keys (Ctrl/Alt/Shift/Win).
-  // Pure-modifier combos are technically valid but prone to OS-level conflicts.
   const MODIFIER_NAMES = new Set(['Ctrl', 'Alt', 'Shift', 'Win'])
   const isModifierOnly = mappingHotkey.split('+').every((k) => MODIFIER_NAMES.has(k))
 
@@ -212,7 +215,6 @@ export function SettingsView({
       e.preventDefault()
       e.stopPropagation()
       if (e.repeat) return // ignore auto-repeat
-      // Add code if not already present (handles L/R Ctrl both → different codes)
       if (!pressedSeqRef.current.includes(e.code)) {
         pressedSeqRef.current.push(e.code)
       }
@@ -241,7 +243,7 @@ export function SettingsView({
   const [triggerFlash, setTriggerFlash] = useState(false)
   const testSeqRef = useRef<string[]>([])
   useEffect(() => {
-    if (recording) return // don't test while recording
+    if (recording) return
     const onDown = (e: KeyboardEvent) => {
       if (e.repeat) return
       if (!testSeqRef.current.includes(e.code)) {
@@ -293,7 +295,7 @@ export function SettingsView({
 
       <SettingsCard
         icon={<Camera className="w-4 h-4 text-text-secondary" />}
-        title="Capture"
+        title={t('settings.capture')}
       >
         <div className="space-y-3">
           {/* Snapshot + Stream side by side */}
@@ -301,11 +303,11 @@ export function SettingsView({
             <div className="flex-1 space-y-2 pr-3">
               <div className="flex items-center justify-between">
                 <span className="text-xs text-text-muted inline-flex items-center gap-1">
-                  <Camera className="w-3.5 h-3.5" /> Snapshot
+                  <Camera className="w-3.5 h-3.5" /> {t('settings.snapshot')}
                 </span>
                 <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                  <span className="text-xs text-text-muted">Auto</span>
-                  <Tooltip text="自动根据窗口状态选择截图方式：前台/后台→WGC，桌面/最小化→DXGI">
+                  <span className="text-xs text-text-muted">{t('settings.snapshot_auto')}</span>
+                  <Tooltip text={t('settings.snapshot_auto_tip')}>
                   <button
                     onClick={(e) => {
                       e.stopPropagation()
@@ -342,7 +344,7 @@ export function SettingsView({
                     ? 'text-accent-secondary bg-accent-secondary/10'
                     : 'text-accent bg-accent/10'
                   return (
-                    <Tooltip key={m.v} text={m.desc}>
+                    <Tooltip key={m.v} text={t(m.desc)}>
                       <label className={`${SELECTABLE_BTN} ${ringClass}`}>
                         <input
                           type="radio" name="snapMethod" value={m.v}
@@ -359,12 +361,12 @@ export function SettingsView({
                           {m.name} <span className="text-text-muted">({m.eng})</span>
                         </span>
                         <span className="ml-auto flex items-center gap-1">
-                          {m.rec.split('/').map((t: string) => (
+                          {t(m.rec).split('/').map((s: string) => (
                             <span
-                              key={t}
+                              key={s}
                               className={`text-[11px] font-medium px-1.5 py-0.5 rounded ${tagClass}`}
                             >
-                              {t}
+                              {s}
                             </span>
                           ))}
                         </span>
@@ -378,11 +380,11 @@ export function SettingsView({
             <div className="flex-1 space-y-2 pl-3">
               <div className="flex items-center justify-between">
                 <span className="text-xs text-text-muted inline-flex items-center gap-1">
-                  <Play className="w-3.5 h-3.5" /> Stream
+                  <Play className="w-3.5 h-3.5" /> {t('settings.stream')}
                 </span>
                 <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                  <span className="text-xs text-text-muted">Auto</span>
-                  <Tooltip text="自动选择流传输方式（当前仅 WGC 支持实时流）">
+                  <span className="text-xs text-text-muted">{t('settings.stream_auto')}</span>
+                  <Tooltip text={t('settings.stream_auto_tip')}>
                   <button
                     onClick={(e) => {
                       e.stopPropagation()
@@ -422,8 +424,8 @@ export function SettingsView({
                       key={m.v}
                       text={
                         unsupported
-                          ? 'DXGI 流未实现，仅 WGC 支持实时预览'
-                          : m.desc
+                          ? t('settings.dxgi_stream_tip')
+                          : t(m.desc)
                       }
                     >
                       <label className={`${SELECTABLE_BTN} ${ringClass}`}>
@@ -445,15 +447,15 @@ export function SettingsView({
                         <span className="ml-auto flex items-center gap-1">
                           {unsupported ? (
                             <span className="text-[11px] font-medium text-text-muted bg-bg-tertiary px-1.5 py-0.5 rounded">
-                              未实现
+                              {t('common.not_implemented')}
                             </span>
                           ) : (
-                            m.rec.split('/').map((t: string) => (
+                            t(m.rec).split('/').map((s: string) => (
                               <span
-                                key={t}
+                                key={s}
                                 className={`text-[11px] font-medium px-1.5 py-0.5 rounded ${tagClass}`}
                               >
-                                {t}
+                                {s}
                               </span>
                             ))
                           )}
@@ -469,7 +471,7 @@ export function SettingsView({
           <div className="border-t border-border pt-3 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs text-text-muted inline-flex items-center gap-1">
-                <Monitor className="w-3.5 h-3.5" /> Render Method
+                <Monitor className="w-3.5 h-3.5" /> {t('settings.render_method')}
               </span>
             </div>
             <div className="flex flex-col gap-2">
@@ -483,7 +485,7 @@ export function SettingsView({
                       ? 'border-border bg-bg-primary hover:bg-bg-hover cursor-pointer'
                       : 'border-border bg-bg-primary opacity-50 cursor-not-allowed'
                 return (
-                  <Tooltip key={m.v} text={m.desc}>
+                  <Tooltip key={m.v} text={t(m.desc)}>
                     <label className={`${SELECTABLE_BTN} ${ringClass}`}>
                       <input
                         type="radio" name="renderMethod" value={m.v}
@@ -500,12 +502,12 @@ export function SettingsView({
                         {m.name} <span className="text-text-muted">({m.eng})</span>
                       </span>
                       <span className="ml-auto flex items-center gap-1">
-                        {m.rec.split('/').map((t: string) => (
+                        {t(m.rec).split('/').map((s: string) => (
                           <span
-                            key={t}
+                            key={s}
                             className={`text-[11px] font-medium px-1.5 py-0.5 rounded ${implemented ? 'text-accent bg-accent/10' : 'text-text-muted bg-bg-tertiary'}`}
                           >
-                            {t}
+                            {s}
                           </span>
                         ))}
                       </span>
@@ -519,15 +521,15 @@ export function SettingsView({
           <div className="border-t border-border pt-3 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs text-text-muted inline-flex items-center gap-1">
-                <MousePointer2 className="w-3.5 h-3.5" /> Mouse Mode
+                <MousePointer2 className="w-3.5 h-3.5" /> {t('settings.mouse_mode')}
               </span>
-              <span className="text-[10px] text-text-muted">虚拟指示器常驻 — 不影响本地鼠标使用</span>
+              <span className="text-[10px] text-text-muted">{t('settings.mouse_hint')}</span>
             </div>
             <div className="flex flex-col gap-2">
               {MOUSE_MODES.map((m) => {
                 const isActive = mouseMode === m.v
                 return (
-                  <Tooltip key={m.v} text={m.desc}>
+                  <Tooltip key={m.v} text={t(m.desc)}>
                     <label className={`${SELECTABLE_BTN} ${
                       isActive
                         ? 'border-accent bg-accent/10 cursor-pointer'
@@ -546,7 +548,7 @@ export function SettingsView({
                         <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded ${
                           isActive ? 'text-accent bg-accent/10' : 'text-text-muted bg-bg-tertiary'
                         }`}>
-                          {m.rec}
+                          {t(m.rec)}
                         </span>
                       </span>
                     </label>
@@ -559,15 +561,15 @@ export function SettingsView({
           <div className="border-t border-border pt-3 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs text-text-muted inline-flex items-center gap-1">
-                <Keyboard className="w-3.5 h-3.5" /> Keyboard Mode
+                <Keyboard className="w-3.5 h-3.5" /> {t('settings.keyboard_mode')}
               </span>
-              <span className="text-[10px] text-text-muted">点击预览画面获取焦点后，键盘输入转发到目标窗口</span>
+              <span className="text-[10px] text-text-muted">{t('settings.keyboard_hint')}</span>
             </div>
             <div className="flex flex-col gap-2">
               {KEYBOARD_MODES.map((m) => {
                 const isActive = keyMode === m.v
                 return (
-                  <Tooltip key={m.v} text={m.desc}>
+                  <Tooltip key={m.v} text={t(m.desc)}>
                     <label className={`${SELECTABLE_BTN} ${
                       isActive
                         ? 'border-accent bg-accent/10 cursor-pointer'
@@ -586,7 +588,7 @@ export function SettingsView({
                         <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded ${
                           isActive ? 'text-accent bg-accent/10' : 'text-text-muted bg-bg-tertiary'
                         }`}>
-                          {m.rec}
+                          {t(m.rec)}
                         </span>
                       </span>
                     </label>
@@ -595,34 +597,34 @@ export function SettingsView({
               })}
             </div>
             <div className="text-[11px] text-text-muted space-y-1">
-              <div>• 普通按键 — <code className="text-accent bg-accent/10 px-1 rounded">keydown</code> / <code className="text-accent bg-accent/10 px-1 rounded">keyup</code></div>
-              <div>• 组合键 — 自动识别（Ctrl+C 等，Ctrl 先按下再按 C）</div>
-              <div>• <code className="text-accent bg-accent/10 px-1 rounded">Esc</code> 或外部点击 → 释放焦点，自动松开所有已按下按键</div>
+              <div>{t('settings.keyboard_note1', { keydown: <code className="text-accent bg-accent/10 px-1 rounded">keydown</code>, keyup: <code className="text-accent bg-accent/10 px-1 rounded">keyup</code> })}</div>
+              <div>{t('settings.keyboard_note2')}</div>
+              <div>{t('settings.keyboard_note3', { esc: <code className="text-accent bg-accent/10 px-1 rounded">Esc</code> })}</div>
             </div>
           </div>
           {/* ── Self-target avoidance mode ── */}
           <div className="border-t border-border pt-3 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs text-text-muted inline-flex items-center gap-1">
-                <MousePointer2 className="w-3.5 h-3.5" /> 自指规避
+                <MousePointer2 className="w-3.5 h-3.5" /> {t('settings.self_target')}
               </span>
               <span className="text-[10px] text-text-muted">
-                桌面捕获时，映射坐标可能落在 GAM 自身窗口
+                {t('settings.self_target_hint')}
               </span>
             </div>
             <div className="flex flex-col gap-2">
               {[
                 {
                   v: 'warn' as const,
-                  name: '红色警告',
-                  eng: 'Visual Warning',
-                  desc: '光标移至 GAM 窗口区域时变红并弹出警告 — 简单安全',
+                  name: t('settings.self_target_warn'),
+                  eng: t('settings.self_target_warn_eng'),
+                  desc: t('settings.self_target_warn_desc'),
                 },
                 {
                   v: 'exclude' as const,
-                  name: '排除窗口',
-                  eng: 'Exclude from Capture',
-                  desc: '桌面捕获画面中隐藏 GAM 窗口 — 需要 Windows 10 2004+',
+                  name: t('settings.self_target_exclude'),
+                  eng: t('settings.self_target_exclude_eng'),
+                  desc: t('settings.self_target_exclude_desc'),
                 },
               ].map((m) => {
                 const isActive = selfTargetMode === m.v
@@ -652,7 +654,7 @@ export function SettingsView({
                             isActive ? 'text-accent bg-accent/10' : 'text-text-muted bg-bg-tertiary'
                           }`}
                         >
-                          {m.v === 'warn' ? '默认' : 'Win10+'}
+                          {m.v === 'warn' ? t('settings.self_target_warn_badge') : t('settings.self_target_exclude_badge')}
                         </span>
                       </span>
                     </label>
@@ -664,13 +666,13 @@ export function SettingsView({
         </div>
       </SettingsCard>
 
-      <SettingsCard icon={<Cpu className="w-4 h-4 text-text-secondary" />} title="Model">
+      <SettingsCard icon={<Cpu className="w-4 h-4 text-text-secondary" />} title={t('settings.model')}>
         <div className="text-xs text-text-muted mb-2">
-          Base model + fine-tuning adapter for game-specific AI.
+          {t('settings.model_desc')}
         </div>
         <div className="flex items-center gap-3 mb-2">
-          <label className="text-sm text-text-secondary w-24 shrink-0">Model</label>
-          <Tooltip text="基础视觉模型" className="flex-1 min-w-0">
+          <label className="text-sm text-text-secondary w-24 shrink-0">{t('settings.model_base')}</label>
+          <Tooltip text={t('settings.model_base_tip')} className="flex-1 min-w-0">
             <input
               defaultValue="GenericAgent v1"
               onBlur={(e) => addLog(`[Setting] base model = ${e.target.value}`)}
@@ -679,8 +681,8 @@ export function SettingsView({
           </Tooltip>
         </div>
         <div className="flex items-center gap-3">
-          <label className="text-sm text-text-secondary w-24 shrink-0">Adapter</label>
-          <Tooltip text="游戏微调权重" className="flex-1 min-w-0">
+          <label className="text-sm text-text-secondary w-24 shrink-0">{t('settings.model_adapter')}</label>
+          <Tooltip text={t('settings.model_adapter_tip')} className="flex-1 min-w-0">
             <input
               defaultValue="tictactoe-finetune"
               onBlur={(e) => addLog(`[Setting] adapter = ${e.target.value}`)}
@@ -690,14 +692,14 @@ export function SettingsView({
         </div>
       </SettingsCard>
 
-      <SettingsCard icon={<Sun className="w-4 h-4 text-text-secondary" />} title="General">
+      <SettingsCard icon={<Sun className="w-4 h-4 text-text-secondary" />} title={t('settings.general')}>
         <div className="space-y-3">
-          {/* 运行权限（普通/管理员）— 切换 = 重启到目标权限 */}
+          {/* 运行权限 */}
           <div className="flex items-center gap-2">
-            <label className="text-sm text-text-secondary w-24 shrink-0">运行权限</label>
+            <label className="text-sm text-text-secondary w-24 shrink-0">{t('settings.permission')}</label>
             <div className="flex gap-1 items-center">
-              {([['普通', false], ['管理员', true]] as [string, boolean][]).map(([l, v]) => (
-                <Tooltip key={String(v)} text={v ? '管理员权限 — 可操作以管理员运行的目标；点击弹 UAC 并重启程序' : '普通用户权限（默认）— 操作普通程序足够，无 UAC 打扰'}>
+              {([[t('settings.permission_normal'), false], [t('settings.permission_admin'), true]] as [string, boolean][]).map(([l, v]) => (
+                <Tooltip key={String(v)} text={v ? t('settings.permission_admin_tip') : t('settings.permission_normal_tip')}>
                   <button
                     onClick={() => onSwitchPermission?.(v)}
                     className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${!!isAdmin === v ? 'bg-accent text-white' : 'bg-bg-tertiary text-text-secondary hover:bg-bg-hover'}`}
@@ -707,19 +709,19 @@ export function SettingsView({
                 </Tooltip>
               ))}
               <span className={`ml-1 text-[10px] px-1.5 py-0.5 rounded ${isAdmin ? 'text-accent bg-accent/10' : 'text-text-muted bg-bg-tertiary'}`}>
-                当前: {isAdmin ? '管理员' : '普通'}
+                {t('settings.permission_current', { level: isAdmin ? t('settings.permission_current_admin') : t('settings.permission_current_normal') })}
               </span>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <label className="text-sm text-text-secondary w-24 shrink-0">Theme</label>
+            <label className="text-sm text-text-secondary w-24 shrink-0">{t('settings.theme')}</label>
             <div className="flex gap-1">
               {[
-                ['Light', 'light', '亮色主题 — 白底黑字'],
-                ['Dark', 'dark', '暗色主题 — VSCode 风格深蓝灰'],
-                ['System', 'system', '跟随系统 — 自动切换亮暗'],
+                [t('settings.theme_light'), 'light', t('settings.theme_light_tip')],
+                [t('settings.theme_dark'), 'dark', t('settings.theme_dark_tip')],
+                [t('settings.theme_system'), 'system', t('settings.theme_system_tip')],
               ].map(([l, v, tip]) => (
-                <Tooltip key={v} text={tip}>
+                <Tooltip key={v as string} text={tip as string}>
                 <button
                   onClick={() => {
                     setTheme(v as 'light' | 'dark' | 'system')
@@ -727,20 +729,18 @@ export function SettingsView({
                   }}
                   className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${theme === v ? 'bg-accent text-white' : 'bg-bg-tertiary text-text-secondary hover:bg-bg-hover'}`}
                 >
-                  {l}
+                  {l as string}
                 </button>
                 </Tooltip>
               ))}
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <label className="text-sm text-text-secondary w-24 shrink-0">Accent</label>
+            <label className="text-sm text-text-secondary w-24 shrink-0">{t('settings.accent')}</label>
             <div className="flex gap-1.5">
               {themePairs.map(([c1, c2], i) => {
                 const isDev = i === themePairs.length - 1
                 const disabled = isDev ? !devMode : devMode
-                // Selected: compare against the SAVED color for this button's mode,
-                // NOT the current accent. Disabled buttons still show their indicator.
                 const selected = isDev
                   ? (devAccent === c1 && devSecondaryAccent === c2)
                   : (normalAccent === c1 && normalSecondaryAccent === c2)
@@ -748,7 +748,6 @@ export function SettingsView({
                 return (
                   <Tooltip key={`${c1}-${c2}`} text={name} className={isDev ? 'ml-3' : ''}>
                   <span className="relative inline-flex items-center justify-center" style={{ width: 28, height: 28 }}>
-                    {/* Selected indicator: top line (c1) + bottom line (c2). Dim when disabled. */}
                     {selected && (
                       <>
                         <span
@@ -761,7 +760,6 @@ export function SettingsView({
                         />
                       </>
                     )}
-                    {/* Button (20×20) */}
                     <button
                       onClick={() => {
                         if (disabled) return
@@ -785,7 +783,6 @@ export function SettingsView({
                             'polygon(87.5% 0%, 100% 0%, 100% 100%, 12.5% 100%, 31.25% 50%, 68.75% 50%)',
                         }}
                       />
-                      {/* Internal cut line (SVG, 20×20) */}
                       <svg
                         className="absolute inset-0 w-full h-full pointer-events-none"
                         viewBox="0 0 20 20"
@@ -806,16 +803,35 @@ export function SettingsView({
               })}
             </div>
           </div>
+          {/* ── Language switcher ── */}
           <div className="flex items-center gap-2">
-            <label className="text-sm text-text-secondary w-24 shrink-0">Log dir</label>
-            <Tooltip text="日志文件存放路径" className="flex-1 min-w-0">
+            <label className="text-sm text-text-secondary w-24 shrink-0">{t('settings.language')}</label>
+            <div className="flex gap-1">
+              {[
+                ['en', t('settings.language_en')],
+                ['zh-CN', t('settings.language_zh_cn')],
+                ['zh-TW', t('settings.language_zh_tw')],
+              ].map(([code, label]) => (
+                <button
+                  key={code}
+                  onClick={() => setLocale(code)}
+                  className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${locale === code ? 'bg-accent text-white' : 'bg-bg-tertiary text-text-secondary hover:bg-bg-hover'}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-text-secondary w-24 shrink-0">{t('settings.log_dir')}</label>
+            <Tooltip text={t('settings.log_dir_tip')} className="flex-1 min-w-0">
               <input
                 value={logDir}
                 readOnly
                 className="w-full h-7 rounded-lg border border-border bg-bg-primary px-3 text-sm text-text-muted outline-none cursor-default font-mono text-xs truncate"
               />
             </Tooltip>
-            <Tooltip text="修改日志目录">
+            <Tooltip text={t('settings.change_log_dir_tip')}>
               <button
                 onClick={async () => {
                   try {
@@ -831,7 +847,7 @@ export function SettingsView({
                 <Pencil className="w-4 h-4" />
               </button>
             </Tooltip>
-            <Tooltip text="在资源管理器中打开日志目录">
+            <Tooltip text={t('settings.open_log_dir_tip')}>
               <button
                 onClick={() => hostCall('open_log_dir').catch(() => {})}
                 className="shrink-0 p-1.5 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-tertiary transition-colors"
@@ -841,8 +857,8 @@ export function SettingsView({
             </Tooltip>
           </div>
           <div className="flex items-center gap-2">
-            <label className="text-sm text-text-secondary w-24 shrink-0">Keep files</label>
-            <Tooltip text="Log 菜单中显示的历史日志文件数">
+            <label className="text-sm text-text-secondary w-24 shrink-0">{t('settings.keep_files')}</label>
+            <Tooltip text={t('settings.keep_files_tip')}>
               <select
                 value={keepFiles}
                 onChange={(e) => setKeepFiles(Number(e.target.value))}
@@ -857,8 +873,8 @@ export function SettingsView({
             </Tooltip>
           </div>
           <div className="flex items-center gap-2">
-            <label className="text-sm text-text-secondary w-24 shrink-0">Dev mode</label>
-            <Tooltip text="开发者模式 — 强制红色/黑客绿主题，解锁帧保存功能">
+            <label className="text-sm text-text-secondary w-24 shrink-0">{t('settings.dev_mode')}</label>
+            <Tooltip text={t('settings.dev_mode_tip')}>
             <button
               onClick={() => {
                 setDevMode(!devMode)
@@ -873,50 +889,49 @@ export function SettingsView({
             </Tooltip>
           </div>
           <div className="flex items-center gap-2">
-            <label className="text-sm text-text-secondary w-24 shrink-0">Mapping key</label>
+            <label className="text-sm text-text-secondary w-24 shrink-0">{t('settings.mapping_key')}</label>
             {recording ? (
               <>
                 <span className={`h-7 px-3 rounded-lg border border-accent bg-accent/10 text-accent text-sm font-mono flex items-center ${displayCombo ? '' : 'animate-pulse'}`}>
-                  {displayCombo || 'Press keys...'}
+                  {displayCombo || t('settings.press_keys')}
                 </span>
                 <span className="flex-1" />
-                <Tooltip text="快捷键触发指示器 — 按下快捷键时闪烁绿光">
+                <Tooltip text={t('settings.hotkey_indicator_tip')}>
                 <span className={`w-2.5 h-2.5 rounded-full shrink-0 transition-colors duration-100 ${triggerFlash ? 'bg-accent shadow-[0_0_6px_var(--color-accent)]' : 'bg-border'}`} />
                 </Tooltip>
-                <Tooltip text="取消修改，恢复原快捷键">
+                <Tooltip text={t('settings.cancel_mapping')}>
                 <button
                   onClick={cancelRecording}
                   className="px-2.5 h-7 rounded-md text-xs font-medium border border-border text-text-secondary hover:bg-bg-hover transition-colors"
                 >
-                  Cancel
+                  {t('settings.cancel_mapping')}
                 </button>
                 </Tooltip>
               </>
             ) : (
               <>
-                <Tooltip text="当前快捷键，点击 Change 可修改">
+                <Tooltip text={t('settings.mapping_key_tip')}>
                 <span className="h-7 px-3 rounded-lg border border-border bg-bg-primary text-sm font-mono text-text-primary flex items-center min-w-[80px]">
                   {mappingHotkey}
                 </span>
                 </Tooltip>
-                {/* ── Modifier-only warning badge ── */}
                 {isModifierOnly && (
-                  <Tooltip text="快捷键仅含修饰键（Ctrl/Alt/Shift/Win），可能与系统快捷键冲突。建议加入至少一个非修饰键，如字母、数字或 F1-F12。">
+                  <Tooltip text={t('settings.modifier_only_tip')}>
                   <span className="h-7 px-2 rounded-md text-xs font-medium text-accent-secondary bg-accent-secondary/10 border border-accent-secondary/30 flex items-center shrink-0 whitespace-nowrap">
-                    ⚠ 纯修饰键
+                    {t('settings.modifier_only')}
                   </span>
                   </Tooltip>
                 )}
                 <span className="flex-1" />
-                <Tooltip text="快捷键触发指示器 — 按下快捷键时闪烁绿光">
+                <Tooltip text={t('settings.hotkey_indicator_tip')}>
                 <span className={`w-2.5 h-2.5 rounded-full shrink-0 transition-colors duration-100 ${triggerFlash ? 'bg-accent shadow-[0_0_6px_var(--color-accent)]' : 'bg-border'}`} />
                 </Tooltip>
-                <Tooltip text="点击后按下新快捷键，松开所有按键确认">
+                <Tooltip text={t('settings.change_mapping_tip')}>
                 <button
                   onClick={startRecording}
                   className="px-2.5 h-7 rounded-md text-xs font-medium border border-border text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors"
                 >
-                  Change
+                  {t('settings.change_mapping')}
                 </button>
                 </Tooltip>
               </>
@@ -927,27 +942,27 @@ export function SettingsView({
 
       <SettingsCard
         icon={<RefreshCw className="w-4 h-4 text-text-secondary" />}
-        title="About"
+        title={t('settings.about')}
       >
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-sm text-text-primary">Game Agent Monitor</div>
-              <div className="text-xs text-text-muted">Version {appVersion}</div>
+              <div className="text-sm text-text-primary">{t('settings.game_agent_monitor')}</div>
+              <div className="text-xs text-text-muted">{t('settings.version', { version: appVersion })}</div>
             </div>
             <ActionBtn
               icon={hasUpdate
                 ? <RefreshCw className="w-3.5 h-3.5 text-accent" />
                 : <RefreshCw className="w-3.5 h-3.5" />}
-              label={hasUpdate ? 'Update Available' : 'Check Update'}
-              title={hasUpdate ? '新版本可用，点击安装' : '检查新版本'}
+              label={hasUpdate ? t('settings.check_update_latest') : t('settings.check_update')}
+              title={hasUpdate ? t('settings.check_update_latest_tip') : t('settings.check_update_tip')}
               variant={hasUpdate ? 'primary' : 'outline'}
               onClick={onCheckUpdate || (() => addLog('[Action] check update'))}
             />
           </div>
           <div className="border-t border-border pt-2 flex items-center justify-between">
             <div className="text-xs text-text-muted min-w-0">
-              <Tooltip text="在浏览器中打开项目 Gitee 页面">
+              <Tooltip text={t('settings.gitee_tip')}>
               <button
                 onClick={() => {
                   try {
@@ -962,13 +977,13 @@ export function SettingsView({
               </Tooltip>
               <span className="mx-2 text-border hidden sm:inline">|</span>
               <span className="hidden sm:inline">
-                C++ WebView2 · React · Tailwind · DXGI · WGC
+                {t('settings.tech_stack')}
               </span>
             </div>
             <ActionBtn
               icon={<span>★</span>}
-              label="Star on GitHub"
-              title="给项目点Star支持开发"
+              label={t('settings.star_github')}
+              title={t('settings.star_tip')}
               variant="primary"
               onClick={() => {
                 try {

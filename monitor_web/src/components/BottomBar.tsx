@@ -1,6 +1,7 @@
 // ═══ BottomBar — status strip: target, methods, FPS, dims, TCP, version ═══
 import { Monitor, Camera, Play, ArrowUp } from 'lucide-react'
 import { METHOD_SHORT } from '../lib/constants'
+import { useTranslation } from 'react-i18next'
 
 export function BottomBar({
   selWin,
@@ -25,6 +26,7 @@ export function BottomBar({
   hasUpdate?: boolean
   onCheckUpdate?: () => void
 }) {
+  const { t } = useTranslation()
   return (
     <div className="flex items-center h-9 bg-bg-secondary border-t border-border px-4 shrink-0 gap-3 text-xs text-text-secondary">
       {/* Target window */}
@@ -61,12 +63,12 @@ export function BottomBar({
       <span className="text-border/40 select-none">│</span>
       {/* Agent TCP connection */}
       <span className="inline-flex items-center gap-1.5">
-        <span className="text-text-muted">TCP :9999</span>
+        <span className="text-text-muted">{t('bottombar.tcp')}</span>
         <span
           className={`w-1.5 h-1.5 rounded-full ${agentConnected ? 'bg-success' : 'bg-text-muted'}`}
         />
         <span className="text-text-muted">
-          {agentConnected ? 'Agent在线' : '等待连接'}
+          {agentConnected ? t('bottombar.agent_online') : t('bottombar.waiting_connection')}
         </span>
       </span>
       <span className="flex-1" />
@@ -75,10 +77,10 @@ export function BottomBar({
         <button
           onClick={onCheckUpdate}
           className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-accent/15 text-accent hover:bg-accent/25 transition-colors cursor-pointer"
-          title="Update available — click to install"
+          title={t('bottombar.update_title')}
         >
           <ArrowUp className="w-3 h-3" />
-          Update
+          {t('bottombar.update')}
         </button>
       )}
       <span className="text-text-muted font-mono text-[11px]">{appVersion}</span>
