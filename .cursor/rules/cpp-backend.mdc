@@ -34,7 +34,9 @@ LOG_DEBUG("tag", "format", args...);  // Dev only
 
 `hostCall(cmd, args)` ↔ `HandleWebMessage` → `{"id", "result"}`；失败显式 error。
 
-关键：`list_windows` / `capture_window` / `capture_stream_*` / `send_input` / `get_version` / `read_live_log`。
+关键：`list_windows` / `capture_window` / `capture_stream_*` / `send_input` / `get_version` / `read_live_log` / `get_settings` / `set_settings`。
+
+Settings：用户数据在 `paths_get_appdata_dir()`（Prod=`GameAgentMonitor`，Dev=`GameAgentMonitor_Dev`）；优先 `set_settings` 整包原子写；启动用 `settings_get_boot_json` + `AddScriptToExecuteOnDocumentCreated`。
 
 ## Windows 路径（铁律 9）
 

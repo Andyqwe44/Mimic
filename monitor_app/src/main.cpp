@@ -568,6 +568,34 @@ HRESULT InitWebView2(HWND hwnd)
                     g_webview->add_NavigationCompleted(new NavCompletedHandler(), nullptr);
                     LOG("main", "perf: controller ready t+%llums", GetTickCount64() - g_boot_tick);
 
+                    // Inject user settings BEFORE first paint so React never flashes defaults.
+                    // Runs on every document create (full navigation); HMR module swaps keep state.
+                    {
+                        std::string boot = settings_get_boot_json();
+                        // Apply theme/accent in the same script so LoadingScreen is already tinted.
+                        std::string js =
+                            "window.__BOOT_SETTINGS__=" + boot + ";"
+                            "(function(){try{var s=window.__BOOT_SETTINGS__||{};"
+                            "var theme=s.theme||'light';"
+                            "var dark=theme==='dark'||(theme==='system'&&window.matchMedia('(prefers-color-scheme: dark)').matches);"
+                            "document.documentElement.classList.toggle('dark',!!dark);"
+                            "var useDev=!!s.devMode;"
+                            "var accent=(useDev?s.devAccent:s.normalAccent)||'#3B82F6';"
+                            "var sec=(useDev?s.devSecondaryAccent:s.normalSecondaryAccent)||'#F97316';"
+                            "document.documentElement.style.setProperty('--color-accent',accent);"
+                            "document.documentElement.style.setProperty('--color-accent-secondary',sec);"
+                            "var v=parseInt(String(accent).slice(1),16);if(!isNaN(v)){"
+                            "var r=Math.max(0,((v>>16)&255)-38),g=Math.max(0,((v>>8)&255)-38),b=Math.max(0,(v&255)-38);"
+                            "var h='#'+((r<<16)|(g<<8)|b).toString(16).padStart(6,'0');"
+                            "document.documentElement.style.setProperty('--color-accent-hover',h);}"
+                            "}catch(e){}})();";
+                        int wlen = MultiByteToWideChar(CP_UTF8, 0, js.c_str(), (int)js.size(), nullptr, 0);
+                        std::wstring wjs(wlen, L'\0');
+                        MultiByteToWideChar(CP_UTF8, 0, js.c_str(), (int)js.size(), &wjs[0], wlen);
+                        g_webview->AddScriptToExecuteOnDocumentCreated(wjs.c_str(), nullptr);
+                        LOG("main", "boot settings injected (%zub)", boot.size());
+                    }
+
                     // Register interfaces in GIT for cross-thread access.
                     // CoMarshalInterThreadInterfaceInStream fails (0x80040155)
                     // because WebView2 lacks COM proxy/stub. GIT works always.

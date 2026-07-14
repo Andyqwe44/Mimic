@@ -1,5 +1,31 @@
 # CLAUDE.md — TicTacToe → General Visual Game AI
 
+## Recent Changes (2026-07-14) — Settings persistence + AppData Dev/Prod + TopBar shortcuts
+
+### Settings write path fixed
+- Root cause: concurrent per-key `set_setting` RMW + double-escape → corrupt `settings.json` (`{},` / `\\\"` / empty `keepFiles`).
+- Fix: `set_settings` atomic bulk write (temp + MoveFileEx); mutex; corrupt detect+reset; `settingsReady` gate before auto-save.
+- Frontend: one debounced `hostCall('set_settings', { settings })`; load with typed checks.
+
+### AppData split (`/DDEV_MODE`)
+- Prod: `%LOCALAPPDATA%\GameAgentMonitor\`
+- Dev: `%LOCALAPPDATA%\GameAgentMonitor_Dev\`
+- Whole tree via `paths_get_appdata_dir()` (config/log/staging/WebView2). `get_settings_path()` uses that helper (no hardcoded folder).
+- Dev build stages `build_dev\config\settings.default.json` for seed.
+
+### Boot theme (no flash)
+- C++ `AddScriptToExecuteOnDocumentCreated` injects `window.__BOOT_SETTINGS__` + applies dark/accent CSS before Navigate.
+- TS `lib/bootSettings.ts` + `main.tsx` / App state init from boot snapshot.
+- `is_valid_settings_json` trims trailing newlines (defaults end with `\n`).
+
+### TopBar shortcuts
+- Locale: one cell + dropdown (En/简/繁).
+- Permission: one icon toggle (User ↔ Shield).
+- Theme: existing ThemeBtn.
+- One divider only between Start and the three cells.
+
+---
+
 ## Recent Changes (2026-07-14) — DevMode Overlay + SSOT (企业级)
 
 仿 Android Developer Options，解决「关开发者模式后 Demo 状态仍骗用户」。

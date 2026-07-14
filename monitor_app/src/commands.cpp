@@ -1861,41 +1861,16 @@ static std::string cmd_download_update(const std::string& diffJsonStr) {
 }
 
 // ── Settings persistence ──────────────────────────────────
-// Forward declaration of paths functions (defined in main.cpp via paths.cpp)
-// We duplicate the path logic here to keep commands.cpp self-contained.
+// Lives under paths_get_appdata_dir()\config\settings.json
+// (Prod: GameAgentMonitor, Dev: GameAgentMonitor_Dev — compile-time /DDEV_MODE).
+// Outside the install dir so app updates never wipe personalization.
 static std::string g_settings_path;
+static std::mutex g_settings_mtx;
 
 static const char* get_settings_path() {
     if (!g_settings_path.empty()) return g_settings_path.c_str();
-
-    // Use %LOCALAPPDATA%\GameAgentMonitor\config\settings.json
-    wchar_t localAppData[MAX_PATH];
-    if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, localAppData))) {
-        int len = WideCharToMultiByte(CP_UTF8, 0, localAppData, -1, nullptr, 0, nullptr, nullptr);
-        std::string base(len - 1, '\0');
-        WideCharToMultiByte(CP_UTF8, 0, localAppData, -1, &base[0], len, nullptr, nullptr);
-        g_settings_path = base + "\\GameAgentMonitor\\config\\settings.json";
-    } else {
-        // Fallback: next to EXE
-        char exeDir[MAX_PATH];
-        GetModuleFileNameA(nullptr, exeDir, MAX_PATH);
-        char* slash = strrchr(exeDir, '\\');
-        if (slash) *slash = '\0';
-        g_settings_path = std::string(exeDir) + "\\config\\settings.json";
-    }
-
-    // Ensure parent directory exists
-    std::string dir = g_settings_path;
-    size_t lastSlash = dir.rfind('\\');
-    if (lastSlash != std::string::npos) {
-        std::string parent = dir.substr(0, lastSlash);
-        CreateDirectoryA(parent.c_str(), nullptr);
-        // Also create parent's parent in case config/ doesn't exist yet
-        size_t prevSlash = parent.rfind('\\');
-        if (prevSlash != std::string::npos)
-            CreateDirectoryA(parent.substr(0, prevSlash).c_str(), nullptr);
-    }
-
+    // paths_get_appdata_dir() already ensure_dir's the config folder
+    g_settings_path = paths_get_appdata_dir() + "\\config\\settings.json";
     return g_settings_path.c_str();
 }
 
@@ -1912,83 +1887,160 @@ static std::string read_file(const char* path) {
     return content;
 }
 
-static std::string cmd_get_settings() {
+// Detect corrupt settings written by the old double-escape / concurrent-RMW path.
+static void trim_json_inplace(std::string& json) {
+    while (!json.empty() && (unsigned char)json.front() <= ' ') json.erase(json.begin());
+    while (!json.empty() && (unsigned char)json.back() <= ' ') json.pop_back();
+}
+
+static bool is_valid_settings_json(const std::string& jsonIn) {
+    std::string json = jsonIn;
+    trim_json_inplace(json);
+    if (json.size() < 2 || json.front() != '{' || json.back() != '}') return false;
+    if (json.rfind("{},", 0) == 0) return false;           // classic corrupt prefix
+    if (json.find("\":,") != std::string::npos) return false; // empty value e.g. "keepFiles":,
+    if (json.find("\\\"") != std::string::npos) return false; // over-escaped quotes
+    return true;
+}
+
+static std::string json_unescape(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    for (size_t i = 0; i < s.size(); i++) {
+        if (s[i] == '\\' && i + 1 < s.size()) {
+            char n = s[++i];
+            if (n == '"') out += '"';
+            else if (n == '\\') out += '\\';
+            else if (n == 'n') out += '\n';
+            else if (n == 't') out += '\t';
+            else if (n == 'r') out += '\r';
+            else out += n;
+        } else {
+            out += s[i];
+        }
+    }
+    return out;
+}
+
+// Atomic write: temp file + ReplaceFile / MoveFileEx
+static bool write_settings_file(const std::string& json) {
+    const char* path = get_settings_path();
+    std::string pathStr(path);
+    size_t lastSlash = pathStr.rfind('\\');
+    if (lastSlash != std::string::npos)
+        CreateDirectoryA(pathStr.substr(0, lastSlash).c_str(), nullptr);
+
+    std::string tmp = pathStr + ".tmp";
+    FILE* f = fopen(tmp.c_str(), "wb");
+    if (!f) return false;
+    size_t n = fwrite(json.data(), 1, json.size(), f);
+    fclose(f);
+    if (n != json.size()) {
+        DeleteFileA(tmp.c_str());
+        return false;
+    }
+    if (!MoveFileExA(tmp.c_str(), path, MOVEFILE_REPLACE_EXISTING)) {
+        DeleteFileA(tmp.c_str());
+        return false;
+    }
+    return true;
+}
+
+// Raw settings object for WebView2 boot injection (before first paint).
+std::string settings_get_boot_json() {
+    std::lock_guard<std::mutex> lk(g_settings_mtx);
     const char* path = get_settings_path();
     std::string json = read_file(path);
+    trim_json_inplace(json);
+    if (json.empty() || json.size() < 3 || !is_valid_settings_json(json)) return "{}";
+    return json;
+}
+
+static std::string cmd_get_settings() {
+    std::lock_guard<std::mutex> lk(g_settings_mtx);
+    const char* path = get_settings_path();
+    std::string json = read_file(path);
+    trim_json_inplace(json);
     if (json.empty() || json.size() < 3) json = "{}";
+    if (!is_valid_settings_json(json)) {
+        LOG_WARN("cmd", "get_settings: corrupt file (%zub), resetting to {}", json.size());
+        // Keep a .bak for forensics, then reset
+        std::string bak = std::string(path) + ".bak";
+        MoveFileExA(path, bak.c_str(), MOVEFILE_REPLACE_EXISTING);
+        json = "{}";
+        write_settings_file(json);
+    }
     LOG("cmd", "get_settings: %s -> %zub", path, json.size());
     return "{\"ok\":true,\"settings\":" + json + "}";
 }
 
-static std::string cmd_set_setting(const std::string& key, const std::string& value) {
-    if (key.empty()) return R"({"ok":false,"error":"key required"})";
+// Bulk replace — preferred path. Frontend sends one object; no concurrent RMW.
+static std::string cmd_set_settings(const std::string& settingsJson) {
+    if (settingsJson.size() < 2 || settingsJson.front() != '{' || settingsJson.back() != '}')
+        return R"({"ok":false,"error":"settings must be a JSON object"})";
+    if (!is_valid_settings_json(settingsJson))
+        return R"({"ok":false,"error":"invalid settings JSON"})";
 
+    std::lock_guard<std::mutex> lk(g_settings_mtx);
+    if (!write_settings_file(settingsJson))
+        return R"({"ok":false,"error":"write failed"})";
+
+    LOG("cmd", "set_settings: %zub", settingsJson.size());
+    return R"({"ok":true})";
+}
+
+// Single-key update. `value` must be a JSON literal already
+// (frontend passes JSON.stringify(x); json_get_str + unescape recovers it).
+static std::string cmd_set_setting(const std::string& key, const std::string& valueLiteral) {
+    if (key.empty()) return R"({"ok":false,"error":"key required"})";
+    if (valueLiteral.empty()) return R"({"ok":false,"error":"value required"})";
+
+    std::lock_guard<std::mutex> lk(g_settings_mtx);
     const char* path = get_settings_path();
     std::string json = read_file(path);
-    if (json.empty() || json.size() < 3) json = "{}";
+    if (json.empty() || json.size() < 3 || !is_valid_settings_json(json)) json = "{}";
 
-    // Simple JSON key-value update: add/overwrite key in the object
-    // Strip outer braces
     std::string inner = json;
     if (!inner.empty() && inner.front() == '{') inner = inner.substr(1);
     if (!inner.empty() && inner.back() == '}') inner.pop_back();
 
-    // Remove whitespace from ends
-    while (!inner.empty() && (inner.front() == ' ' || inner.front() == '\n' || inner.front() == '\r')) inner = inner.substr(1);
-    while (!inner.empty() && (inner.back() == ' ' || inner.back() == '\n' || inner.back() == '\r')) inner.pop_back();
+    while (!inner.empty() && (inner.front() == ' ' || inner.front() == '\n' || inner.front() == '\r'))
+        inner = inner.substr(1);
+    while (!inner.empty() && (inner.back() == ' ' || inner.back() == '\n' || inner.back() == '\r' || inner.back() == ','))
+        inner.pop_back();
 
-    // Check if key already exists — remove old value
     std::string search = "\"" + key + "\":";
     size_t pos = inner.find(search);
     if (pos != std::string::npos) {
-        // Find end of value (comma or end of string)
         size_t end = pos + search.length();
         int depth = 0;
         bool inStr = false;
         while (end < inner.size()) {
             char c = inner[end];
             if (inStr) {
-                if (c == '"' && inner[end-1] != '\\') inStr = false;
+                if (c == '"' && inner[end - 1] != '\\') inStr = false;
             } else {
                 if (c == '"') inStr = true;
                 else if (c == '{' || c == '[') depth++;
                 else if (c == '}' || c == ']') { if (depth > 0) depth--; else break; }
-                else if (c == ',' && depth == 0) { end++; break; } // include comma
+                else if (c == ',' && depth == 0) { end++; break; }
             }
             end++;
         }
         inner.erase(pos, end - pos);
-        // Remove trailing comma at end
-        while (!inner.empty() && inner.back() == ',') inner.pop_back();
+        while (!inner.empty() && (inner.back() == ',' || inner.back() == ' ')) inner.pop_back();
+        while (!inner.empty() && (inner.front() == ',' || inner.front() == ' ')) inner = inner.substr(1);
     }
 
-    // Append new key-value
-    if (!inner.empty() && inner.back() != ',' && inner.front() != '\0') inner += ",";
-    // JSON-escape the value string
-    std::string escaped;
-    for (char c : value) {
-        if (c == '"') escaped += "\\\"";
-        else if (c == '\\') escaped += "\\\\";
-        else if (c == '\n') escaped += "\\n";
-        else escaped += c;
-    }
-    inner += "\"" + key + "\":" + escaped;
-
+    if (!inner.empty()) inner += ",";
+    // Insert JSON literal as-is (do NOT re-escape — that corrupted the file)
+    inner += "\"" + key + "\":" + valueLiteral;
     json = "{" + inner + "}";
 
-    // Write back
-    const char* dir = get_settings_path();
-    std::string dirStr(dir);
-    size_t lastSlash = dirStr.rfind('\\');
-    if (lastSlash != std::string::npos)
-        CreateDirectoryA(dirStr.substr(0, lastSlash).c_str(), nullptr);
+    if (!write_settings_file(json))
+        return R"({"ok":false,"error":"write failed"})";
 
-    FILE* f = fopen(dir, "wb");
-    if (!f) return R"({"ok":false,"error":"write failed"})";
-    fwrite(json.data(), 1, json.size(), f);
-    fclose(f);
-
-    LOG("cmd", "set_setting: %s=%s", key.c_str(), value.c_str());
+    LOG("cmd", "set_setting: %s=%s", key.c_str(), valueLiteral.c_str());
     return R"({"ok":true})";
 }
 
@@ -2255,8 +2307,13 @@ std::string dispatch_command(const std::string& json) {
     else if (cmd == "get_settings") {
         result = cmd_get_settings();
     }
+    else if (cmd == "set_settings") {
+        result = cmd_set_settings(json_get_obj(args, "settings"));
+    }
     else if (cmd == "set_setting") {
-        result = cmd_set_setting(json_get_str(args, "key"), json_get_str(args, "value"));
+        // value is JSON.stringify(x) from TS → unescape to recover JSON literal
+        result = cmd_set_setting(json_get_str(args, "key"),
+                                 json_unescape(json_get_str(args, "value")));
     }
 
     if (id <= 0) return result; // fire-and-forget (no id field)
@@ -2291,21 +2348,9 @@ extern unsigned long long g_boot_tick;  // perf: set in WinMain (main.cpp) for s
 
 void backend_init() {
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED); // STA for WebView2/WIC
-#ifdef DEV_MODE
-    // Dev: keep logs next to the exe (self-contained build_dev\bin\, read by devprobe;
-    // the dev dir is always writable, no need to reach into appdata).
-    char exe_dir[MAX_PATH];
-    GetModuleFileNameA(nullptr, exe_dir, MAX_PATH);
-    char* last_slash = strrchr(exe_dir, '\\');
-    if (last_slash) *last_slash = '\0';
-    std::string log_dir = std::string(exe_dir) + "\\log";
-#else
-    // Prod: logs under %LOCALAPPDATA%\GameAgentMonitor\log — writable regardless of the
-    // install drive (Program Files\bin is not user-writable, same root cause as the
-    // white-screen bug) and cleaned by the uninstaller. paths_get_appdata_dir() has
-    // already ensure_dir'd the log\ subfolder; paths_init() ran before backend_init().
+    // Logs under AppData\log (Prod: GameAgentMonitor, Dev: GameAgentMonitor_Dev).
+    // Writable for non-admin users; cleaned by uninstaller for Prod.
     std::string log_dir = paths_get_appdata_dir() + "\\log";
-#endif
     capture_log_init("agent", APP_VERSION, log_dir.c_str(), 5, 5000);
     capture_log_set_notify(on_log_notify);  // C++ LOG() → push to TS in real-time
 #ifdef DEV_MODE

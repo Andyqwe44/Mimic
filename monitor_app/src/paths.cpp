@@ -108,9 +108,17 @@ std::string paths_get_install_dir() {
 std::string paths_get_appdata_dir() {
     if (!g_appdata_dir.empty()) return g_appdata_dir;
 
+    // Compile-time split (same pattern as mutex / window class):
+    //   Prod  → %LOCALAPPDATA%\GameAgentMonitor
+    //   Dev   → %LOCALAPPDATA%\GameAgentMonitor_Dev  (/DDEV_MODE)
+    // Release installer never defines DEV_MODE, so end users only see Prod.
     wchar_t localAppData[MAX_PATH];
     if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, localAppData))) {
+#ifdef DEV_MODE
+        g_appdata_dir = narrow(localAppData) + "\\GameAgentMonitor_Dev";
+#else
         g_appdata_dir = narrow(localAppData) + "\\GameAgentMonitor";
+#endif
     } else {
         // Last resort
         g_appdata_dir = paths_get_install_dir() + "\\data";

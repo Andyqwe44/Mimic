@@ -227,6 +227,8 @@ its own kind; the two can coexist on one machine):
 | Prod  | `Global\GameAgentMonitor_8A3F2D`     | `GameAgentMonitor`     | `Game Agent Monitor`       |
 | Dev   | `Global\GameAgentMonitor_8A3F2D_Dev` | `GameAgentMonitor_Dev` | `Game Agent Monitor (Dev)` |
 
+**AppData** (same `/DDEV_MODE` split): Prod → `%LOCALAPPDATA%\GameAgentMonitor\`; Dev → `%LOCALAPPDATA%\GameAgentMonitor_Dev\` (config/log/staging/WebView2). Settings use atomic `set_settings`; boot injects `__BOOT_SETTINGS__` before first paint.
+
 If another instance is running, activates its window (restore + foreground) and exits.
 
 **Exit code = the only signal (no log, no console).** The guard runs BEFORE

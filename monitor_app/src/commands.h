@@ -37,6 +37,10 @@ void stream_bridge_push_frame(const uint8_t* bgra, int w, int h);
 /// Accessor for main window HWND (used by get_self_rect command).
 void* get_main_hwnd();
 
+/// Raw settings JSON object for boot injection (never empty — "{}" on miss/corrupt).
+/// Used by main.cpp AddScriptToExecuteOnDocumentCreated before first paint.
+std::string settings_get_boot_json();
+
 /// Initialize backend subsystems (logger, COM, WGC apartment).
 void backend_init();
 

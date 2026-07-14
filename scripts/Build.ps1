@@ -149,11 +149,11 @@ function Build-MonitorApp {
     $out = if ($Dev) { 'build_dev' } else { 'build' }
     Push-Location $dir
     try {
-        # Fresh package layout. Prod mirrors the release dir: build\{bin,frontend,config}.
-        # Dev only needs build_dev\bin (Vite serves the frontend in dev).
+        # Fresh package layout. Prod: build\{bin,frontend,config}. Dev: build_dev\{bin,config}
+        # (Dev still needs settings.default.json so paths_init can seed AppData_Dev.)
         if (Test-Path $out) { Remove-Item -Recurse -Force $out }
-        New-Item -ItemType Directory -Force -Path "$out\bin" | Out-Null
-        if (-not $Dev) { New-Item -ItemType Directory -Force -Path "$out\frontend", "$out\config" | Out-Null }
+        New-Item -ItemType Directory -Force -Path "$out\bin", "$out\config" | Out-Null
+        if (-not $Dev) { New-Item -ItemType Directory -Force -Path "$out\frontend" | Out-Null }
 
         $inc = @('/I', 'src', '/I', 'dep', '/I', "$Root\capture\include", '/I', "$Root\common\include")
         $cflags = if ($Dev) {
@@ -185,8 +185,12 @@ function Build-MonitorApp {
         (@('common', 'sendinput', 'winapi', 'postmessage', 'driver') | ForEach-Object { "$Root\input\build\input_$_.dll" })
         foreach ($d in $dlls) { Copy-Item $d "$out\bin\" -Force }
 
+        # Always stage settings.default.json (Dev seeds GameAgentMonitor_Dev; Prod ships in package).
+        $settings = Join-Path $Root 'config\settings.default.json'
+        if (Test-Path $settings) { Copy-Item $settings "$out\config\" -Force }
+
         if (-not $Dev) {
-            # Prod package: updater(+.new) + frontend(dist) + config into the layout.
+            # Prod package: updater(+.new) + frontend(dist) into the layout.
             $upd = Join-Path $Root 'updater\build\updater.exe'
             if (Test-Path $upd) {
                 Copy-Item $upd "$out\bin\" -Force
@@ -194,8 +198,6 @@ function Build-MonitorApp {
             }
             $dist = Join-Path $Root 'monitor_web\dist'
             if (Test-Path $dist) { Copy-Item "$dist\*" "$out\frontend\" -Recurse -Force }
-            $settings = Join-Path $Root 'config\settings.default.json'
-            if (Test-Path $settings) { Copy-Item $settings "$out\config\" -Force }
         }
     }
     finally { Pop-Location }

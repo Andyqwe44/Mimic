@@ -21,7 +21,9 @@
     "start": "Start",
     "start_tip": "Start agent task",
     "stop": "Stop",
-    "stop_tip": "Stop all running tasks"
+    "stop_tip": "Stop all running tasks",
+    "perm_normal_abbr": "普",
+    "perm_admin_abbr": "管"
   },
 
   "bottombar": {
