@@ -458,6 +458,8 @@ locales/: en.json, zh-CN.json, zh-TW.json
 
 **i18n（摘要）**：Settings → General → Language；`settings.json` 键 `locale`；插值用 `{var}`（非 `{{var}}`）；`ActionBtn` 宽度按拉丁=1 / CJK≈2 单位自动选档。细则 → `.cursor/rules/monitor-web.mdc`；变更史 → `CLAUDE.old.md`。
 
+**DevMode overlays（摘要 · 铁律 5）**：`display = demoOverlay ?? SSOT`。Demo（Agent/更新弹窗/自检）只写 overlay，禁止写真相。关 Dev = 清 overlay → 关能力（dump/Test Target/真自检）→ `get_agent_status` 重检。假更新弹窗纯前端，不调下载 API。细则 → `monitor-web.mdc`；史 → `CLAUDE.old.md`。
+
 ---
 
 ## Known Issues

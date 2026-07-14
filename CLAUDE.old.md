@@ -1,5 +1,32 @@
 # CLAUDE.md — TicTacToe → General Visual Game AI
 
+## Recent Changes (2026-07-14) — DevMode Overlay + SSOT (企业级)
+
+仿 Android Developer Options，解决「关开发者模式后 Demo 状态仍骗用户」。
+
+### 模型
+```
+displayX = demoOverlay ?? realSSOT
+```
+
+| 层 | 状态 | 关 DevMode |
+|----|------|------------|
+| Overlay | `demoAgentOverride` / `demoUpdateInfo(+progress)` / `demoSelfTest` | 全部清 null |
+| Capabilities | frame dump、Test Target、真自检 running | 关 dump；关 Test Target；abort+disconnect 自检 |
+| SSOT | `agentConnectedReal` ← `get_agent_status`（TCP :9999 clients）；真 `updateInfo` | **重检**，不盲写 false / 不回滚快照 |
+
+### 关键实现
+- `App.tsx`：`leaveDevModeCleanup` 三步（清 overlay → 关能力 → `refreshAgentStatus`）；`setDevModeSafe` 点击关 Dev 同步调用
+- DevTools UI Demos 只 `setDemo*`；假更新弹窗纯前端，下载按钮 no-op
+- C++ `get_agent_status` → `{"connected":bool,"clients":n}`；前端 3s 轮询 + 关 Dev 时再刷
+- 文档：`.cursor/rules/monitor-web.mdc`「DevMode overlays」；CLAUDE.md UI 摘要
+
+### 刻意不做
+- 骨架屏 3s：全屏锁操作，关 Dev 路径不可达，不清
+- 盲回滚进 Dev 前的快照（会在「Dev 期间真连上」时撒谎）
+
+---
+
 ## Recent Changes (2026-07-14) — i18n full UI + interpolation / CJK button width
 
 ### Full zh-CN / zh-TW UI copy

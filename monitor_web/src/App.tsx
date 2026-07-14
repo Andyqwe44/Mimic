@@ -43,9 +43,16 @@ export default function App() {
   const [appReady, setAppReady] = useState(false)   // false = show startup splash overlay
   const [previewSkeleton, setPreviewSkeleton] = useState(false)  // Dev: manual skeleton preview
   const [isAdmin, setIsAdmin] = useState(false)  // current process elevation (admin?)
+  // ── Update SSOT (real check_update / download only) ──
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
   const [updateDownloading, setUpdateDownloading] = useState(false)
   const [updateProgress, setUpdateProgress] = useState<UpdateProgressMsg | null>(null)
+  // ── Dev UI overlays — never written into SSOT (企业级：display = overlay ?? real) ──
+  const [demoAgentOverride, setDemoAgentOverride] = useState<boolean | null>(null)
+  const [demoUpdateInfo, setDemoUpdateInfo] = useState<UpdateInfo | null>(null)
+  const [demoUpdateDownloading, setDemoUpdateDownloading] = useState(false)
+  const [demoUpdateProgress, setDemoUpdateProgress] = useState<UpdateProgressMsg | null>(null)
+  const [demoSelfTest, setDemoSelfTest] = useState<SelfTestState | null>(null)
   const [rightWidth, setRightWidth] = useState(DEFAULT_RIGHT_WIDTH)
   const [rightCollapsed, setRightCollapsed] = useState(false)
 
@@ -241,23 +248,23 @@ export default function App() {
     hostCall('switch_permission', { admin: toAdmin }).catch(() => {})
   }, [])
 
-  // ── Dev demo backdoors: inject fake UI states without backend ──
+  // ── Dev UI demos: write overlays only — never SSOT (铁律 5 / 企业级) ──
   const devInjectUpdate = useCallback((info: UpdateInfo) => {
-    setUpdateInfo(info)
-    setUpdateDownloading(false)
-    setUpdateProgress(null)
-    addLog(`[Dev] inject update: status=${info.status}`)
+    setDemoUpdateInfo({ ...info, _dev: true })
+    setDemoUpdateDownloading(false)
+    setDemoUpdateProgress(null)
+    addLog(`[Dev] overlay update: status=${info.status}`)
   }, [])
   const devInjectSelfTest = useCallback((st: SelfTestState) => {
-    setSelfTest(st)
-    addLog(`[Dev] inject selftest: phase=${st.phase}`)
+    setDemoSelfTest({ ...st, _dev: true } as SelfTestState)
+    addLog(`[Dev] overlay selftest: phase=${st.phase}`)
   }, [])
   const devInjectAgent = useCallback((connected: boolean) => {
-    setAgentConnected(connected)
-    addLog(`[Dev] inject agent: ${connected ? 'connected' : 'disconnected'}`)
+    setDemoAgentOverride(connected)
+    addLog(`[Dev] overlay agent: ${connected ? 'connected' : 'disconnected'}`)
   }, [])
 
-  // Fake download progress snapshot (static, no animation)
+  // Fake download progress — overlay only, no hostCall
   const devInjectDownload = useCallback((phase: 'download' | 'done' | 'error') => {
     const cur = appVersion.replace(/^v/, '')
     const fakeDiff = [
@@ -268,20 +275,20 @@ export default function App() {
       { path: 'frontend/assets/index-ByT4uD_r.css', size: 65536, dl: 61440 },
       { path: 'frontend/index.html', size: 2048, dl: 2048 },
     ]
-    setUpdateInfo({
+    setDemoUpdateInfo({
       status: 'update', current: cur, latest: '9.9.99',
       name: 'v9.9.99 — Demo Download (模拟)', body: '', url: '',
       diff: fakeDiff, message: '', mandatory: false, mode: 'incremental', _dev: true,
-    } as any)
-    setUpdateDownloading(true)
+    })
+    setDemoUpdateDownloading(true)
     if (phase === 'download') {
-      setUpdateProgress({ phase: 'download', current_file: 3, total_files: 6, skipped_files: 0, file: 'frontend/assets/index-Cys4Z6Yf.js', done_bytes: 460800, total_bytes: 1048576, skipped_bytes: 0 })
+      setDemoUpdateProgress({ phase: 'download', current_file: 3, total_files: 6, skipped_files: 0, file: 'frontend/assets/index-Cys4Z6Yf.js', done_bytes: 460800, total_bytes: 1048576, skipped_bytes: 0 })
     } else if (phase === 'done') {
-      setUpdateProgress({ phase: 'done', current_file: 6, total_files: 6, skipped_files: 0, file: '', done_bytes: 1048576, total_bytes: 1048576, skipped_bytes: 0 })
+      setDemoUpdateProgress({ phase: 'done', current_file: 6, total_files: 6, skipped_files: 0, file: '', done_bytes: 1048576, total_bytes: 1048576, skipped_bytes: 0 })
     } else {
-      setUpdateProgress({ phase: 'error', current_file: 3, total_files: 6, skipped_files: 0, file: 'frontend/index.html', done_bytes: 460800, total_bytes: 1048576, skipped_bytes: 0, error_file: 'frontend/index.html' })
+      setDemoUpdateProgress({ phase: 'error', current_file: 3, total_files: 6, skipped_files: 0, file: 'frontend/index.html', done_bytes: 460800, total_bytes: 1048576, skipped_bytes: 0, error_file: 'frontend/index.html' })
     }
-    addLog(`[Dev] inject download: phase=${phase}`)
+    addLog(`[Dev] overlay download: phase=${phase}`)
   }, [appVersion])
 
   // ── Update check / download handlers ──
@@ -360,19 +367,21 @@ export default function App() {
 
   const downloadUpdate = useCallback(() => {
     if (!updateInfo) return
-    if ((updateInfo as any)._dev) { addLog('[update] dev mock — download skipped'); return }
-    startDownload((updateInfo as any).diff)
+    if (updateInfo._dev) { addLog('[update] unexpected _dev on SSOT — skipped'); return }
+    startDownload(updateInfo.diff || [])
   }, [updateInfo, startDownload])
 
   // Clear staging dir — user opts to "重新下载" instead of resuming.
   const clearStagingAndDownload = useCallback(async () => {
+    if (!updateInfo) return
+    if (updateInfo._dev) { addLog('[update] unexpected _dev on SSOT — skipped'); return }
     await hostCall('clear_staging').catch(() => {})
-    startDownload((updateInfo as any).diff)
+    startDownload(updateInfo.diff || [])
   }, [updateInfo, startDownload])
 
   // Full update: re-query with force_full to get the complete file set, then download.
   const forceFullUpdate = useCallback(async () => {
-    if ((updateInfo as any)._dev) { addLog('[update] dev mock — force full skipped'); return }
+    if (updateInfo?._dev) { addLog('[update] unexpected _dev on SSOT — skipped'); return }
     addLog('[update] fetching full package...')
     try {
       const info = await hostCall('check_update', { force_full: true })
@@ -750,11 +759,6 @@ export default function App() {
   const [saveStreamFrames, setSaveStreamFrames] = useState(false)
   const [frameDumpDir, setFrameDumpDir] = useState('')
 
-  // Auto-switch from Dev tab when devMode is turned off
-  useEffect(() => {
-    if (!devMode && tab === 'DevTools') setTab('Settings')
-  }, [devMode, tab])
-
   // ── Target window state (polled every 500ms) ──
   const [winState, setWinState] = useState('desktop')
   const lastWinStateRef = useRef('desktop')
@@ -772,7 +776,8 @@ export default function App() {
   const [snapshotLatency, setSnapshotLatency] = useState<number | null>(null)
   const [streamFps, setStreamFps] = useState(0)
   const [targetDims, setTargetDims] = useState<{w:number,h:number} | null>(null)
-  const [agentConnected, setAgentConnected] = useState(false) // placeholder — toggleable via Dev demo
+  const [agentConnectedReal, setAgentConnectedReal] = useState(false) // SSOT — TCP :9999 clients
+  // display = overlay ?? real (computed below after demo state)
 
   // ── Self-target detection: GAM window rect + virtual screen rect ──
   const [selfRect, setSelfRect] = useState<Rect | null>(null)
@@ -1001,6 +1006,66 @@ export default function App() {
   const startStreamRef = useRef(startStream)
   startStreamRef.current = startStream
 
+  // Leave Dev mode — 企业级三步：清 overlay → 关 Dev 能力 → 重检 SSOT
+  const selfTestLiveRef = useRef(selfTest)
+  selfTestLiveRef.current = selfTest
+  const frameDumpRef = useRef({ capture: false, stream: false, dir: '' })
+  frameDumpRef.current = { capture: saveCaptureFrames, stream: saveStreamFrames, dir: frameDumpDir }
+
+  const refreshAgentStatus = useCallback(async () => {
+    try {
+      const r = await hostCall('get_agent_status')
+      setAgentConnectedReal(!!r?.connected)
+    } catch {
+      setAgentConnectedReal(false)
+    }
+  }, [])
+
+  // Startup + periodic truth (SSOT); overlay never touches this
+  useEffect(() => {
+    refreshAgentStatus()
+    const id = window.setInterval(() => { refreshAgentStatus() }, 3000)
+    return () => window.clearInterval(id)
+  }, [refreshAgentStatus])
+
+  const leaveDevModeCleanup = useCallback(() => {
+    // ① Clear UI overlays (Demo 层)
+    setDemoAgentOverride(null)
+    setDemoUpdateInfo(null)
+    setDemoUpdateDownloading(false)
+    setDemoUpdateProgress(null)
+    setDemoSelfTest(null)
+
+    // ② Disable Dev capabilities (Android-style)
+    const st = selfTestLiveRef.current
+    if (st.phase === 'running') {
+      selfTestAbort.current = true
+      hostCall('selftest_disconnect').catch(() => {})
+      setSelfTest({ phase: 'idle' })
+    }
+    const dump = frameDumpRef.current
+    if (dump.capture || dump.stream) {
+      setSaveCaptureFrames(false)
+      setSaveStreamFrames(false)
+      hostCall('set_frame_dump', { capture: false, stream: false, dir: dump.dir }).catch(() => {})
+    }
+    hostCall('find_test_target')
+      .then((r: any) => { if (r?.hwnd) return hostCall('launch_test_target') })
+      .catch(() => {})
+
+    setTab((t) => (t === 'DevTools' ? 'Settings' : t))
+
+    // ③ Re-detect from SSOT
+    refreshAgentStatus().then(() => {
+      addLog('[Dev] left dev mode — overlays cleared, caps off, SSOT refreshed')
+    })
+  }, [refreshAgentStatus])
+
+  const setDevModeSafe = useCallback((on: boolean) => {
+    if (!on) leaveDevModeCleanup()
+    setDevMode(on)
+  }, [leaveDevModeCleanup])
+
   const runSelfTestFlow = useCallback(
     async (perCell: number) => {
       if (selfTest.phase === 'running') return
@@ -1097,6 +1162,14 @@ export default function App() {
     [measureLayout, checkVerticalLayout],
   )
 
+  // ═══ Display = overlay ?? SSOT (企业级；关 Dev 清 overlay 后自动回到真相) ═══
+  const displayAgentConnected = demoAgentOverride ?? agentConnectedReal
+  const displayUpdateInfo = demoUpdateInfo ?? updateInfo
+  const displayUpdateDownloading = demoUpdateInfo ? demoUpdateDownloading : updateDownloading
+  const displayUpdateProgress = demoUpdateInfo ? demoUpdateProgress : updateProgress
+  const displaySelfTest = demoSelfTest ?? selfTest
+  const displayHasUpdate = displayUpdateInfo?.status === 'update'
+
   // ═══ Render ═══
   return (
     <div className="relative h-full flex flex-col bg-bg-primary">
@@ -1153,13 +1226,13 @@ export default function App() {
               }}
               keepFiles={keepFiles} setKeepFiles={setKeepFiles}
               appVersion={appVersion} theme={theme} setTheme={setTheme}
-              devMode={devMode} setDevMode={setDevMode}
+              devMode={devMode} setDevMode={setDevModeSafe}
               mouseMode={mouseMode} setMouseMode={setMouseMode}
               keyMode={keyMode} setKeyMode={setKeyMode}
               mappingHotkey={mappingHotkey} setMappingHotkey={setMappingHotkey}
               selfTargetMode={selfTargetMode} setSelfTargetMode={setSelfTargetMode}
               onCheckUpdate={checkForUpdate}
-              hasUpdate={updateInfo?.status === 'update'}
+              hasUpdate={displayHasUpdate}
               isAdmin={isAdmin}
               onSwitchPermission={switchPermission}
             />
@@ -1227,8 +1300,8 @@ export default function App() {
             previewing={previewing} fps={streamFps}
             targetDims={targetDims}
             appVersion={appVersion}
-            agentConnected={agentConnected}
-            hasUpdate={updateInfo?.status === 'update'}
+            agentConnected={displayAgentConnected}
+            hasUpdate={displayHasUpdate}
             onCheckUpdate={checkForUpdate}
           />
         </div>
@@ -1314,21 +1387,46 @@ export default function App() {
 
       {/* ── Self-Test report overlay ── */}
       <SelfTestModal
-        state={selfTest}
-        onClose={() => setSelfTest({ phase: 'idle' })}
-        onAbort={() => { selfTestAbort.current = true }}
+        state={displaySelfTest}
+        onClose={() => {
+          if (demoSelfTest) setDemoSelfTest(null)
+          else setSelfTest({ phase: 'idle' })
+        }}
+        onAbort={() => {
+          if (demoSelfTest) setDemoSelfTest(null)
+          else selfTestAbort.current = true
+        }}
       />
 
-      {/* ── Update available modal ── */}
-      {updateInfo && (
+      {/* ── Update modal: real SSOT or Dev overlay (no backend for demos) ── */}
+      {displayUpdateInfo && (
         <UpdateModal
-          info={updateInfo}
-          downloading={updateDownloading}
-          progress={updateProgress}
-          onDownload={downloadUpdate}
-          onClearAndDownload={clearStagingAndDownload}
-          onForceUpdate={forceFullUpdate}
-          onClose={() => { setUpdateInfo(null); setUpdateDownloading(false); setUpdateProgress(null) }}
+          info={displayUpdateInfo}
+          downloading={displayUpdateDownloading}
+          progress={displayUpdateProgress}
+          onDownload={() => {
+            if (demoUpdateInfo) { addLog('[update] demo overlay — no download'); return }
+            downloadUpdate()
+          }}
+          onClearAndDownload={() => {
+            if (demoUpdateInfo) { addLog('[update] demo overlay — no clear/download'); return }
+            clearStagingAndDownload()
+          }}
+          onForceUpdate={() => {
+            if (demoUpdateInfo) { addLog('[update] demo overlay — no force update'); return }
+            forceFullUpdate()
+          }}
+          onClose={() => {
+            if (demoUpdateInfo) {
+              setDemoUpdateInfo(null)
+              setDemoUpdateDownloading(false)
+              setDemoUpdateProgress(null)
+            } else {
+              setUpdateInfo(null)
+              setUpdateDownloading(false)
+              setUpdateProgress(null)
+            }
+          }}
         />
       )}
     </div>

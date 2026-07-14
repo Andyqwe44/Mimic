@@ -2114,6 +2114,18 @@ std::string dispatch_command(const std::string& json) {
         snprintf(b, sizeof(b), "{\"hwnd\":%llu}", (unsigned long long)(uintptr_t)h);
         result = b;
     }
+    else if (cmd == "get_agent_status") {
+        // SSOT for BottomBar Agent indicator — TCP :9999 client count
+        size_t n = 0;
+        {
+            std::lock_guard<std::mutex> lk(g_tcp_mutex);
+            n = g_tcp_clients.size();
+        }
+        char b[80];
+        snprintf(b, sizeof(b), "{\"connected\":%s,\"clients\":%zu}",
+                 n > 0 ? "true" : "false", n);
+        result = b;
+    }
     else if (cmd == "selftest_connect") {
         result = cmd_selftest_connect(json_get_int(args, "port"));
     }

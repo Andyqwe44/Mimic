@@ -81,11 +81,12 @@ function genPoints(g: Geometry, perCell: number) {
 type ClickReport = { type: 'click'; seq: number; btn: number; x: number; y: number; gx: number; gy: number; hit: boolean }
 
 // UI phase state shared by App orchestrator + report modal.
+// `_dev` marks UI-demo injections — cleared when leaving Dev mode (铁律 5).
 export type SelfTestState =
   | { phase: 'idle' }
-  | { phase: 'running'; done: number; total: number }
-  | { phase: 'done'; summary: SelfTestSummary }
-  | { phase: 'error'; error: string }
+  | { phase: 'running'; done: number; total: number; _dev?: boolean }
+  | { phase: 'done'; summary: SelfTestSummary; _dev?: boolean }
+  | { phase: 'error'; error: string; _dev?: boolean }
 
 export interface RunOpts {
   perCell: number

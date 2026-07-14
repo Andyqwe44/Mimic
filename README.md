@@ -128,6 +128,7 @@ type_tag 1 (BGRA): [w:4][h:4][ch:4][reserved:4][pixels: w*h*ch]
 - **Virtual desktop** — Cross-desktop window enumeration, absolute numbering (Task View order via registry), desktop switching
 - **Window picker** — EnumWindows with search, type filter (All/Desktop/Window), D1/D2 badges, ⚡ for remote-desktop windows
 - **Single-frame** — WGC/GDI multi-method capture with PNG output
+- **Dev mode** — DevTools UI demos use overlay layer only; leaving Dev mode clears overlays and refreshes agent status via get_agent_status (no blind rollback)
 - **Input forwarding** — Click/drag/wheel/keyboard input injected into target window via 3 simulation layers (see below)
 
 ## Input Forwarding (send_input)
