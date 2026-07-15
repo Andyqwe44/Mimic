@@ -1,6 +1,12 @@
-# Game Agent Monitor
+# Mimic — Game Agent Monitor
 
 Desktop monitor for visual game AI — **pixels in, actions out**.
+
+> **Repo moved (2026-07)**: canonical home is now
+> [gitee.com/Andyqwe44/mimic](https://gitee.com/Andyqwe44/mimic)
+> (mirror: [github.com/Andyqwe44/Mimic](https://github.com/Andyqwe44/Mimic)).
+> The old `tictactoe` repo is frozen at v0.3.31 — a migration release whose
+> binaries point here, so pre-0.3.31 installs auto-update across.
 
 ## Architecture
 

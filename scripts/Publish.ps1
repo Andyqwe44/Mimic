@@ -16,7 +16,7 @@ param(
 . "$PSScriptRoot\lib\Common.ps1"
 
 $token = '26b26b041e3a6ac124ed8dc7d7c71e84'
-$repo = 'Andyqwe44/tictactoe'
+$repo = 'Andyqwe44/mimic'
 $api = "https://gitee.com/api/v5/repos/$repo"
 $tag = "v$Version"
 $installer = Join-Path (Get-RepoRoot) "release\GameAgentMonitor_Setup_v$Version.exe"

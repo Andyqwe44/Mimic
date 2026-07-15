@@ -249,6 +249,10 @@ Settings: atomic `set_settings` (bulk JSON); boot injects `window.__BOOT_SETTING
 
 完整发布链：dev 验证 → prod 构建 → 打包 installer → Gitee Release → 用户点"Check Update"。
 
+**⚠️ 仓库已迁移（2026-07，v0.3.31）**：发布仓 = `gitee.com/Andyqwe44/mimic`（origin），GitHub 镜像 `github.com/Andyqwe44/Mimic`。
+旧仓 `tictactoe`（remote `tictactoe-old`）**永久冻结于 v0.3.31 迁移版**——它是 <0.3.31 老装机跳到 mimic 的唯一跳板，
+**严禁删除/改路径/再发版**。本地文件夹名仍为 tictactoe，无需改。
+
 ### 一键发布（推荐）
 
 ```powershell

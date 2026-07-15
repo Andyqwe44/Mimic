@@ -86,7 +86,7 @@ $manifest = [ordered]@{
     full_update   = [bool]$Full
     # Server-controllable download source. The client builds each file's URL from
     # this base — move host/repo/CDN by editing a future manifest, no client rebuild.
-    download_base = "https://gitee.com/Andyqwe44/tictactoe/raw/$tag/release/GameAgentMonitor/"
+    download_base = "https://gitee.com/Andyqwe44/mimic/raw/$tag/release/GameAgentMonitor/"
     updater       = [ordered]@{ path = 'bin/updater.exe' }
     sig           = $sig          # ECDSA P-256 signature (base64) over the files digest; '' if unsigned
     files         = $files

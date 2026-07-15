@@ -93,7 +93,7 @@ Write-Ok "pushed main + v$ver"
 
 # 9. Verify the raw version.json URL resolves (302 -> 200) with the right version.
 Write-Step 'verify raw version.json'
-$u = "https://gitee.com/Andyqwe44/tictactoe/raw/v$ver/release/GameAgentMonitor/version.json"
+$u = "https://gitee.com/Andyqwe44/mimic/raw/v$ver/release/GameAgentMonitor/version.json"
 try {
     $r = Invoke-RestMethod -Uri $u -Method Get
     if ($r.app -eq $ver) { Write-Ok "raw 200, app=$($r.app)" } else { Write-Warn2 "raw app mismatch: $($r.app)" }
@@ -101,4 +101,4 @@ try {
 catch { Write-Warn2 "raw URL check failed: $_" }
 
 Write-Host "`n==================== release $ver DONE ====================" -ForegroundColor Green
-Write-Host "  https://gitee.com/Andyqwe44/tictactoe/releases/download/v$ver/GameAgentMonitor_Setup_v$ver.exe"
+Write-Host "  https://gitee.com/Andyqwe44/mimic/releases/download/v$ver/GameAgentMonitor_Setup_v$ver.exe"
