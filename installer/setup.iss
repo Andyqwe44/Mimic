@@ -6,7 +6,7 @@
 #define MyAppVersion "0.0.0"
 #endif
 #define MyAppPublisher "GameAgentMonitor"
-#define MyAppURL "https://gitee.com/Andyqwe44/tictactoe"
+#define MyAppURL "https://gitee.com/Andyqwe44/mimic"
 #define MyAppExeName "monitor_app.exe"
 
 [Setup]

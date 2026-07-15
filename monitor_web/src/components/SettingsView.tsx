@@ -967,13 +967,13 @@ export function SettingsView({
               <button
                 onClick={() => {
                   try {
-                    window.open('https://gitee.com/Andyqwe44/tictactoe', '_blank')
+                    window.open('https://gitee.com/Andyqwe44/mimic', '_blank')
                   } catch {}
                   addLog('[Project] open Gitee')
                 }}
                 className="text-accent hover:underline cursor-pointer truncate"
               >
-                gitee.com/Andyqwe44/tictactoe
+                gitee.com/Andyqwe44/mimic
               </button>
               </Tooltip>
               <span className="mx-2 text-border hidden sm:inline">|</span>
@@ -988,7 +988,7 @@ export function SettingsView({
               variant="primary"
               onClick={() => {
                 try {
-                  window.open('https://github.com/Andyqwe44/tictactoe', '_blank')
+                  window.open('https://github.com/Andyqwe44/Mimic', '_blank')
                 } catch {}
               }}
               className="shrink-0 ml-2"

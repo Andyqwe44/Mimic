@@ -410,7 +410,7 @@ static void show_main_window()
             L"1. 重新安装 Game Agent Monitor\r\n"
             L"2. 安装/修复 Microsoft Edge WebView2 Runtime\r\n"
             L"   (go.microsoft.com/fwlink/p/?LinkId=2124703)\r\n"
-            L"3. 访问 gitee.com/Andyqwe44/tictactoe 获取最新安装包";
+            L"3. 访问 gitee.com/Andyqwe44/mimic 获取最新安装包";
         RECT rc; GetClientRect(g_hwnd, &rc);
         HWND hHelp = CreateWindowExW(0, L"STATIC", help,
             WS_CHILD | WS_VISIBLE | SS_CENTER | SS_EDITCONTROL,

@@ -1379,7 +1379,7 @@ static std::string cmd_check_update(bool forceFull) {
     } else {
         LOG("cmd", "check_update: querying Gitee API...");
         std::string body = winhttp_get(
-            L"https://gitee.com/api/v5/repos/Andyqwe44/tictactoe/releases/latest",
+            L"https://gitee.com/api/v5/repos/Andyqwe44/mimic/releases/latest",
             "update");
         if (body.empty()) {
             LOG("cmd", "check_update: HTTP request failed");
@@ -1408,7 +1408,7 @@ static std::string cmd_check_update(bool forceFull) {
         // CDN can lag right after a release is published (302 propagation / tag
         // raw not yet live). A transient miss must NEVER be reported as "no
         // update" — that was the 0.3.x update-stuck bug.
-        std::string manifestUrl = "https://gitee.com/Andyqwe44/tictactoe/raw/";
+        std::string manifestUrl = "https://gitee.com/Andyqwe44/mimic/raw/";
         manifestUrl += tag;
         manifestUrl += "/release/GameAgentMonitor/version.json";
         std::string remoteManifest;
@@ -1439,7 +1439,7 @@ static std::string cmd_check_update(bool forceFull) {
         if (remoteSchema > KNOWN_SCHEMA) {
             LOG_ERROR("cmd", "check_update: manifest schema %d > known %d - client too old for incremental",
                 remoteSchema, KNOWN_SCHEMA);
-            std::string relUrl = "https://gitee.com/Andyqwe44/tictactoe/releases/tag/" + tag;
+            std::string relUrl = "https://gitee.com/Andyqwe44/mimic/releases/tag/" + tag;
             return "{\"ok\":false,\"needs_full_installer\":true"
                    ",\"error\":\"this update needs a newer installer - please download the full package\""
                    ",\"current\":\"" + json_escape(current) + "\""
@@ -1528,7 +1528,7 @@ static std::string cmd_check_update(bool forceFull) {
                                 // back to the tag path for a schema-1 manifest).
                                 std::string dlUrl = !downloadBase.empty()
                                     ? downloadBase + filePath
-                                    : ("https://gitee.com/Andyqwe44/tictactoe/raw/"
+                                    : ("https://gitee.com/Andyqwe44/mimic/raw/"
                                         + tag + "/release/GameAgentMonitor/" + filePath);
                                 diffJson += "{\"path\":\"" + filePath + "\"";
                                 diffJson += ",\"v\":\"" + remoteVer + "\"";

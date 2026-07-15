@@ -1,12 +1,26 @@
 // ═══ Tooltip, ActionBtn, ThemeBtn — reusable UI kit ═══
-import { useState, useRef } from 'react'
+import { useState, useRef, useLayoutEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { Moon, Sun } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { BTN_SIZE_CLASS, btnAutoSize, H } from '../lib/design'
+import { BTN_SIZE_CLASS, btnAutoSize, H, RADIUS, TEXT } from '../lib/design'
 
-// ── Tooltip: 300ms delay, portal to body, smart positioning ──
+const TIP_GAP = 6
+const TIP_MARGIN = 4
+const PAD_TIP = 'px-2 py-1'
+
+type TipPlacement = 'top' | 'bottom'
+
+/**
+ * Tooltip positioning (铁律 4):
+ * 1. Prefer above the anchor.
+ * 2. If anchor is near the window top (not enough room above) → below.
+ * 3. Prefer horizontally centered on the anchor; clamp so the tip stays fully
+ *    inside the viewport (right/left edges), without drifting away needlessly.
+ * Uses real measured tip size — never estimate from string length (EN tips are
+ * longer than ZH and the old estimate pulled them far left).
+ */
 export function Tooltip({
   text,
   children,
@@ -17,44 +31,81 @@ export function Tooltip({
   className?: string
 }) {
   const [show, setShow] = useState(false)
-  const [pos, setPos] = useState({ x: 0, y: 0, placement: 'top' as 'top' | 'bottom' })
+  const [pos, setPos] = useState({ left: 0, top: 0, placement: 'top' as TipPlacement })
+  const [ready, setReady] = useState(false)
   const timer = useRef<number>(0)
-  const ref = useRef<HTMLDivElement>(null)
+  const anchorRef = useRef<HTMLDivElement>(null)
+  const tipRef = useRef<HTMLDivElement>(null)
 
-  const updatePos = () => {
-    if (!ref.current) return
-    const r = ref.current.getBoundingClientRect()
-    const tipW = Math.min(text.length * 8 + 20, 300)
-    const tipH = 28
-    const above = r.top > tipH + 8
-    let x = r.left + r.width / 2
+  const placeTip = () => {
+    const anchorEl = anchorRef.current
+    const tipEl = tipRef.current
+    if (!anchorEl || !tipEl) return
+
+    const a = anchorEl.getBoundingClientRect()
+    const tipW = tipEl.offsetWidth
+    const tipH = tipEl.offsetHeight
     const vw = window.innerWidth
-    x = Math.max(tipW / 2 + 4, Math.min(vw - tipW / 2 - 4, x))
-    setPos({ x, y: above ? r.top : r.bottom, placement: above ? 'top' : 'bottom' })
+    const vh = window.innerHeight
+
+    // ── Vertical: prefer above; flip below when top-clamped ──
+    let placement: TipPlacement = 'top'
+    let top = a.top - TIP_GAP - tipH
+    if (a.top < tipH + TIP_GAP + TIP_MARGIN) {
+      placement = 'bottom'
+      top = a.bottom + TIP_GAP
+    }
+    // Keep fully inside viewport vertically
+    if (top + tipH > vh - TIP_MARGIN) top = Math.max(TIP_MARGIN, vh - tipH - TIP_MARGIN)
+    if (top < TIP_MARGIN) {
+      if (a.bottom + TIP_GAP + tipH <= vh - TIP_MARGIN) {
+        placement = 'bottom'
+        top = a.bottom + TIP_GAP
+      } else {
+        top = TIP_MARGIN
+      }
+    }
+
+    // ── Horizontal: center on anchor, clamp into viewport ──
+    let left = a.left + a.width / 2 - tipW / 2
+    if (left + tipW > vw - TIP_MARGIN) left = vw - tipW - TIP_MARGIN
+    if (left < TIP_MARGIN) left = TIP_MARGIN
+
+    setPos({ left, top, placement })
+    setReady(true)
   }
+
+  useLayoutEffect(() => {
+    if (!show) {
+      setReady(false)
+      return
+    }
+    placeTip()
+    const onResize = () => placeTip()
+    window.addEventListener('resize', onResize)
+    window.addEventListener('scroll', onResize, true)
+    return () => {
+      window.removeEventListener('resize', onResize)
+      window.removeEventListener('scroll', onResize, true)
+    }
+  }, [show, text])
 
   return (
     <div
-      ref={ref}
+      ref={anchorRef}
       className={`relative inline-flex ${className || ''}`}
       onMouseEnter={() => {
-        updatePos()
-        timer.current = window.setTimeout(() => {
-          updatePos()
-          setShow(true)
-        }, 300)
+        timer.current = window.setTimeout(() => setShow(true), 300)
       }}
       onMouseLeave={() => {
         clearTimeout(timer.current)
         setShow(false)
+        setReady(false)
       }}
       onMouseMove={() => {
         if (!show) {
           clearTimeout(timer.current)
-          timer.current = window.setTimeout(() => {
-            updatePos()
-            setShow(true)
-          }, 300)
+          timer.current = window.setTimeout(() => setShow(true), 300)
         }
       }}
     >
@@ -62,13 +113,14 @@ export function Tooltip({
       {show &&
         createPortal(
           <div
-            className="fixed px-2 py-1 bg-bg-tertiary text-text-primary text-xs rounded shadow-lg whitespace-nowrap pointer-events-none z-[9999]"
+            ref={tipRef}
+            className={`fixed ${PAD_TIP} bg-bg-tertiary text-text-primary ${TEXT.xs} ${RADIUS.md} shadow-lg whitespace-nowrap pointer-events-none z-[9999]`}
             style={{
-              left: pos.x,
-              top: pos.placement === 'top' ? pos.y - 6 : pos.y + 6,
-              transform:
-                pos.placement === 'top' ? 'translate(-50%, -100%)' : 'translate(-50%, 0)',
+              left: pos.left,
+              top: pos.top,
+              opacity: ready ? 1 : 0,
             }}
+            data-placement={pos.placement}
           >
             {text}
           </div>,
