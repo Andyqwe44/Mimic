@@ -3,12 +3,6 @@
 # core.autocrlf=true would rewrite these on checkout; pin them explicitly:
 #   - .sh must stay LF, else git-bash chokes on the shebang (`/bin/bash^M`).
 #   - .cmd/.bat must stay CRLF, else cmd.exe misparses lines like `cd /d ...`.
-
-# Line-ending policy — prevents the release pipeline from breaking on checkout.
-#
-# core.autocrlf=true would rewrite these on checkout; pin them explicitly:
-#   - .sh must stay LF, else git-bash chokes on the shebang (`/bin/bash^M`).
-#   - .cmd/.bat must stay CRLF, else cmd.exe misparses lines like `cd /d ...`.
 #   - .ps1 CRLF — Windows PowerShell scripts (the build/release pipeline).
 
 *.sh   text eol=lf
@@ -16,12 +10,28 @@
 *.bat  text eol=crlf
 *.ps1  text eol=crlf
 
-# Release package text must match Gitee/GitHub raw (LF). CRLF on disk ⇒
-# New-VersionJson hashes CRLF but clients download LF → SHA256 mismatch.
+# Text that ships in the release package must stay LF so Gitee/GitHub raw
+# bytes match New-VersionJson sha256 (CRLF checkout previously broke
+# config/settings.default.json updates).
 *.json text eol=lf
 *.html text eol=lf
 *.css  text eol=lf
 *.js   text eol=lf
 *.md   text eol=lf
 *.txt  text eol=lf
-release/** text eol=lf
+*.svg  text eol=lf
+*.xml  text eol=lf
+*.map  text eol=lf
+
+# NEVER treat PE/binaries as text — `release/** text eol=lf` corrupted DLLs/EXEs.
+*.dll  binary
+*.exe  binary
+*.new  binary
+*.lib  binary
+*.pdb  binary
+*.obj  binary
+*.res  binary
+*.png  binary
+*.ico  binary
+*.bin  binary
+*.wasm binary

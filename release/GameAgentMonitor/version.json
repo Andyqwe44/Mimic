@@ -2,7 +2,7 @@
     "schema":  2,
     "app":  "0.3.32",
     "channel":  "stable",
-    "released":  "2026-07-15T04:42:23.482Z",
+    "released":  "2026-07-15T04:44:46.644Z",
     "min_version":  "0.3.24",
     "mandatory":  false,
     "message":  "仓库已迁移到 mimic。本次可能是跳板升级的一步：安装完成后请再次点击「检查更新」。需要多轮手动操作才能升到最新版，只更新一次不等于已到最新。",
@@ -15,7 +15,7 @@
     "updater":  {
                     "path":  "bin/updater.exe"
                 },
-    "sig":  "fPnYExL8z1+O6XAGWeaWS+zcPTwAo4rZx2JiXW3aX9AHQ9b4Ndui2IGxb1zDhNVrjPgilOKWSaJHXj+jaJdB6A==",
+    "sig":  "Rtu7b2DXf6PMerfmuG6Q70K0Jd+onDHMgXFXG7pdwhHBdFexnEd/v5trBGH6xo2w9hxkPclUZ0D7y3NmYvGhbg==",
     "files":  {
                   "bin/capture_common.dll":  {
                                                  "v":  "0.3.32",
