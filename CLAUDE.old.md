@@ -1,5 +1,22 @@
 # CLAUDE.md — TicTacToe → General Visual Game AI
 
+## Recent Changes (2026-07-16) — GPU H.264 hard path + embedded WS + dual gates
+
+### Root cause (soft encode ~8fps / multi-second lag)
+- `SET_D3D_MANAGER` failed with **`MF_E_TRANSFORM_ASYNC_LOCKED` (0xC00D6D77)** — HW MFTs need `MF_TRANSFORM_ASYNC_UNLOCK` before any `ProcessMessage`.
+- After unlock, AMD/Intel/NVENC remain **async**: must pump `METransformNeedInput` / `METransformHaveOutput`; sync `ProcessOutput` → `E_UNEXPECTED`.
+- Soft fallback on WGC worker (Map 1080p + CPU encode) starved capture → client ~8fps.
+
+### Fix
+- `h264_encoder`: async unlock + event model; DXGI HW first (`AMDh264Encoder` proven); VP BGRA→NV12; soft ≤1280.
+- WGC: `D3D11_CREATE_DEVICE_VIDEO_SUPPORT`; GPU callback / `cpu_readback=0`.
+- Embedded `ws_server` HTTP+WS `:9997` (removed `bridge.py`); `controller_web` → React/Vite, staged by Build.ps1.
+- Dual gates: 发送画面 / 接受控制; thin UI `StreamGatesPanel`.
+- Controller: `avc1.42E028`, tight decode backpressure, relative latency probe.
+- Bench: `test/h264_hw_bench` + `h264_recv_bench.mjs` — **1920×1080 HW ~44fps encode / ~43.5fps recv, ~15ms encode**.
+
+---
+
 ## Recent Changes (2026-07-14) — Settings persistence + AppData Dev/Prod + TopBar shortcuts
 
 ### Settings write path fixed

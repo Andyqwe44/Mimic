@@ -14,15 +14,15 @@ Desktop monitor for visual game AI — **pixels in, actions out**.
 
 ```
 ┌─ monitor_app (Windows thin client) ─────────────────────────┐
-│  Capture (WGC…)  +  send_input (atomic)  +  local UI          │
-│  Local preview: SharedBuffer BGRA                             │
-│  Remote: TCP :9999  H.264 out + CONTROL_MSG JSON in           │
+│  Capture (WGC GPU) → HW H.264 → TCP :9999 + embedded WS :9997│
+│  Gates: 发送画面 / 接受控制   ·  atomic send_input              │
+│  Local UI: ops + gates (no local video preview in thin mode) │
 └──────────┬───────────────────────────────────────────────────┘
-           │ FRAM protocol
+           │ FRAM / WebSocket
     ┌──────┴──────────────────────────────┐
     ▼                                     ▼
- controller_web (+ bridge.py WS:9997)   Python vision model
- phone / another PC browser             (same TCP actions)
+ controller_web (React, :9997)          Python vision model
+ phone / another PC browser             (TCP :9999 CONTROL_MSG)
 ```
 
 | Target | Input policy |
@@ -36,9 +36,9 @@ Agent context: Cursor loads `.cursor/rules/*.mdc`. Long-form: `CLAUDE.md` / `AGE
 
 | Language | Role |
 |----------|------|
-| C++17 | Thin host: capture, SharedBuffer preview, H.264 TCP, `send_input` |
-| TypeScript/React | Local ops UI (`monitor_web`); remote UI in `controller_web/` |
-| Python | Vision model and/or `controller_web/bridge.py` (WebSocket↔TCP) |
+| C++17 | Thin host: WGC→GPU H.264, embedded HTTP+WS `:9997`, TCP `:9999`, `send_input` |
+| TypeScript/React | Local ops UI (`monitor_web`); remote UI (`controller_web`, served by agent) |
+| Python | Vision model (TCP `:9999`) |
 
 ## Quick Start
 
@@ -92,7 +92,7 @@ tictactoe/
 │   └── dep/              WebView2 SDK
 ├── scripts/              PowerShell build/release pipeline (Build/Release/Verify/Publish)
 ├── monitor_web/          Local React UI (Vite + TypeScript + Tailwind)
-├── controller_web/       Remote Web controller (H.264 + actions; bridge.py)
+├── controller_web/       Remote React controller (WebCodecs H.264 + actions; agent serves :9997)
 ├── protocol/             Wire format (C++/Python)
 ├── model/                Python AI
 ├── test_target/          Standalone input-test window (TCP :9998 self-test feedback)
@@ -117,9 +117,11 @@ Desktop single-frame → `dxgi` (DesktopBlt). Window single-frame → `wgc`. Str
 
 | Transport | Port | Description |
 |-----------|------|-------------|
-| SharedBuffer | COM | Local Monitor preview (BGRA) |
+| SharedBuffer | COM | Legacy/local BGRA preview (non-thin / debug) |
 | TCP FRAM | 9999 | Remote: H.264 Annex-B out + JSON control in |
-| WebSocket bridge | 9997 | `controller_web/bridge.py` for browsers (no raw TCP) |
+| Embedded HTTP+WS | 9997 | Agent serves `controller_web` + binary H.264 + JSON control (no Python bridge) |
+
+**Thin-client gates (Monitor tab):** **发送画面** starts WGC→HW H.264 push; **接受控制** allows remote `CONTROL_MSG` / WS actions. Both default closed.
 
 ## Wire Protocol (TCP :9999)
 

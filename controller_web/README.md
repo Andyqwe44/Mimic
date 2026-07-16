@@ -1,41 +1,29 @@
 # GAM Web Controller
 
-Cross-platform remote control UI (phone / another PC). Talks to the Windows agent via **TCP FRAM** (H.264 out, JSON actions in). Browsers cannot open raw TCP, so a small Python bridge exposes WebSocket.
+React + Tailwind UI styled like **Game Agent Monitor**. Connects to the agent’s embedded WebSocket (`:9997`).
 
 ## Flow
 
 ```
-Browser (controller_web) --WS:9997--> bridge.py --TCP:9999--> monitor_app
-         WebCodecs H.264 decode              CONTROL_MSG JSON
+Browser (this UI) --WS:9997--> monitor_app
+  WebCodecs H.264 decode         CONTROL JSON (needs accept_control gate)
 ```
 
-## Run
-
-1. Start `monitor_app`, select a target, start **Preview** (stream must be running).
-2. Bridge:
-
-```powershell
-pip install websockets
-python controller_web\bridge.py
-```
-
-3. Serve UI (another terminal):
+## Dev
 
 ```powershell
 cd controller_web
-python -m http.server 8080
+npm install
+npm run dev          # http://0.0.0.0:8080 → connect ws://<host>:9997
 ```
 
-4. Open `http://<pc-ip>:8080` on phone or another PC → Connect `ws://<pc-ip>:9997`.
+Production/static is built by `scripts\Build.ps1` into `monitor_app\build(_dev)\controller\` and served by the agent at `http://<host>:9997`.
 
-## Protocol (TCP :9999)
+## Agent gates
 
-| Direction | type_tag | Body |
-|-----------|----------|------|
-| Agent → controller | `2` H264 | `[w:4][h:4][flags:4][res:4][Annex-B NAL…]` flags bit0=keyframe |
-| Controller → agent | `3` CONTROL | UTF-8 JSON action (`mousedown` / `mouseup` / `move` / `keydown` / …) |
+1. **发送画面** — start H.264 push  
+2. **接受控制** — apply mouse/keyboard from this page  
 
-Agent **forces** `hwnd` + method from the active stream target:
+## Note on latency
 
-- desktop → foreground `sendinput`
-- window → background `sendmessage`, coords must be in `[0,1]`
+Agent must use **hardware** H.264 when possible. Soft 1080p encode was ~8 fps / multi-second lag; soft path now scales to 1280 and drops frames under WS backpressure.

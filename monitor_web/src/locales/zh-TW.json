@@ -211,6 +211,16 @@
     "preview_tip": "開始即時預覽",
     "no_preview": "未開始預覽",
     "no_preview_hint": "點擊右上角「預覽」開始即時預覽",
+    "stream_gate": "傳送畫面",
+    "stream_gate_on": "停止傳送",
+    "stream_gate_tip": "閘門：允許將 H.264 畫面傳送到控制端",
+    "control_gate": "接受控制",
+    "control_gate_on": "控制中",
+    "control_gate_tip": "閘門：允許套用控制端傳來的鍵鼠指令",
+    "thin_status_title": "薄用戶端 · 無本機預覽",
+    "thin_status_body": "傳送畫面：{stream} · 接受控制：{control}\n用瀏覽器開啟下方位址檢視畫面並操作",
+    "gate_open": "開",
+    "gate_closed": "關",
     "remote_active": "遠端控制中 · 滑鼠{mm} · 鍵盤{km}",
     "remote_hover": "懸停移動游標 · 點擊控制 · 頂欄輸入法鍵入 · 滑鼠{mm}",
     "desktop_preview": "桌面遠端控制 · 滑鼠{mm} · 鍵盤{km} · {state}",
@@ -231,6 +241,12 @@
     "key_postmsg": "PostMsg",
     "policy_foreground": "桌面 · 前景",
     "policy_background": "視窗 · 背景"
+  },
+
+  "gates": {
+    "title": "遠端閘門",
+    "target": "目標",
+    "hint": "畫面發往控制端網頁（:9997）。\n兩閘預設關閉；須分別開啟才推流 / 執行遠端鍵鼠。"
   },
 
   "update": {

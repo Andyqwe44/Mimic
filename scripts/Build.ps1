@@ -11,7 +11,7 @@
 # Modules migrated so far: logger. (capture/input/updater/monitor_app to follow.)
 
 param(
-    [ValidateSet('all', 'logger', 'capture', 'input', 'updater', 'monitor_app', 'test_target')]
+    [ValidateSet('all', 'logger', 'capture', 'input', 'updater', 'monitor_app', 'test_target', 'h264_bench')]
     [string[]]$Module = @('all'),
     [switch]$Dev
 )
@@ -166,7 +166,8 @@ function Build-MonitorApp {
             'oleaut32.lib', 'ws2_32.lib', 'windowscodecs.lib', 'dwmapi.lib', 'shell32.lib', 'shlwapi.lib',
             'winhttp.lib', 'bcrypt.lib', 'advapi32.lib', 'mfplat.lib', 'mf.lib', 'mfuuid.lib', 'wmcodecdspuuid.lib')
         $linkflags = if ($Dev) { @('/DEBUG:FULL') } else { @('/OPT:REF', '/OPT:ICF', '/Brepro') }
-        $srcs = @('src\main.cpp', 'src\commands.cpp', 'src\h264_encoder.cpp', 'src\virtual_desktop.cpp', 'src\paths.cpp', 'src\sha256_util.cpp', 'src\update_verify.cpp')
+        $srcs = @('src\main.cpp', 'src\commands.cpp', 'src\h264_encoder.cpp', 'src\ws_server.cpp',
+            'src\virtual_desktop.cpp', 'src\paths.cpp', 'src\sha256_util.cpp', 'src\update_verify.cpp')
         $libs = @('dep\WebView2LoaderStatic.lib', "$Root\logger\build\logger.lib") +
         (@('common', 'wgc', 'gdi', 'pw', 'screen', 'desktop') | ForEach-Object { "$Root\capture\build\capture_$_.lib" }) +
         (@('common', 'sendinput', 'winapi', 'postmessage', 'driver') | ForEach-Object { "$Root\input\build\input_$_.lib" })
@@ -197,6 +198,24 @@ function Build-MonitorApp {
         # Always stage settings.default.json (Dev seeds GameAgentMonitor_Dev; Prod ships in package).
         $settings = Join-Path $Root 'config\settings.default.json'
         if (Test-Path $settings) { Copy-Item $settings "$out\config\" -Force }
+
+        # Web controller (React) — build then stage for embedded HTTP+WS :9997.
+        $ctrlSrc = Join-Path $Root 'controller_web'
+        $ctrlDist = Join-Path $ctrlSrc 'dist'
+        if (Test-Path (Join-Path $ctrlSrc 'package.json')) {
+            Write-Step 'controller_web (vite build)'
+            Push-Location $ctrlSrc
+            try {
+                if (-not (Test-Path 'node_modules')) { npm install }
+                npm run build
+                if ($LASTEXITCODE) { throw 'controller_web: vite build failed' }
+            }
+            finally { Pop-Location }
+            if (Test-Path $ctrlDist) {
+                New-Item -ItemType Directory -Force -Path "$out\controller" | Out-Null
+                Copy-Item "$ctrlDist\*" "$out\controller\" -Recurse -Force
+            }
+        }
 
         if (-not $Dev) {
             # Prod package: updater(+.new) + frontend(dist) into the layout.
@@ -243,6 +262,37 @@ function Build-TestTarget {
     Write-Ok 'test_target.exe'
 }
 
+function Build-H264Bench {
+    Write-Step 'h264_hw_bench.exe (WGC→HW H.264→TCP)'
+    $dir = Join-Path $Root 'test'
+    $bld = Join-Path $dir 'build'
+    New-Item -ItemType Directory -Force -Path $bld | Out-Null
+    $inc = @('/I', "$Root\monitor_app\src", '/I', "$Root\capture\include", '/I', "$Root\common\include", '/I', "$Root\logger")
+    $cflags = @('/nologo', '/EHsc', '/std:c++17', '/source-charset:utf-8', '/DNOMINMAX', '/DNDEBUG', '/O2', '/MT') + $inc
+    $libs = @(
+        "$Root\logger\build\logger.lib",
+        "$Root\capture\build\capture_common.lib",
+        "$Root\capture\build\capture_wgc.lib"
+    )
+    $lflags = @('d3d11.lib', 'dxgi.lib', 'windowsapp.lib', 'user32.lib', 'gdi32.lib', 'ole32.lib',
+        'oleaut32.lib', 'mfplat.lib', 'mf.lib', 'mfuuid.lib', 'wmcodecdspuuid.lib', 'ws2_32.lib', 'advapi32.lib')
+    Push-Location $dir
+    try {
+        $clArgs = $cflags + @(
+            "/Fo$bld\", "/Fe:$bld\h264_hw_bench.exe",
+            'h264_hw_bench.cpp',
+            "$Root\monitor_app\src\h264_encoder.cpp"
+        ) + $libs + $lflags
+        cl.exe @clArgs
+        if ($LASTEXITCODE) { throw 'h264_hw_bench: cl failed' }
+        Copy-Item "$Root\logger\build\logger.dll" "$bld\" -Force
+        Copy-Item "$Root\capture\build\capture_common.dll" "$bld\" -Force
+        Copy-Item "$Root\capture\build\capture_wgc.dll" "$bld\" -Force
+    }
+    finally { Pop-Location }
+    Write-Ok 'h264_hw_bench.exe'
+}
+
 # Dispatch — flat conditionals in dependency order (capture/input/monitor_app link
 # against logger.lib etc). Explicit ifs, not foreach+switch.
 $all = $Module -contains 'all'
@@ -251,4 +301,5 @@ if ($all -or $Module -contains 'capture')     { Build-Capture }
 if ($all -or $Module -contains 'input')       { Build-Input }
 if ($all -or $Module -contains 'updater')     { Build-Updater }
 if ($all -or $Module -contains 'test_target') { Build-TestTarget }
+if ($all -or $Module -contains 'h264_bench')  { Build-H264Bench }
 if ($all -or $Module -contains 'monitor_app') { Build-MonitorApp }

@@ -93,9 +93,11 @@ export function MonitorView({
   snapMethod: _snapMethod,
   streamMethod: _streamMethod,
   previewing,
+  acceptControl = false,
   snapshotLatency: _snapshotLatency,
   onTakeSnapshot,
   onTogglePreview,
+  onToggleAcceptControl,
   children,
   inputMethod: _inputMethod,
   mouseMode: _mouseMode,
@@ -115,9 +117,11 @@ export function MonitorView({
   snapMethod: string
   streamMethod: string
   previewing: boolean
+  acceptControl?: boolean
   snapshotLatency: number | null
   onTakeSnapshot: () => void
   onTogglePreview: () => void
+  onToggleAcceptControl?: () => void
   children: React.ReactNode
   inputMethod?: string
   mouseMode?: 'seize' | 'semi' | 'background'
@@ -811,14 +815,17 @@ export function MonitorView({
             {inputPolicy === 'foreground' ? t('monitor.policy_foreground') : t('monitor.policy_background')}
           </span>
         )}
-        <ActionBtn
-          icon={<Camera className="w-3.5 h-3.5" />}
-          label={t('monitor.snapshot')}
-          title={t('monitor.snapshot_tip')}
-          variant="primary"
-          onClick={onTakeSnapshot}
-        />
-        {previewing ? (
+        {!THIN_CLIENT && (
+          <ActionBtn
+            icon={<Camera className="w-3.5 h-3.5" />}
+            label={t('monitor.snapshot')}
+            title={t('monitor.snapshot_tip')}
+            variant="primary"
+            onClick={onTakeSnapshot}
+          />
+        )}
+        {/* Thin client: gates live in the right-rail StreamGatesPanel */}
+        {!THIN_CLIENT && (previewing ? (
           <ActionBtn
             icon={<Square className="w-3.5 h-3.5" />}
             label={t('monitor.stop')}
@@ -834,7 +841,7 @@ export function MonitorView({
             variant="outline-accent"
             onClick={onTogglePreview}
           />
-        )}
+        ))}
       </div>
 
       {/* ── Preview canvas (full width) ── */}
@@ -884,7 +891,22 @@ export function MonitorView({
             </div>
           )}
 
-          {!previewing && (
+          {THIN_CLIENT ? (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-6">
+              <div className="text-center space-y-2 max-w-md">
+                <div className="text-sm text-text-muted">{t('monitor.thin_status_title')}</div>
+                <div className="text-xs text-text-tertiary leading-relaxed">
+                  {t('monitor.thin_status_body', {
+                    stream: previewing ? t('monitor.gate_open') : t('monitor.gate_closed'),
+                    control: acceptControl ? t('monitor.gate_open') : t('monitor.gate_closed'),
+                  })}
+                </div>
+                <div className="text-[11px] text-text-tertiary font-mono pt-1">
+                  http://&lt;lan-ip&gt;:9997
+                </div>
+              </div>
+            </div>
+          ) : !previewing ? (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div className="text-center space-y-1">
                 <div className="text-sm text-text-muted">{t('monitor.no_preview')}</div>
@@ -893,7 +915,7 @@ export function MonitorView({
                 </div>
               </div>
             </div>
-          )}
+          ) : null}
         </div>
       </div>
     </div>

@@ -143,6 +143,13 @@ public:
     /// Wait for a frame with timeout (milliseconds). Returns false on timeout.
     bool wait_frame(WgcFrame& out, int timeout_ms, WgcTiming* timing = nullptr);
 
+    /// GPU-only: get next frame as D3D11 BGRA texture (no CPU Map). Caller must
+    /// finish using tex before the next capture_gpu/wait_frame_gpu call.
+    bool capture_gpu(ComPtr<ID3D11Texture2D>& out_tex, int& out_w, int& out_h);
+    bool wait_frame_gpu(ComPtr<ID3D11Texture2D>& out_tex, int& out_w, int& out_h, int timeout_ms);
+
+    ID3D11Device* d3d_device() const { return device_.Get(); }
+
     /// Check if session is still valid.
     bool is_ok() const { return ok_; }
 
@@ -183,6 +190,10 @@ private:
     int staging_w_[STAGING_COUNT] = {};
     int staging_h_[STAGING_COUNT] = {};
     int staging_idx_ = 0;
+
+    // GPU-only path: DEFAULT BGRA copy (no Map)
+    ComPtr<ID3D11Texture2D> gpu_hold_;
+    int gpu_hold_w_ = 0, gpu_hold_h_ = 0;
 
     // Frame synchronization: FrameArrived callback signals this
     std::mutex frame_mtx_;

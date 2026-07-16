@@ -8,6 +8,7 @@ import { BottomBar } from './components/BottomBar'
 import { Tooltip } from './components/Toolkit'
 import { ConnectionPanel } from './components/ConnectionPanel'
 import { ScreenshotPanel } from './components/ScreenshotPanel'
+import { StreamGatesPanel } from './components/StreamGatesPanel'
 import { LogPanel } from './components/LogPanel'
 import { SettingsView } from './components/SettingsView'
 import { DevToolsView } from './components/DevToolsView'
@@ -21,6 +22,7 @@ import { runSelfTest, sleep, type SelfTestState } from './lib/selftest'
 import { cantCaptureMinimized } from './lib/constants'
 import { DESKTOP_TITLE, displayTargetTitle } from './lib/windowTitle'
 import { setSavedLocale } from './lib/i18n'
+import { THIN_CLIENT } from './lib/features'
 import type { WindowInfo, Rect } from './lib/types'
 
 // ── Layout constants ──
@@ -802,6 +804,7 @@ export default function App() {
   const snapCancelRef = useRef(0)             // incremented to cancel stale snapshots
   const [previewing, setPreviewing] = useState(false)
   const previewingRef = useRef(false)          // ref version for SharedBuffer handler closure
+  const [acceptControl, setAcceptControl] = useState(false)
   const snapshotRef = useRef(false)            // true while waiting for snapshot frame
   const snapshotStartRef = useRef(0)           // Date.now() when snapshot was triggered
   const [capMethod, setCapMethod] = useState('')        // actual method used (from C++ response)
@@ -924,10 +927,10 @@ export default function App() {
     previewingRef.current = false
     setPreviewing(false)
     try {
-      await hostCall('capture_stream_stop')
+      await hostCall('set_stream_gate', { enabled: false })
     } catch (_) {}
     opStateRef.current = 'idle'
-    addLog('[Capture] stream stopped')
+    addLog('[Stream] gate closed')
     setSsExpanded(false)
   }, [])
 
@@ -1009,17 +1012,17 @@ export default function App() {
     setSnapshotLatency(null)
 
     try {
-      await hostCall('capture_stream_start', {
+      // Thin client: stream gate = allow sending H.264 to controllers (no local preview).
+      await hostCall('set_stream_gate', {
+        enabled: true,
         hwnd,
-        tcpPort: 9999,
         method: streamMethod,
-        transport: renderMethod,
       })
     } catch (e) {
       previewingRef.current = false
       setPreviewing(false)
       opStateRef.current = 'idle'
-      addLog(`[Preview] start failed: ${e}`)
+      addLog(`[Stream] start failed: ${e}`)
       return
     }
     if (!screenshotExpanded) setSsExpanded(true)
@@ -1033,6 +1036,20 @@ export default function App() {
       await startStream()
     }
   }, [previewing, stopStream, startStream])
+
+  const toggleAcceptControl = useCallback(async () => {
+    const next = !acceptControl
+    try {
+      await hostCall('set_control_gate', {
+        enabled: next,
+        hwnd: selWindow.hwnd ?? 0,
+      })
+      setAcceptControl(next)
+      addLog(`[Control] accept_control ${next ? 'ON' : 'OFF'}`)
+    } catch (e) {
+      addLog(`[Control] set_control_gate failed: ${e}`)
+    }
+  }, [acceptControl, selWindow.hwnd])
 
   // ═══ Self-Test orchestration ═══
   // One-click calibration: reuses the real user-facing callbacks (select →
@@ -1348,9 +1365,11 @@ export default function App() {
               capMethod={capMethod}
               snapMethod={snapMethod} streamMethod={streamMethod}
               previewing={previewing}
+              acceptControl={acceptControl}
               snapshotLatency={snapshotLatency}
               onTakeSnapshot={takeSnapshot}
               onTogglePreview={togglePreview}
+              onToggleAcceptControl={toggleAcceptControl}
               mouseMode={mouseMode}
               keyMode={keyMode}
               mappingEnabled={mappingEnabled} setMappingEnabled={setMappingEnabled}
@@ -1361,22 +1380,24 @@ export default function App() {
               selfTargetMode={selfTargetMode}
               apiRef={monitorApiRef}
             >
-              <ScreenshotPanel
-                selWin={selWindow} screenRatio={screenRatio}
-                snapMethod={snapMethod} streamMethod={streamMethod}
-                renderMethod={renderMethod} winState={winState}
-                expanded={true} onToggle={() => {}}
-                previewing={previewing} previewingRef={previewingRef}
-                snapshotRef={snapshotRef} snapshotStartRef={snapshotStartRef}
-                capMethod={capMethod}
-                onTakeSnapshot={takeSnapshot}
-                onTogglePreview={togglePreview}
-                pinned={false} onTogglePin={() => {}}
-                hasContentRef={ssHasContentRef}
-                bare
-                onFps={setStreamFps}
-                onDims={(w, h) => setTargetDims({w, h})}
-              />
+              {!THIN_CLIENT && (
+                <ScreenshotPanel
+                  selWin={selWindow} screenRatio={screenRatio}
+                  snapMethod={snapMethod} streamMethod={streamMethod}
+                  renderMethod={renderMethod} winState={winState}
+                  expanded={true} onToggle={() => {}}
+                  previewing={previewing} previewingRef={previewingRef}
+                  snapshotRef={snapshotRef} snapshotStartRef={snapshotStartRef}
+                  capMethod={capMethod}
+                  onTakeSnapshot={takeSnapshot}
+                  onTogglePreview={togglePreview}
+                  pinned={false} onTogglePin={() => {}}
+                  hasContentRef={ssHasContentRef}
+                  bare
+                  onFps={setStreamFps}
+                  onDims={(w, h) => setTargetDims({w, h})}
+                />
+              )}
             </MonitorView>
           )}
           {/* Log tab */}
@@ -1440,24 +1461,34 @@ export default function App() {
                 pinned={connectionPinned} onTogglePin={toggleConnPin}
               />
             </div>
-            {/* Screenshot panel (overflow-hidden for grid animation) */}
+            {/* Thin client: gates instead of local screenshot preview */}
             <div className="shrink-0 overflow-hidden">
-              <ScreenshotPanel
-                selWin={selWindow} screenRatio={screenRatio}
-                snapMethod={snapMethod} streamMethod={streamMethod}
-                renderMethod={renderMethod} winState={winState}
-                expanded={screenshotExpanded}
-                onToggle={() => setSsExpanded(!screenshotExpandedRef.current)}
-                previewing={previewing} previewingRef={previewingRef}
-                snapshotRef={snapshotRef} snapshotStartRef={snapshotStartRef}
-                capMethod={capMethod}
-                onTakeSnapshot={takeSnapshot}
-                onTogglePreview={togglePreview}
-                pinned={screenshotPinned} onTogglePin={toggleSsPin}
-                hasContentRef={ssHasContentRef}
-                onFps={setStreamFps}
-                onDims={(w, h) => setTargetDims({w, h})}
-              />
+              {THIN_CLIENT ? (
+                <StreamGatesPanel
+                  streamOn={previewing}
+                  controlOn={acceptControl}
+                  onToggleStream={togglePreview}
+                  onToggleControl={toggleAcceptControl}
+                  targetTitle={displayTargetTitle(selWindow.title, t)}
+                />
+              ) : (
+                <ScreenshotPanel
+                  selWin={selWindow} screenRatio={screenRatio}
+                  snapMethod={snapMethod} streamMethod={streamMethod}
+                  renderMethod={renderMethod} winState={winState}
+                  expanded={screenshotExpanded}
+                  onToggle={() => setSsExpanded(!screenshotExpandedRef.current)}
+                  previewing={previewing} previewingRef={previewingRef}
+                  snapshotRef={snapshotRef} snapshotStartRef={snapshotStartRef}
+                  capMethod={capMethod}
+                  onTakeSnapshot={takeSnapshot}
+                  onTogglePreview={togglePreview}
+                  pinned={screenshotPinned} onTogglePin={toggleSsPin}
+                  hasContentRef={ssHasContentRef}
+                  onFps={setStreamFps}
+                  onDims={(w, h) => setTargetDims({w, h})}
+                />
+              )}
             </div>
             {/* Log panel (compact mode in sidebar) */}
             <div className="shrink-0">

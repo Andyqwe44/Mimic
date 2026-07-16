@@ -83,9 +83,11 @@ bool WgcCapture::create_d3d_device_monitor(HMONITOR hmon) {
     D3D_DRIVER_TYPE driver = adapter ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE;
     IDXGIAdapter* adapter_ptr = adapter ? adapter.Get() : nullptr;
 
+    // VIDEO_SUPPORT required so MF hardware H.264 can bind IMFDXGIDeviceManager
+    // to this device (without it SET_D3D_MANAGER → 0xc00d6d77 → software fallback).
+    UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT;
     hr = D3D11CreateDevice(
-        adapter_ptr, driver, nullptr,
-        D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+        adapter_ptr, driver, nullptr, flags,
         nullptr, 0, D3D11_SDK_VERSION,
         device_.GetAddressOf(), nullptr, ctx_.GetAddressOf());
 
@@ -93,6 +95,9 @@ bool WgcCapture::create_d3d_device_monitor(HMONITOR hmon) {
         last_error_ = "D3D11CreateDevice failed";
         return false;
     }
+    ComPtr<ID3D10Multithread> mt;
+    if (SUCCEEDED(device_.As(&mt)) && mt)
+        mt->SetMultithreadProtected(TRUE);
     return true;
 }
 
@@ -124,9 +129,10 @@ bool WgcCapture::create_d3d_device(HWND hwnd) {
     D3D_DRIVER_TYPE driver = adapter ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE;
     IDXGIAdapter* adapter_ptr = adapter ? adapter.Get() : nullptr;
 
+    // VIDEO_SUPPORT required for MF hardware H.264 (DXGI DeviceManager).
+    UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT;
     hr = D3D11CreateDevice(
-        adapter_ptr, driver, nullptr,
-        D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+        adapter_ptr, driver, nullptr, flags,
         nullptr, 0, D3D11_SDK_VERSION,
         device_.GetAddressOf(), nullptr, ctx_.GetAddressOf());
 
@@ -134,6 +140,9 @@ bool WgcCapture::create_d3d_device(HWND hwnd) {
         last_error_ = "D3D11CreateDevice failed";
         return false;
     }
+    ComPtr<ID3D10Multithread> mt;
+    if (SUCCEEDED(device_.As(&mt)) && mt)
+        mt->SetMultithreadProtected(TRUE);
     return true;
 }
 
@@ -440,6 +449,75 @@ bool WgcCapture::capture(WgcFrame& out, WgcTiming* timing) {
     }
 
     return true;
+}
+
+bool WgcCapture::capture_gpu(ComPtr<ID3D11Texture2D>& out_tex, int& out_w, int& out_h) {
+    out_tex.Reset();
+    out_w = out_h = 0;
+    if (!ok_) return false;
+
+    auto frame = pool_.TryGetNextFrame();
+    if (!frame) return false;
+
+    auto surface = frame.Surface();
+    auto access = surface.as<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
+    ComPtr<ID3D11Texture2D> src_tex;
+    HRESULT hr = access->GetInterface(__uuidof(ID3D11Texture2D), (void**)src_tex.GetAddressOf());
+    if (FAILED(hr) || !src_tex) {
+        std::lock_guard<std::mutex> lk(frame_mtx_);
+        frame_ready_ = false;
+        return false;
+    }
+
+    D3D11_TEXTURE2D_DESC desc;
+    src_tex->GetDesc(&desc);
+    int fw = (int)desc.Width, fh = (int)desc.Height;
+    if (desc.Format != format_) {
+        ok_ = false;
+        frame_cv_.notify_all();
+        return false;
+    }
+
+    // DEFAULT copy so FramePool can recycle the surface; no CPU Map.
+    if (!gpu_hold_ || gpu_hold_w_ != fw || gpu_hold_h_ != fh) {
+        D3D11_TEXTURE2D_DESC td = {};
+        td.Width = fw;
+        td.Height = fh;
+        td.MipLevels = 1;
+        td.ArraySize = 1;
+        td.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        td.SampleDesc.Count = 1;
+        td.Usage = D3D11_USAGE_DEFAULT;
+        td.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+        gpu_hold_.Reset();
+        if (FAILED(device_->CreateTexture2D(&td, nullptr, &gpu_hold_))) return false;
+        gpu_hold_w_ = fw;
+        gpu_hold_h_ = fh;
+    }
+    ctx_->CopyResource(gpu_hold_.Get(), src_tex.Get());
+    out_tex = gpu_hold_;
+    out_w = fw;
+    out_h = fh;
+    last_w_ = fw;
+    last_h_ = fh;
+    {
+        std::lock_guard<std::mutex> lk(frame_mtx_);
+        frame_ready_ = false;
+    }
+    return true;
+}
+
+bool WgcCapture::wait_frame_gpu(ComPtr<ID3D11Texture2D>& out_tex, int& out_w, int& out_h, int timeout_ms) {
+    if (!ok_) return false;
+    if (capture_gpu(out_tex, out_w, out_h)) return true;
+    std::unique_lock<std::mutex> lk(frame_mtx_);
+    if (!frame_cv_.wait_for(lk, std::chrono::milliseconds(timeout_ms),
+                            [this] { return frame_ready_ || !ok_; })) {
+        return false;
+    }
+    if (!ok_) return false;
+    lk.unlock();
+    return capture_gpu(out_tex, out_w, out_h);
 }
 
 bool WgcCapture::wait_frame(WgcFrame& out, int timeout_ms, WgcTiming* timing) {

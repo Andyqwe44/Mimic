@@ -211,6 +211,16 @@
     "preview_tip": "开始实时预览",
     "no_preview": "未开始预览",
     "no_preview_hint": "点击右上角「预览」开始实时预览",
+    "stream_gate": "发送画面",
+    "stream_gate_on": "停止发送",
+    "stream_gate_tip": "闸门：允许将 H.264 画面发送到控制端",
+    "control_gate": "接受控制",
+    "control_gate_on": "控制中",
+    "control_gate_tip": "闸门：允许应用控制端发来的键鼠指令",
+    "thin_status_title": "薄客户端 · 无本机预览",
+    "thin_status_body": "发送画面：{stream} · 接受控制：{control}\n用浏览器打开下方地址查看画面并操作",
+    "gate_open": "开",
+    "gate_closed": "关",
     "remote_active": "远程控制中 · 鼠标{mm} · 键盘{km}",
     "remote_hover": "悬停移动光标 · 点击控制 · 顶栏输入法键入 · 鼠标{mm}",
     "desktop_preview": "桌面远程控制 · 鼠标{mm} · 键盘{km} · {state}",
@@ -231,6 +241,12 @@
     "key_postmsg": "PostMsg",
     "policy_foreground": "桌面 · 前台",
     "policy_background": "窗口 · 后台"
+  },
+
+  "gates": {
+    "title": "远程闸门",
+    "target": "目标",
+    "hint": "画面发往控制端网页（:9997）。\n两闸默认关闭；须分别打开才推流 / 执行远端键鼠。"
   },
 
   "update": {

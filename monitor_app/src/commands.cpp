@@ -13,6 +13,9 @@
 #include "version.h"
 #include "sha256_util.h"
 #include "update_verify.h"
+#include "ws_server.h"
+#include "h264_encoder.h"
+#include <d3d11.h>
 #include "../../logger/logger.h"
 #include "../../capture/include/capture_methods.h"
 #include "../../capture/include/capture_wgc_ffi.h"
@@ -460,13 +463,16 @@ static std::thread g_stream_thread;
 static WgcStreamHandle* g_stream_handle = nullptr;
 // Active remote-control target (forced onto CONTROL_MSG actions).
 static std::atomic<uint64_t> g_control_hwnd{0};
+// Dual gates (SSOT): stream out vs apply remote control. Default both closed.
+static std::atomic<bool> g_allow_stream{false};
+static std::atomic<bool> g_accept_control{false};
+static std::atomic<uint64_t> g_stream_session{0};
 
 // Fwd: remote CONTROL_MSG → send_input (defined with input dispatch).
 static std::string execute_remote_control_json(const std::string& actionJson);
 
 // ── TCP server (port 9999): H.264 NAL out + CONTROL_MSG JSON in ──
 #include "../../protocol/protocol.h"
-#include "h264_encoder.h"
 
 struct TcpClient {
     SOCKET sock = INVALID_SOCKET;
@@ -479,6 +485,7 @@ static std::vector<TcpClient*> g_tcp_clients;
 static SOCKET g_tcp_listen = INVALID_SOCKET;
 static std::thread g_tcp_accept_thread;
 static std::atomic<bool> g_tcp_running{false};
+static std::atomic<bool> g_h264_need_key{true};
 
 static bool tcp_recv_exact(SOCKET s, char* buf, int n) {
     int got = 0;
@@ -536,6 +543,7 @@ static void tcp_accept_loop() {
             std::lock_guard<std::mutex> lk(g_tcp_mutex);
             g_tcp_clients.push_back(c);
         }
+        g_h264_need_key.store(true); // new viewer needs an IDR soon
         LOG("cmd", "TCP controller connected");
     }
 }
@@ -616,6 +624,168 @@ static void tcp_broadcast_h264(const H264Packet& pkt) {
     }
 }
 
+static H264Encoder g_h264;
+static std::mutex g_h264_mtx;
+
+// HW: encode every WGC frame (no artificial throttle — latency first, ~30fps from WGC).
+// Soft: still capped; soft 1080p cannot sustain real-time.
+static constexpr int kRemoteEncodeMinIntervalMsHw = 0;
+static constexpr int kRemoteEncodeMinIntervalMsSw = 50;   // ~20fps soft
+static constexpr int kRemoteEncodeMaxWHw = 1920;
+static constexpr int kRemoteEncodeMaxWSw = 1280;
+
+static void scale_bgra_nn(const uint8_t* src, int sw, int sh,
+                          uint8_t* dst, int dw, int dh) {
+    for (int y = 0; y < dh; ++y) {
+        int sy = (int)((int64_t)y * sh / dh);
+        const uint8_t* srow = src + (size_t)sy * sw * 4;
+        uint8_t* drow = dst + (size_t)y * dw * 4;
+        for (int x = 0; x < dw; ++x) {
+            int sx = (int)((int64_t)x * sw / dw);
+            memcpy(drow + x * 4, srow + sx * 4, 4);
+        }
+    }
+}
+
+static void broadcast_h264_all(const H264Packet& pkt) {
+    tcp_broadcast_h264(pkt);
+    ws_broadcast_h264(pkt);
+}
+
+static bool remote_has_viewers() {
+    {
+        std::lock_guard<std::mutex> lk(g_tcp_mutex);
+        if (!g_tcp_clients.empty()) return true;
+    }
+    return ws_server_has_clients();
+}
+
+// WGC worker: GPU texture → H.264 → TCP/WS.
+// Soft encode at full 1080p was ~8fps / multi-second lag (see agent log SOFTWARE_FALLBACK).
+static void on_wgc_gpu_frame(void* /*ctx*/, void* d3d_device, void* d3d_tex, int w, int h) {
+    if (!g_streaming.load() || !g_allow_stream.load()) return;
+    if (!d3d_device || !d3d_tex || w < 16 || h < 16) return;
+    if (!remote_has_viewers()) return;
+
+    static ULONGLONG s_last_enc_ms = 0;
+    static int s_enc_w = 0, s_enc_h = 0;
+    static bool s_h264_give_up = false;
+    static bool s_prefer_soft_scale = false;
+    static uint64_t s_stream_gen = 0;
+    static std::vector<uint8_t> s_bgra_full;
+    static std::vector<uint8_t> s_bgra_scaled;
+    uint64_t gen = g_stream_session.load();
+    if (gen != s_stream_gen) {
+        s_stream_gen = gen;
+        s_h264_give_up = false;
+        s_prefer_soft_scale = false;
+        s_enc_w = s_enc_h = 0;
+        s_last_enc_ms = 0;
+    }
+
+    auto* dev = (ID3D11Device*)d3d_device;
+    auto* tex = (ID3D11Texture2D*)d3d_tex;
+
+    std::lock_guard<std::mutex> lk(g_h264_mtx);
+
+    // First init: try HW at source size (needs WGC device VIDEO_SUPPORT).
+    if (!s_h264_give_up && !g_h264.ready()) {
+        int ew = w & ~1, eh = h & ~1;
+        if (ew > kRemoteEncodeMaxWHw) {
+            ew = kRemoteEncodeMaxWHw & ~1;
+            eh = ((int)((int64_t)h * ew / w)) & ~1;
+        }
+        if (g_h264.init(dev, ew, eh, 30, 6000)) {
+            s_enc_w = ew; s_enc_h = eh;
+            s_prefer_soft_scale = !g_h264.hardware();
+            g_h264_need_key.store(true);
+            LOG("cmd", "H.264 %s %dx%d", g_h264.hardware() ? "HARDWARE" : "SOFTWARE_FALLBACK", ew, eh);
+            // Soft at 1080p is unusable — re-init private soft encoder at 1280.
+            if (s_prefer_soft_scale) {
+                g_h264.shutdown();
+                int sw = (w > kRemoteEncodeMaxWSw) ? kRemoteEncodeMaxWSw : (w & ~1);
+                int sh = ((int)((int64_t)h * sw / w)) & ~1;
+                if (sh < 16) sh = 16;
+                if (!g_h264.init(sw, sh, 20, 2500)) {
+                    s_h264_give_up = true;
+                    LOG_WARN("cmd", "H.264 soft re-init %dx%d failed", sw, sh);
+                    return;
+                }
+                s_enc_w = sw; s_enc_h = sh;
+                g_h264_need_key.store(true);
+                LOG_WARN("cmd", "H.264 SOFTWARE scaled %dx%d (1080p soft too slow)", sw, sh);
+            }
+        } else {
+            s_h264_give_up = true;
+            LOG_WARN("cmd", "H.264 init failed — sticky give-up");
+            return;
+        }
+    }
+    if (!g_h264.ready()) return;
+
+    int interval = g_h264.hardware() ? kRemoteEncodeMinIntervalMsHw : kRemoteEncodeMinIntervalMsSw;
+    ULONGLONG now = GetTickCount64();
+    if (now - s_last_enc_ms < (ULONGLONG)interval) return;
+    s_last_enc_ms = now;
+
+    if (g_h264_need_key.exchange(false))
+        g_h264.request_keyframe();
+
+    std::vector<H264Packet> pkts;
+    if (g_h264.hardware() && !s_prefer_soft_scale) {
+        int ew = w & ~1, eh = h & ~1;
+        if (ew != s_enc_w || eh != s_enc_h) {
+            // Resolution change — re-init next frame.
+            g_h264.shutdown();
+            s_enc_w = s_enc_h = 0;
+            return;
+        }
+        if (!g_h264.encode_texture(tex, ew, eh, pkts) || pkts.empty()) return;
+    } else {
+        // Soft path: Map staging → scale → encode_bgra (keeps latency bounded).
+        static ComPtr<ID3D11Texture2D> s_staging;
+        static int s_stg_w = 0, s_stg_h = 0;
+        ComPtr<ID3D11DeviceContext> ctx;
+        dev->GetImmediateContext(&ctx);
+        D3D11_TEXTURE2D_DESC td = {};
+        tex->GetDesc(&td);
+        if (!s_staging || s_stg_w != (int)td.Width || s_stg_h != (int)td.Height) {
+            td.Usage = D3D11_USAGE_STAGING;
+            td.BindFlags = 0;
+            td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+            td.MiscFlags = 0;
+            s_staging.Reset();
+            if (FAILED(dev->CreateTexture2D(&td, nullptr, &s_staging))) return;
+            s_stg_w = (int)td.Width;
+            s_stg_h = (int)td.Height;
+        }
+        ctx->CopyResource(s_staging.Get(), tex);
+        D3D11_MAPPED_SUBRESOURCE mapped = {};
+        if (FAILED(ctx->Map(s_staging.Get(), 0, D3D11_MAP_READ, 0, &mapped))) return;
+        s_bgra_full.resize((size_t)w * h * 4);
+        if ((int)mapped.RowPitch == w * 4) {
+            memcpy(s_bgra_full.data(), mapped.pData, s_bgra_full.size());
+        } else {
+            for (int y = 0; y < h; ++y)
+                memcpy(s_bgra_full.data() + (size_t)y * w * 4,
+                       (uint8_t*)mapped.pData + y * mapped.RowPitch, (size_t)w * 4);
+        }
+        ctx->Unmap(s_staging.Get(), 0);
+
+        int tw = s_enc_w, th = s_enc_h;
+        const uint8_t* px = s_bgra_full.data();
+        int pw = w, ph = h;
+        if (tw != w || th != h) {
+            s_bgra_scaled.resize((size_t)tw * th * 4);
+            scale_bgra_nn(s_bgra_full.data(), w, h, s_bgra_scaled.data(), tw, th);
+            px = s_bgra_scaled.data();
+            pw = tw; ph = th;
+        }
+        if (!g_h264.encode_bgra(px, pw, ph, pkts) || pkts.empty()) return;
+    }
+    for (const auto& p : pkts) broadcast_h264_all(p);
+}
+
 static void tcp_broadcast_bgra_fallback(const uint8_t* bgra, int w, int h) {
     uint32_t body_size = 16 + (uint32_t)(w * h * 4);
     uint8_t hdr[PROTOCOL_FRAME_HEADER];
@@ -639,9 +809,6 @@ static void tcp_broadcast_bgra_fallback(const uint8_t* bgra, int w, int h) {
         }
     }
 }
-
-static H264Encoder g_h264;
-static std::mutex g_h264_mtx;
 
 static std::string cmd_capture_stream_stop(); // fwd decl for cmd_capture_stream_start
 
@@ -832,9 +999,9 @@ static std::string cmd_capture_stream_start(uint64_t hwnd, const std::string& me
     if (method == "wgc" || method == "WGC") {
         if (h == nullptr) {
             g_stream_handle = wgc_stream_start_monitor(
-                MonitorFromWindow(nullptr, MONITOR_DEFAULTTOPRIMARY), 1280);
+                MonitorFromWindow(nullptr, MONITOR_DEFAULTTOPRIMARY), kRemoteEncodeMaxWHw);
         } else {
-            g_stream_handle = wgc_stream_start(h, 1280);
+            g_stream_handle = wgc_stream_start(h, kRemoteEncodeMaxWHw);
         }
     } else if (method == "dxgi" || method == "DXGI") {
         // DXGI Desktop Duplication stream not yet implemented.
@@ -850,84 +1017,84 @@ static std::string cmd_capture_stream_start(uint64_t hwnd, const std::string& me
         LOG("cmd", "stream_start: FAILED");
         return R"({"ok":false,"error":"wgc_stream_start failed"})";
     }
+    // GPU encode before Map — no local SharedBuffer preview.
+    wgc_stream_set_gpu_frame_callback(g_stream_handle, on_wgc_gpu_frame, nullptr);
+    wgc_stream_set_cpu_readback(g_stream_handle, 0);
+
     g_control_hwnd.store(hwnd);
+    g_allow_stream.store(true);
     g_streaming = true;
+    g_stream_session.fetch_add(1);
+    g_h264_need_key.store(true);
 
-    g_stream_thread = std::thread([transport]() {
-        CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-        std::vector<uint8_t> buf(MAX_PX);
-        int enc_w = 0, enc_h = 0;
-        bool h264_give_up = false; // sticky: do not spam SetInputType every frame
-        while (g_streaming) {
-            int w, h, ch;
-            int size = wgc_stream_read(g_stream_handle, buf.data(), MAX_PX, &w, &h, &ch);
-            if (size > 0 && w > 0 && h > 0 && w <= 3840 && h <= 2160) {
-                // Local Monitor preview: SharedBuffer (BGRA) — unchanged.
-                stream_bridge_push_frame(buf.data(), w, h);
-
-                // Remote controllers: H.264 NAL over TCP (type=2). BGRA fallback
-                // only if encoder unavailable. Skip encode when no TCP clients.
-                bool have_clients = false;
-                {
-                    std::lock_guard<std::mutex> lk(g_tcp_mutex);
-                    have_clients = !g_tcp_clients.empty();
-                }
-                if (have_clients) {
-                    std::lock_guard<std::mutex> lk(g_h264_mtx);
-                    int ew = w & ~1, eh = h & ~1;
-                    if (!h264_give_up && (!g_h264.ready() || enc_w != ew || enc_h != eh)) {
-                        if (!g_h264.init(ew, eh, 60, 4000)) {
-                            LOG_WARN("cmd", "H.264 init failed — TCP fallback to BGRA (sticky)");
-                            h264_give_up = true;
-                            enc_w = enc_h = 0;
-                        } else {
-                            enc_w = ew; enc_h = eh;
-                            h264_give_up = false;
-                        }
-                    }
-                    if (g_h264.ready()) {
-                        std::vector<H264Packet> pkts;
-                        if (g_h264.encode_bgra(buf.data(), w, h, pkts) && !pkts.empty()) {
-                            for (const auto& p : pkts) tcp_broadcast_h264(p);
-                        }
-                    } else if (h264_give_up) {
-                        tcp_broadcast_bgra_fallback(buf.data(), w, h);
-                    }
-                }
-
-                dump_frame_if_enabled(buf.data(), w, h, true);
-            } else {
-                Sleep(1);
-            }
-        }
-        {
-            std::lock_guard<std::mutex> lk(g_h264_mtx);
-            g_h264.shutdown();
-        }
-        CoUninitialize();
+    // WGC worker owns capture+encode; this thread only waits for stop.
+    g_stream_thread = std::thread([]() {
+        while (g_streaming) Sleep(50);
+        std::lock_guard<std::mutex> lk(g_h264_mtx);
+        g_h264.shutdown();
     });
 
-    LOG("cmd", "stream_start: hwnd=%llu method=%s transport=%s dump_cap=%d dump_str=%d dump_dir='%s'",
-        (unsigned long long)hwnd, method.c_str(), transport.c_str(),
-        (int)g_dump_capture_frames, (int)g_dump_stream_frames, g_dump_dir.c_str());
-    return R"({"ok":true})";
+    LOG("cmd", "stream_start: hwnd=%llu method=%s transport=%s gpu_encode=1 (no local preview)",
+        (unsigned long long)hwnd, method.c_str(), transport.c_str());
+    return R"({"ok":true,"allow_stream":true})";
 }
 
 static std::string cmd_capture_stream_stop() {
     g_streaming = false;
+    g_allow_stream.store(false);
     if (g_stream_handle) {
         wgc_stream_signal_stop(g_stream_handle);
         if (g_stream_thread.joinable()) g_stream_thread.join();
+        wgc_stream_set_gpu_frame_callback(g_stream_handle, nullptr, nullptr);
         wgc_stream_stop(g_stream_handle);
         g_stream_handle = nullptr;
     }
-    g_control_hwnd.store(0);
+    // Keep g_control_hwnd so accept_control can still target last window.
     {
         std::lock_guard<std::mutex> lk(g_h264_mtx);
         g_h264.shutdown();
     }
-    LOG("cmd", "stream_stop");
-    return R"({"ok":true})";
+    LOG("cmd", "stream_stop allow_stream=0");
+    return R"({"ok":true,"allow_stream":false})";
+}
+
+static std::string cmd_set_stream_gate(const std::string& args) {
+    bool enabled = json_get_bool(args, "enabled");
+    if (!enabled) {
+        if (g_streaming) return cmd_capture_stream_stop();
+        g_allow_stream.store(false);
+        return R"({"ok":true,"allow_stream":false})";
+    }
+    uint64_t hwnd = json_get_uint64(args, "hwnd");
+    std::string method = json_get_str(args, "method");
+    if (method.empty()) method = (hwnd == 0) ? "wgc" : "wgc";
+    if (g_streaming) {
+        g_allow_stream.store(true);
+        return R"({"ok":true,"allow_stream":true})";
+    }
+    return cmd_capture_stream_start(hwnd, method, "h264");
+}
+
+static std::string cmd_set_control_gate(const std::string& args) {
+    bool enabled = json_get_bool(args, "enabled");
+    g_accept_control.store(enabled);
+    // Optional: remember target hwnd without starting stream.
+    if (args.find("\"hwnd\"") != std::string::npos)
+        g_control_hwnd.store(json_get_uint64(args, "hwnd"));
+    LOG("cmd", "accept_control=%d hwnd=%llu", (int)enabled,
+        (unsigned long long)g_control_hwnd.load());
+    return enabled ? R"({"ok":true,"accept_control":true})"
+                   : R"({"ok":true,"accept_control":false})";
+}
+
+static std::string cmd_get_gates() {
+    char buf[128];
+    snprintf(buf, sizeof(buf),
+             "{\"ok\":true,\"allow_stream\":%s,\"accept_control\":%s,\"hwnd\":%llu}",
+             g_allow_stream.load() ? "true" : "false",
+             g_accept_control.load() ? "true" : "false",
+             (unsigned long long)g_control_hwnd.load());
+    return buf;
 }
 
 // ── Log commands ──────────────────────────────────────────
@@ -1386,6 +1553,9 @@ static std::string cmd_send_input(const std::string& args) {
 // Apply target-driven policy: desktop=foreground SendInput, window=background SendMessage.
 // Forces hwnd to g_control_hwnd so a hallucinating model cannot retarget another window.
 static std::string execute_remote_control_json(const std::string& actionJson) {
+    if (!g_accept_control.load()) {
+        return "{\"ok\":false,\"error\":\"accept_control gate closed\"}";
+    }
     uint64_t hwnd = g_control_hwnd.load();
     const char* method = (hwnd == 0) ? "sendinput" : "sendmessage";
 
@@ -2579,6 +2749,9 @@ std::string dispatch_command(const std::string& json) {
             json_get_str(args, "method"), json_get_str(args, "transport"));
     }
     else if (cmd == "capture_stream_stop") result = cmd_capture_stream_stop();
+    else if (cmd == "set_stream_gate") result = cmd_set_stream_gate(args);
+    else if (cmd == "set_control_gate") result = cmd_set_control_gate(args);
+    else if (cmd == "get_gates") result = cmd_get_gates();
     else if (cmd == "read_logs") result = cmd_read_logs(json_get_int(args, "max_files"));
     else if (cmd == "read_log_file") result = cmd_read_log_file(json_get_str(args, "filename"));
     else if (cmd == "open_log_dir") result = cmd_open_log_dir();
@@ -2943,6 +3116,23 @@ void backend_init() {
         GetTickCount64() - g_boot_tick);
     init_wic();
     tcp_server_start();
+    {
+        std::string root = paths_get_install_dir() + "\\controller";
+        DWORD attr = GetFileAttributesA((root + "\\index.html").c_str());
+        if (attr == INVALID_FILE_ATTRIBUTES) {
+            std::string fallback = paths_get_exe_dir() + "\\..\\..\\..\\controller_web";
+            char canon[MAX_PATH];
+            if (GetFullPathNameA(fallback.c_str(), MAX_PATH, canon, nullptr))
+                root = canon;
+        }
+        ws_server_start(root,
+            [](const std::string& json) {
+                std::string result = execute_remote_control_json(json);
+                if (result.find("\"ok\":false") != std::string::npos)
+                    LOG_WARN("ws", "control rejected: %s", result.c_str());
+            },
+            []() { g_h264_need_key.store(true); });
+    }
 
     // MTA daemon for WGC (separate thread avoids STA vs MTA conflict)
     g_mta_running = true;
@@ -2970,6 +3160,7 @@ void backend_shutdown() {
     g_mta_running = false;
     if (g_mta_thread.joinable()) g_mta_thread.join();
     st_cleanup();          // drop self-test client link
+    ws_server_stop();
     tcp_server_stop();
     capture_log_flush();
     capture_log_shutdown();

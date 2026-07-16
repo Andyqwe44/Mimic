@@ -11,6 +11,7 @@
 #include "../include/capture_wgc.hpp"
 #include "../include/capture_wgc_ffi.h"
 #include "../../logger/logger.h"
+#include <wrl/client.h>
 #include <thread>
 #include <atomic>
 #include <mutex>
@@ -43,6 +44,10 @@ struct WgcStreamHandle {
     std::atomic<bool> running{false};
     std::atomic<bool> has_frame{false};
     std::atomic<bool> init_ok{false};
+    std::atomic<bool> cpu_readback{true};
+    WgcGpuFrameCb gpu_cb = nullptr;
+    void* gpu_cb_ctx = nullptr;
+    std::mutex cb_mtx;
 
     // Init synchronization: start() blocks until worker signals init done
     std::mutex init_mtx;
@@ -55,6 +60,69 @@ struct WgcStreamHandle {
     std::vector<uint8_t> frame_buf;
     int frame_w = 0, frame_h = 0, frame_ch = 4;
     int max_dim = 0; // 0 = no scaling
+
+    void run_loop() {
+        running = true;
+        wgc::WgcFrame frame;
+        int dbg = 0;
+        while (running) {
+            const bool want_cpu = cpu_readback.load(std::memory_order_acquire);
+            WgcGpuFrameCb cb = nullptr;
+            void* ctx = nullptr;
+            {
+                std::lock_guard<std::mutex> lk(cb_mtx);
+                cb = gpu_cb;
+                ctx = gpu_cb_ctx;
+            }
+
+            if (!want_cpu && cb) {
+                Microsoft::WRL::ComPtr<ID3D11Texture2D> tex;
+                int tw = 0, th = 0;
+                if (!cap.wait_frame_gpu(tex, tw, th, 100)) {
+                    if (!running) break;
+                    continue;
+                }
+                dbg++;
+                if (dbg % 30 == 0)
+                    LOG("wgc-worker", "%d gpu-frames %dx%d", dbg, tw, th);
+                // GPU encode path: no Map. max_dim scaling skipped (encoder may scale).
+                cb(ctx, (void*)cap.d3d_device(), (void*)tex.Get(), tw, th);
+                continue;
+            }
+
+            if (!cap.wait_frame(frame, 100)) {
+                if (!running) break;
+                continue;
+            }
+            dbg++;
+            if (dbg % 30 == 0)
+                LOG("wgc-worker", "%d frames, ok=%d", dbg, cap.is_ok() ? 1 : 0);
+
+            if (max_dim > 0 && (frame.width > max_dim || frame.height > max_dim)) {
+                float scale = (float)max_dim / (float)(std::max(frame.width, frame.height));
+                int dw = (int)(frame.width * scale);
+                int dh = (int)(frame.height * scale);
+                if (dw < 1) dw = 1;
+                if (dh < 1) dh = 1;
+                std::vector<uint8_t> scaled(dw * dh * 4);
+                scale_bgra_keep_aspect(frame.pixels.data(), frame.width, frame.height,
+                                        scaled.data(), dw, dh);
+                std::lock_guard<std::mutex> lk(mtx);
+                frame_buf = std::move(scaled);
+                frame_w = dw;
+                frame_h = dh;
+                frame_ch = frame.channels;
+                has_frame = true;
+            } else {
+                std::lock_guard<std::mutex> lk(mtx);
+                frame_buf = std::move(frame.pixels);
+                frame_w = frame.width;
+                frame_h = frame.height;
+                frame_ch = frame.channels;
+                has_frame = true;
+            }
+        }
+    }
 
     bool start(HWND hwnd, int _max_dim) {
         max_dim = _max_dim;
@@ -82,47 +150,7 @@ struct WgcStreamHandle {
             }
             init_cv.notify_one();
 
-            running = true;
-            wgc::WgcFrame frame;
-            int dbg = 0;
-            while (running) {
-                // Wait up to 100ms for a frame (condition variable, not busy-wait)
-                if (!cap.wait_frame(frame, 100)) {
-                    if (!running) break;
-                    continue;
-                }
-                dbg++;
-                if (dbg % 30 == 0) {
-                    LOG("wgc-worker", "%d frames, ok=%d", dbg, cap.is_ok() ? 1 : 0);
-                }
-
-                // Scale if max_dim is set and frame is larger
-                if (max_dim > 0 && (frame.width > max_dim || frame.height > max_dim)) {
-                    float scale = (float)max_dim / (float)(std::max(frame.width, frame.height));
-                    int dw = (int)(frame.width * scale);
-                    int dh = (int)(frame.height * scale);
-                    if (dw < 1) dw = 1;
-                    if (dh < 1) dh = 1;
-
-                    std::vector<uint8_t> scaled(dw * dh * 4);
-                    scale_bgra_keep_aspect(frame.pixels.data(), frame.width, frame.height,
-                                            scaled.data(), dw, dh);
-
-                    std::lock_guard<std::mutex> lk(mtx);
-                    frame_buf = std::move(scaled);
-                    frame_w = dw;
-                    frame_h = dh;
-                    frame_ch = frame.channels;
-                    has_frame = true;
-                } else {
-                    std::lock_guard<std::mutex> lk(mtx);
-                    frame_buf = std::move(frame.pixels);
-                    frame_w = frame.width;
-                    frame_h = frame.height;
-                    frame_ch = frame.channels;
-                    has_frame = true;
-                }
-            }
+            run_loop();
 
             // Worker exits cleanly — DispatcherQueue shutdown is handled
             // by stop() AFTER worker.join(), to avoid use-after-free crash.
@@ -310,41 +338,7 @@ WgcStreamHandle* wgc_stream_start_monitor(HMONITOR hmon, int max_dim) {
         }
         h->init_cv.notify_one();
 
-        h->running = true;
-        wgc::WgcFrame frame;
-        while (h->running) {
-            if (!h->cap.wait_frame(frame, 100)) {
-                if (!h->running) break;
-                continue;
-            }
-
-            if (h->max_dim > 0 && (frame.width > h->max_dim || frame.height > h->max_dim)) {
-                float scale = (float)h->max_dim / (float)(std::max(frame.width, frame.height));
-                int dw = (int)(frame.width * scale);
-                int dh = (int)(frame.height * scale);
-                if (dw < 1) dw = 1;
-                if (dh < 1) dh = 1;
-
-                std::vector<uint8_t> scaled(dw * dh * 4);
-                scale_bgra_keep_aspect(frame.pixels.data(), frame.width, frame.height,
-                                        scaled.data(), dw, dh);
-
-                std::lock_guard<std::mutex> lk(h->mtx);
-                h->frame_buf = std::move(scaled);
-                h->frame_w = dw;
-                h->frame_h = dh;
-                h->frame_ch = frame.channels;
-                h->has_frame = true;
-            } else {
-                std::lock_guard<std::mutex> lk(h->mtx);
-                h->frame_buf = std::move(frame.pixels);
-                h->frame_w = frame.width;
-                h->frame_h = frame.height;
-                h->frame_ch = frame.channels;
-                h->has_frame = true;
-            }
-        }
-
+        h->run_loop();
         // DispatcherQueue shutdown handled by stop() after worker.join()
     });
 
@@ -422,6 +416,25 @@ int wgc_capture_single_monitor(HMONITOR hmon, uint8_t* buf, int buf_size,
     LOG("wgc", "wgc_capture_single_monitor: timeout after 50 attempts, shutting down");
     cap.shutdown();
     dq.ShutdownQueueAsync();
+    return 0;
+}
+
+void wgc_stream_set_gpu_frame_callback(WgcStreamHandle* h, WgcGpuFrameCb cb, void* ctx) {
+    if (!h) return;
+    std::lock_guard<std::mutex> lk(h->cb_mtx);
+    h->gpu_cb = cb;
+    h->gpu_cb_ctx = ctx;
+}
+
+void wgc_stream_set_cpu_readback(WgcStreamHandle* h, int enable) {
+    if (!h) return;
+    h->cpu_readback.store(enable != 0, std::memory_order_release);
+    LOG("wgc", "cpu_readback=%d", enable != 0 ? 1 : 0);
+}
+
+int wgc_stream_pump(WgcStreamHandle* h) {
+    // Worker thread owns the wait loop; pump is a no-op placeholder for API symmetry.
+    (void)h;
     return 0;
 }
 

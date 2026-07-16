@@ -54,6 +54,17 @@ GAM_API WgcStreamHandle* wgc_stream_start_monitor(HMONITOR hmon, int max_dim);
 GAM_API int wgc_capture_single_monitor(HMONITOR hmon, uint8_t* buf, int buf_size,
                                int* out_w, int* out_h, int* out_ch);
 
+/// GPU frame callback: d3d11_device / d3d11_texture are ID3D11Device* / ID3D11Texture2D*.
+/// Invoked on the WGC worker thread; texture is valid only during the call.
+typedef void (*WgcGpuFrameCb)(void* ctx, void* d3d11_device, void* d3d11_texture, int w, int h);
+
+/// When cpu_readback==0, worker skips Map and only invokes the GPU callback.
+GAM_API void wgc_stream_set_gpu_frame_callback(WgcStreamHandle* h, WgcGpuFrameCb cb, void* ctx);
+GAM_API void wgc_stream_set_cpu_readback(WgcStreamHandle* h, int enable);
+
+/// Pump one wait cycle (for gpu-only mode). Returns 1 if a frame was delivered.
+GAM_API int wgc_stream_pump(WgcStreamHandle* h);
+
 #ifdef __cplusplus
 }
 #endif

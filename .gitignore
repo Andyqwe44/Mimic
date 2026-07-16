@@ -20,6 +20,9 @@ test_target/**/WebView2UserData/
 # Generated code
 monitor_app/src/embedded_assets.h
 
+# Vite / controller static (staged by Build.ps1 into monitor_app/build*/controller)
+controller_web/dist/
+
 # === Dependencies ===
 **/node_modules/
 

@@ -383,18 +383,22 @@ Streaming (`capture_stream_start`):
 | Desktop `hwnd=0` | Foreground (may occupy user mouse/keyboard) | `sendinput` |
 | Window | Background; coords must stay in window `[0,1]` | `sendmessage` |
 
-Remote `CONTROL_MSG` actions are forced onto the active stream `hwnd` (cannot retarget). Atomic types: `mousedown`/`mouseup`/`move(+held)`/`keydown`/`keyup`/`text`. Local Mapping/IME scaffolding is off when `THIN_CLIENT` (`monitor_web/src/lib/features.ts`).
+Remote `CONTROL_MSG` / WS actions are forced onto the active stream `hwnd` (cannot retarget). Atomic types: `mousedown`/`mouseup`/`move(+held)`/`keydown`/`keyup`/`text`. Local Mapping/IME scaffolding is off when `THIN_CLIENT` (`monitor_web/src/lib/features.ts`).
 
-TCP video: prefer H.264 type=2 (MF MFT); local preview stays SharedBuffer BGRA. Web controllers use `controller_web/` + `bridge.py` (WS:9997 ↔ TCP:9999). **Not MJPEG.**
+**Gates:** `allow_stream` / `accept_control` (UI: 发送画面 / 接受控制). Stream push and remote input only when the matching gate is open.
+
+**Remote video (thin):** WGC GPU texture → MF **hardware** H.264 (DXGI; `MF_TRANSFORM_ASYNC_UNLOCK` + NeedInput/HaveOutput) → TCP `:9999` + embedded WS `:9997`. Soft MFT is fallback only (scaled ≤1280). **Not MJPEG.** No Python `bridge.py`. `controller_web` (React) is built by `Build.ps1` into `build(_dev)\controller\` and served by `ws_server`.
+
+**HW encode proof:** `test/h264_hw_bench.cpp` + `test/h264_recv_bench.mjs` (`Build.ps1 -Module h264_bench`) — WGC→HW H.264→TCP :19999.
 
 ### Streaming pipeline
 
 ```
-WGC → condition_variable → TryGetNextFrame → CopyResource(GPU) → Map(CPU)
-  → BGRA → stream_bridge_push_frame (MTA thread)
-  → PostMessage(WM_STREAM_FRAME)
-  → [STA main thread] shared_buffer_push_frame → PostSharedBufferToScript
-  → [JS] sharedbufferreceived → ImageData → Canvas putImageData
+Remote (thin / gates open):
+  WGC GPU tex → H264Encoder::encode_texture → TCP/WS Annex-B  (no local SharedBuffer)
+
+Local preview (non-thin / debug):
+  WGC → Map(CPU) → stream_bridge PostMessage → SharedBuffer → Canvas
 ```
 
 Stream bridge uses PostMessage because WebView2 SharedBuffer interfaces are STA-only,
@@ -479,7 +483,7 @@ locales/: en.json, zh-CN.json, zh-TW.json
 ## Known Issues
 
 1. **WGC FPS**: Event-driven — static content = low FPS. Dynamic window = 60+.
-2. **H.264 MFT**: Encoder creates MP4 for progressive download, `<video>` needs full file.
+2. **H.264 remote path**: Prefer HW DXGI MFT; soft fallback is capped. WebCodecs needs Baseline Level 4.0 (`avc1.42E028`) for 1080p.
 3. **Chromium background tab throttling**: WebView2 may throttle when app loses focus.
 4. **WebView2 cross-thread COM**: STA-only interfaces, COM marshaling fails. Stream uses PostMessage bridge.
 5. **Async break-point jitter**: TS `hostCall('log_ui_event')` arrives async — may split C++ log runs. Cosmetic only.

@@ -211,6 +211,16 @@
     "preview_tip": "Start live preview",
     "no_preview": "No preview active",
     "no_preview_hint": "Click Preview button to start real-time preview",
+    "stream_gate": "Send video",
+    "stream_gate_on": "Stop send",
+    "stream_gate_tip": "Gate: allow H.264 stream to controllers",
+    "control_gate": "Accept control",
+    "control_gate_on": "Controlling",
+    "control_gate_tip": "Gate: apply remote mouse/keyboard from controller",
+    "thin_status_title": "Thin client · no local preview",
+    "thin_status_body": "Send video: {stream} · Accept control: {control}\nOpen the URL below in a browser to view and control",
+    "gate_open": "ON",
+    "gate_closed": "OFF",
     "remote_active": "Remote control · Mouse {mm} · Keyboard {km}",
     "remote_hover": "Hover to move · Click to control · Type in toolbar IME · Mouse {mm}",
     "desktop_preview": "Desktop remote control · Mouse {mm} · Keyboard {km} · {state}",
@@ -231,6 +241,12 @@
     "key_postmsg": "PostMsg",
     "policy_foreground": "Desktop · foreground",
     "policy_background": "Window · background"
+  },
+
+  "gates": {
+    "title": "Remote gates",
+    "target": "Target",
+    "hint": "Video goes to the controller page (:9997).\nBoth gates default OFF — open separately to stream / apply remote input."
   },
 
   "update": {
