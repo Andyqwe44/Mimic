@@ -10,31 +10,35 @@ Desktop monitor for visual game AI — **pixels in, actions out**.
 
 ## Architecture
 
+**Thin agent client (2026-07 turn):** PC host = capture + execute. Vision / human control is external.
+
 ```
-┌─ monitor_app (C++ Win32) ───────────────────────────────────┐
-│  React UI (TypeScript + Tailwind)  ←→  C++ backend           │
-│  WebView2 browser control            WebMessage bridge        │
-│  Dashboard / Monitor / Log           SharedBuffer zero-copy   │
-│  Dev:  build_dev\monitor_app.exe → localhost:1420  SharedBuffer zero-copy         │
-│  Prod: build\monitor_app.exe → gam.local          Stream bridge                   │
+┌─ monitor_app (Windows thin client) ─────────────────────────┐
+│  Capture (WGC…)  +  send_input (atomic)  +  local UI          │
+│  Local preview: SharedBuffer BGRA                             │
+│  Remote: TCP :9999  H.264 out + CONTROL_MSG JSON in           │
 └──────────┬───────────────────────────────────────────────────┘
-           │
-    ┌──────┼────────┐
-    ▼      ▼        ▼
-  C++      C++      TCP :9999
-  capture  logger   (agent / Python)
-  WGC+DI  file+mem  binary frames
+           │ FRAM protocol
+    ┌──────┴──────────────────────────────┐
+    ▼                                     ▼
+ controller_web (+ bridge.py WS:9997)   Python vision model
+ phone / another PC browser             (same TCP actions)
 ```
+
+| Target | Input policy |
+|--------|----------------|
+| Entire desktop | Foreground `sendinput` (may occupy mouse/keyboard) |
+| Specific window | Background `sendmessage`; coords clamped to window `[0,1]` |
 
 **Zero Rust. Single MSVC command builds everything.**
 
-Agent context: Cursor loads `.cursor/rules/*.mdc` (iron laws + scoped C++/web/build rules). Long-form docs: `CLAUDE.md` / `AGENTS.md`.
+Agent context: Cursor loads `.cursor/rules/*.mdc`. Long-form: `CLAUDE.md` / `AGENTS.md`.
 
 | Language | Role |
 |----------|------|
-| C++17 | Host: Win32 window, WebView2, capture, SharedBuffer, stream bridge, TCP, logging |
-| TypeScript/React | UI inside WebView2 (same code regardless of host) |
-| Python | AI model training/inference (separate process, TCP :9999) |
+| C++17 | Thin host: capture, SharedBuffer preview, H.264 TCP, `send_input` |
+| TypeScript/React | Local ops UI (`monitor_web`); remote UI in `controller_web/` |
+| Python | Vision model and/or `controller_web/bridge.py` (WebSocket↔TCP) |
 
 ## Quick Start
 
@@ -87,7 +91,8 @@ tictactoe/
 ├── monitor_app/          C++ WebView2 host (main window + commands + single-instance)
 │   └── dep/              WebView2 SDK
 ├── scripts/              PowerShell build/release pipeline (Build/Release/Verify/Publish)
-├── monitor_web/          React frontend (Vite + TypeScript + Tailwind)
+├── monitor_web/          Local React UI (Vite + TypeScript + Tailwind)
+├── controller_web/       Remote Web controller (H.264 + actions; bridge.py)
 ├── protocol/             Wire format (C++/Python)
 ├── model/                Python AI
 ├── test_target/          Standalone input-test window (TCP :9998 self-test feedback)
@@ -112,17 +117,21 @@ Desktop single-frame → `dxgi` (DesktopBlt). Window single-frame → `wgc`. Str
 
 | Transport | Port | Description |
 |-----------|------|-------------|
-| SharedBuffer | COM | Zero-copy GPU→Canvas, main path |
-| MJPEG | 9998 | JPEG over HTTP multipart, fallback |
-| TCP | 9999 | Wire protocol, external agent/Python |
+| SharedBuffer | COM | Local Monitor preview (BGRA) |
+| TCP FRAM | 9999 | Remote: H.264 Annex-B out + JSON control in |
+| WebSocket bridge | 9997 | `controller_web/bridge.py` for browsers (no raw TCP) |
 
 ## Wire Protocol (TCP :9999)
 
 ```
 Frame: [magic:4 "FRAM"][body_size:4 LE][type_tag:4 LE][body]
 
-type_tag 1 (BGRA): [w:4][h:4][ch:4][reserved:4][pixels: w*h*ch]
+type_tag 1 (BGRA fallback): [w:4][h:4][ch:4][reserved:4][pixels]
+type_tag 2 (H.264 preferred): [w:4][h:4][flags:4][reserved:4][Annex-B NAL…]  flags&1=keyframe
+type_tag 3 (CONTROL_MSG): UTF-8 JSON action; agent forces hwnd+method from stream target
 ```
+
+Remote Web UI: see [`controller_web/README.md`](controller_web/README.md).
 
 ## Features
 

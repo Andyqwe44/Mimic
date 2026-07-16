@@ -1,27 +1,55 @@
 // ═══ Monitor View — live preview + remote-control input forwarding ═══
-// Renders ScreenshotPanel in bare mode, adds toolbar + canvas overlay for
-// mouse/keyboard input mapping. Supports click/dblclick/drag/wheel/keyboard.
+// Canvas keeps the real OS cursor only. Click ripples / drag rect / hover
+// circle are drawn on the REAL capture target via C++ layered overlays.
+//
+// Preview mapping = test harness only (production = remote model → send_input).
+// Same atomic path as agent: mousedown/up/move(+held)/keydown/up/text(Unicode).
+// While mapping+previewing, host pins GAM TOPMOST (set_mapping_controller).
+//
+// IME dock: compose here; on commit flush whole string as background WM_CHAR
+// (no SetFocus / no target activate — must not steal the user's foreground).
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Camera, Play, Square, MousePointer2, Power } from 'lucide-react'
+import { Camera, Play, Square, Power } from 'lucide-react'
 import { ActionBtn, Tooltip } from './Toolkit'
-import { STATE_LABEL, codeToName, MOUSE_METHOD, KEY_METHOD } from '../lib/constants'
+import { STATE_LABEL, codeToName, resolveInputMethods } from '../lib/constants'
+import { THIN_CLIENT } from '../lib/features'
 import { addLog, hostCall } from '../lib/bridge'
 import type { WindowInfo, Rect } from '../lib/types'
 
 // ── Types ──
-interface Ripple { id: number; x: number; y: number }
 interface KeyToast { text: string; id: number }
 interface PressedKey { key: string; code: string; keyCode: number }
 
 // Imperative API exposed to the Self-Test orchestrator (App).
-// sendClick drives the EXACT same path as a real user click (see handleMouseUp).
+// Every send* drives the EXACT same hostCall('send_input') path a real user uses.
 export interface MonitorApi {
   sendClick: (rx: number, ry: number, button?: string) => Promise<any>
+  sendWheel: (rx: number, ry: number, delta: number) => Promise<any>
+  sendDrag: (path: { x: number; y: number }[], button?: string) => Promise<any>
+  sendText: (text: string) => Promise<any>
+  sendKey: (type: 'keydown' | 'keyup', key: string, code: string, vk: number) => Promise<any>
   ready: () => boolean   // preview + mapping active and target dims known
 }
 
-// ── Coordinate helper ──
+// ── Coordinate helpers ──
+// Letterboxed image layout inside the preview container (object-fit: contain).
+function imageLayout(cw: number, ch: number, imageW: number, imageH: number) {
+  if (cw <= 0 || ch <= 0 || imageW <= 0 || imageH <= 0) {
+    return { iw: 0, ih: 0, ox: 0, oy: 0 }
+  }
+  const imgAspect = imageW / imageH
+  const containerAspect = cw / ch
+  if (containerAspect > imgAspect) {
+    const ih = ch
+    const iw = ch * imgAspect
+    return { iw, ih, ox: (cw - iw) / 2, oy: 0 }
+  }
+  const iw = cw
+  const ih = cw / imgAspect
+  return { iw, ih, ox: 0, oy: (ch - ih) / 2 }
+}
+
 // Compute normalized (0-1) coords relative to actual image area, accounting for letterbox
 function getImageCoords(
   clientX: number, clientY: number,
@@ -30,25 +58,9 @@ function getImageCoords(
 ): { rx: number; ry: number; inImage: boolean; px: number; py: number } {
   const cw = containerRect.width
   const ch = containerRect.height
-  if (cw <= 0 || ch <= 0 || imageW <= 0 || imageH <= 0) {
+  const { iw, ih, ox, oy } = imageLayout(cw, ch, imageW, imageH)
+  if (iw <= 0 || ih <= 0) {
     return { rx: 0, ry: 0, inImage: false, px: 0, py: 0 }
-  }
-  const imgAspect = imageW / imageH
-  const containerAspect = cw / ch
-
-  let iw: number, ih: number, ox: number, oy: number
-  if (containerAspect > imgAspect) {
-    // container wider → letterbox on left/right
-    ih = ch
-    iw = ch * imgAspect
-    ox = (cw - iw) / 2
-    oy = 0
-  } else {
-    // container taller → letterbox on top/bottom
-    iw = cw
-    ih = cw / imgAspect
-    ox = 0
-    oy = (ch - ih) / 2
   }
 
   const rx = (clientX - containerRect.left - ox) / iw
@@ -86,8 +98,8 @@ export function MonitorView({
   onTogglePreview,
   children,
   inputMethod: _inputMethod,
-  mouseMode,
-  keyMode,
+  mouseMode: _mouseMode,
+  keyMode: _keyMode,
   mappingEnabled,
   setMappingEnabled,
   mappingHotkey,
@@ -111,7 +123,7 @@ export function MonitorView({
   mouseMode?: 'seize' | 'semi' | 'background'
   keyMode?: 'seize' | 'postmsg' | 'sendmsg'
   mappingEnabled: boolean
-  setMappingEnabled: (v: boolean) => void
+  setMappingEnabled: React.Dispatch<React.SetStateAction<boolean>>
   mappingHotkey: string
   targetDims: { w: number; h: number } | null
   selfRect?: Rect | null
@@ -123,34 +135,37 @@ export function MonitorView({
   const isDesktop = selWin.hwnd === 0
   const stateLabel = t(STATE_LABEL[winState] || winState)
 
-  // ── Derived input methods from mode ──
-  // Desktop (hwnd=0) only supports sendinput — postmessage/winapi need a real window.
-  const mM = isDesktop ? 'sendinput' : MOUSE_METHOD[mouseMode ?? 'background']
-  const kM = isDesktop ? 'sendinput' : KEY_METHOD[keyMode ?? 'postmsg']
-  const sendMove = isDesktop || (mouseMode ?? 'background') === 'seize'   // desktop always sends move
-  const mouseModeShort = mouseMode === 'seize' ? t('monitor.mouse_seize') : mouseMode === 'semi' ? t('monitor.mouse_semi') : t('monitor.mouse_bg')
-  const keyModeShort = keyMode === 'seize' ? t('monitor.key_seize') : keyMode === 'sendmsg' ? t('monitor.key_sendmsg') : t('monitor.key_postmsg')
+  // Target-driven policy (Settings mouse/key modes ignored):
+  // desktop → foreground SendInput; window → background SendMessage + [0,1] clip.
+  const { mouseMethod: mM, keyMethod: kM, sendMove, policy: inputPolicy } =
+    resolveInputMethods(isDesktop)
 
   // ═══ Interaction state ═══
-  const [focused, setFocused] = useState(false)    // canvas has keyboard focus
+  const [focused, setFocused] = useState(false)    // IME dock has keyboard focus
+  const [composing, setComposing] = useState(false)
   const [mouseOn, setMouseOn] = useState(false)
   const [dragging, setDragging] = useState(false)
   const dragPathRef = useRef<{ x: number; y: number }[]>([])
   const dragButtonRef = useRef<string>('left')     // button held during drag
   const dragStartRef = useRef<{ rx: number; ry: number } | null>(null)
   const dragCurrentRef = useRef<{ rx: number; ry: number } | null>(null)
+  const buttonHeldRef = useRef(false)              // target button is physically down
   const lastSampleRef = useRef<number>(0)           // throttle drag sampling at 50ms
   const pressedKeysRef = useRef<PressedKey[]>([])   // currently held keys (for auto-release on blur)
+  const stageRef = useRef<HTMLDivElement>(null)     // preview stage (for blur containment)
   const containerRef = useRef<HTMLDivElement>(null)
+  const imeInputRef = useRef<HTMLInputElement>(null)
+  const composingRef = useRef(false)
+  const imeFlushingRef = useRef(false) // avoid re-entrant dock → target maps
+  const wheelRemainderRef = useRef(0)
 
-  // ── Visual feedback refs ──
-  const [ripples, setRipples] = useState<Ripple[]>([])
+  // ── Visual feedback (key toast stays on canvas; click/drag drawn on real target) ──
   const [keyToast, setKeyToast] = useState<KeyToast | null>(null)
   const idCounterRef = useRef(0)
   const nextId = () => { idCounterRef.current += 1; return idCounterRef.current }
-  const dblclickSuppressRef = useRef(false)   // skip mouseup click when dblclick already sent
   const lastMoveSendRef = useRef(0)          // throttle mouse-move forwarding at 60fps
   const lastCursorRef = useRef(0)            // throttle cursor overlay update at 30fps
+  const lastDragOverlayRef = useRef(0)
 
   // ── Cursor overlay state (follows mouse on canvas) ──
   const [cursorPos, setCursorPos] = useState<{ rx: number; ry: number; px: number; py: number } | null>(null)
@@ -174,22 +189,31 @@ export function MonitorView({
     )
   })()
 
-  // ── Clear cursor overlay when mapping or preview toggles off ──
+  // ── Clear real-target overlays when mapping or preview toggles off ──
   useEffect(() => {
     if (!mappingEnabled || !previewing) {
       setCursorPos(null)
-      hostCall('cursor_overlay', { show: 0 }).catch(() => {})
+      hostCall('target_overlays_hide').catch(() => {})
     }
   }, [mappingEnabled, previewing])
 
-  // ── Cleanup expired ripples ──
+  // Thin client: local preview-mapping disabled (controller is external Web/TCP).
   useEffect(() => {
-    if (ripples.length === 0) return
-    const timer = setTimeout(() => {
-      setRipples((prev) => prev.filter((r) => Date.now() - r.id < 400))
-    }, 450)
-    return () => clearTimeout(timer)
-  }, [ripples])
+    if (THIN_CLIENT && mappingEnabled) setMappingEnabled(false)
+  }, [mappingEnabled, setMappingEnabled])
+
+  // Test harness only: pin GAM above targets while preview-mapping (same-box
+  // z-order). Production agent never needs this — it has no preview canvas.
+  useEffect(() => {
+    if (THIN_CLIENT) return
+    const on = mappingEnabled && previewing
+    hostCall('set_mapping_controller', { on: on ? 1 : 0 }).catch((err: any) => {
+      addLog(`[Input] set_mapping_controller failed: ${err?.message || err}`)
+    })
+    return () => {
+      hostCall('set_mapping_controller', { on: 0 }).catch(() => {})
+    }
+  }, [mappingEnabled, previewing])
 
   // ── Cleanup expired key toast ──
   useEffect(() => {
@@ -202,7 +226,8 @@ export function MonitorView({
   const pressedHotkeyRef = useRef<string[]>([])
   useEffect(() => {
     const onDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+      const editingField = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement
+      if (editingField && e.target !== imeInputRef.current) return
       if (e.repeat) return
       if (!pressedHotkeyRef.current.includes(e.code)) {
         pressedHotkeyRef.current.push(e.code)
@@ -210,9 +235,11 @@ export function MonitorView({
       if (seqMatches(pressedHotkeyRef.current, mappingHotkey)) {
         e.preventDefault()
         e.stopPropagation()
-        const next = !mappingEnabled
-        setMappingEnabled(next)
-        addLog(`[Input] mapping ${next ? 'ON' : 'OFF'} (${mappingHotkey})`)
+        setMappingEnabled((current) => {
+          const next = !current
+          addLog(`[Input] mapping ${next ? 'ON' : 'OFF'} (${mappingHotkey})`)
+          return next
+        })
       }
     }
     const onUp = (e: KeyboardEvent) => {
@@ -233,39 +260,91 @@ export function MonitorView({
   const releaseAllKeys = useCallback(() => {
     const keys = pressedKeysRef.current
     if (keys.length === 0) return
+    pressedKeysRef.current = []
     for (const k of keys) {
       hostCall('send_input', {
         hwnd: selWin.hwnd, type: 'keyup',
         key: k.key, code: k.code, vk: k.keyCode, method: kM,
-      }).catch(() => {})
+      }).catch((err: any) => {
+        if (!pressedKeysRef.current.find((held) => held.code === k.code)) {
+          pressedKeysRef.current.push(k)
+        }
+        addLog(`[Input] auto-release failed for ${k.code}: ${err?.message || err}`)
+      })
     }
-    addLog(`[Input] auto-released ${keys.length} key(s) on blur`)
-    keys.length = 0
-  }, [selWin.hwnd, mM, kM])
+    addLog(`[Input] auto-release requested for ${keys.length} key(s)`)
+  }, [selWin.hwnd, kM])
 
-  const handleBlur = useCallback(() => {
-    setFocused(false)
-    releaseAllKeys()
-    if (dragging) {
-      // Cancel drag — send mouseup so target window doesn't stay stuck
-      setDragging(false)
-      const path = dragPathRef.current
+  useEffect(() => {
+    if (!mappingEnabled || !previewing) {
+      releaseAllKeys()
+      composingRef.current = false
+      setComposing(false)
+      imeInputRef.current?.blur()
+      if (imeInputRef.current) imeInputRef.current.value = ''
+      return
+    }
+    // Keyboard focus lives on the IME strip (toolbar), not the target.
+    const t = window.setTimeout(() => {
+      imeInputRef.current?.focus({ preventScroll: true })
+    }, 0)
+    return () => clearTimeout(t)
+  }, [mappingEnabled, previewing, releaseAllKeys])
+
+  useEffect(() => {
+    if (mappingEnabled && previewing) return
+    if (buttonHeldRef.current) {
+      // releaseHeldButton needs selWin/mM — call inline to avoid stale closure order
+      const pos = dragCurrentRef.current ?? dragStartRef.current
       const button = dragButtonRef.current
-      if (path.length > 0) {
+      buttonHeldRef.current = false
+      setDragging(false)
+      hostCall('target_drag', { show: 0 }).catch(() => {})
+      if (pos) {
         hostCall('send_input', {
-          hwnd: selWin.hwnd, type: 'click',
-          x_norm: path[path.length - 1].x, y_norm: path[path.length - 1].y,
-          button, method: mM,
+          hwnd: selWin.hwnd, type: 'mouseup', button,
+          x_norm: pos.rx, y_norm: pos.ry, method: mM,
         }).catch(() => {})
-        addLog(`[Input] drag cancelled on blur — auto-released mouse button at last position`)
       }
       dragPathRef.current = []
       dragStartRef.current = null
       dragCurrentRef.current = null
     }
-  }, [releaseAllKeys, dragging, selWin.hwnd, mM, kM])
+  }, [mappingEnabled, previewing, selWin.hwnd, mM])
 
-  // ── Mouse down → start drag (or click if released without moving) ──
+  // Emergency mouseup if gesture is cancelled (leave / blur / mapping off).
+  const releaseHeldButton = useCallback(
+    (reason: string) => {
+      if (!buttonHeldRef.current) return
+      const pos = dragCurrentRef.current ?? dragStartRef.current
+      const button = dragButtonRef.current
+      buttonHeldRef.current = false
+      setDragging(false)
+      hostCall('target_drag', { show: 0 }).catch(() => {})
+      if (pos) {
+        hostCall('send_input', {
+          hwnd: selWin.hwnd, type: 'mouseup', button,
+          x_norm: pos.rx, y_norm: pos.ry, method: mM,
+        }).catch((err: any) => {
+          addLog(`[Mouse] emergency mouseup failed: ${err?.message || err}`)
+        })
+      }
+      dragPathRef.current = []
+      dragStartRef.current = null
+      dragCurrentRef.current = null
+      addLog(`[Mouse] press cancelled (${reason})`)
+    },
+    [selWin.hwnd, mM],
+  )
+
+  const handleImeBlur = useCallback((e: React.FocusEvent<HTMLInputElement>) => {
+    if (e.relatedTarget instanceof Node && stageRef.current?.contains(e.relatedTarget)) return
+    setFocused(false)
+    releaseAllKeys()
+    releaseHeldButton('ime blur')
+  }, [releaseAllKeys, releaseHeldButton])
+
+  // ── Mouse down → IMMEDIATE mousedown on target (real press-hold, not batch) ──
   const handleMouseDown = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (!previewing || !mappingEnabled) return
@@ -275,11 +354,9 @@ export function MonitorView({
       const { rx, ry, inImage } = getImageCoords(e.clientX, e.clientY, rect, dims.w, dims.h)
       if (!inImage) return
 
-      // Prevent browser context menu on right-click
-      if (e.button === 2) e.preventDefault()
-
-      // Focus canvas for keyboard input
-      e.currentTarget.focus()
+      // Keep IME strip focused — do not let the canvas steal keyboard focus.
+      e.preventDefault()
+      imeInputRef.current?.focus({ preventScroll: true })
 
       const button = e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left'
       dragButtonRef.current = button
@@ -287,29 +364,42 @@ export function MonitorView({
       dragStartRef.current = { rx, ry }
       dragCurrentRef.current = { rx, ry }
       lastSampleRef.current = Date.now()
+      buttonHeldRef.current = true
       setDragging(true)
+
+      hostCall('send_input', {
+        hwnd: selWin.hwnd, type: 'mousedown', button,
+        x_norm: rx, y_norm: ry, method: mM,
+      }).catch((err: any) => {
+        buttonHeldRef.current = false
+        setDragging(false)
+        addLog(`[Mouse] mousedown failed: ${err?.message || err}`)
+      })
     },
-    [isDesktop, previewing, mappingEnabled, targetDims],
+    [previewing, mappingEnabled, targetDims, selWin.hwnd, mM],
   )
 
-  // ── Mouse move → drag sampling OR cursor forwarding ──
+  // ── Mouse move → live held-move (selection) OR hover forwarding ──
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (!previewing || !mappingEnabled) return
       const dims = targetDims
       if (!dims || dims.w <= 0 || dims.h <= 0) return
       const now = Date.now()
+      const rect = e.currentTarget.getBoundingClientRect()
 
-      if (dragging) {
-        // Drag path sampling at 50ms
-        if (now - lastSampleRef.current < 50) return
-        const rect = e.currentTarget.getBoundingClientRect()
+      if (dragging && buttonHeldRef.current) {
+        // Stream moves while button is down — required for text selection.
+        if (now - lastSampleRef.current < 16) return
         const coords = getImageCoords(e.clientX, e.clientY, rect, dims.w, dims.h)
         if (!coords.inImage) return
         dragPathRef.current.push({ x: coords.rx, y: coords.ry })
         dragCurrentRef.current = { rx: coords.rx, ry: coords.ry }
         lastSampleRef.current = now
-        // Update cursor overlay during drag too (canvas dot + real-window circle)
+        hostCall('send_input', {
+          hwnd: selWin.hwnd, type: 'move', button: dragButtonRef.current,
+          held: true, x_norm: coords.rx, y_norm: coords.ry, method: mM,
+        }).catch(() => {})
         if (now - lastCursorRef.current > 33) {
           lastCursorRef.current = now
           setCursorPos({ rx: coords.rx, ry: coords.ry, px: coords.px, py: coords.py })
@@ -317,158 +407,177 @@ export function MonitorView({
             hwnd: selWin.hwnd, x_norm: coords.rx, y_norm: coords.ry, show: 1,
           }).catch(() => {})
         }
-      } else {
-        // Update cursor overlay at ~30fps (canvas dot + real-window circle via C++)
-        if (now - lastCursorRef.current > 33) {
-          lastCursorRef.current = now
-          const rect = e.currentTarget.getBoundingClientRect()
-          const coords = getImageCoords(e.clientX, e.clientY, rect, dims.w, dims.h)
-          if (coords.inImage) {
-            setCursorPos({ rx: coords.rx, ry: coords.ry, px: coords.px, py: coords.py })
-            // Send to C++ → real-screen circle overlay at absolute screen position
-            hostCall('cursor_overlay', {
-              hwnd: selWin.hwnd, x_norm: coords.rx, y_norm: coords.ry, show: 1,
-            }).catch(() => {})
-          } else {
-            setCursorPos(null)
-            hostCall('cursor_overlay', { show: 0 }).catch(() => {})
-          }
+        if (dragStartRef.current && now - lastDragOverlayRef.current > 33) {
+          lastDragOverlayRef.current = now
+          hostCall('target_drag', {
+            show: 1,
+            hwnd: selWin.hwnd,
+            x0: dragStartRef.current.rx,
+            y0: dragStartRef.current.ry,
+            x1: coords.rx,
+            y1: coords.ry,
+          }).catch(() => {})
         }
-        // Mouse move forwarding: ONLY in seize mode (grabs system cursor).
-        // Semi + Background: virtual indicator only, no cursor movement.
-        if (!sendMove) return
-        // Continuous cursor forwarding at 60fps
-        if (now - lastMoveSendRef.current < 16) return
-        lastMoveSendRef.current = now
-        const rect = e.currentTarget.getBoundingClientRect()
-        const { rx, ry, inImage } = getImageCoords(e.clientX, e.clientY, rect, dims.w, dims.h)
-        if (!inImage) return
-        hostCall('send_input', {
-          hwnd: selWin.hwnd, type: 'move', x_norm: rx, y_norm: ry, method: mM,
-        }).catch(() => {})
+        return
       }
+
+      if (now - lastCursorRef.current > 33) {
+        lastCursorRef.current = now
+        const coords = getImageCoords(e.clientX, e.clientY, rect, dims.w, dims.h)
+        if (coords.inImage) {
+          setCursorPos({ rx: coords.rx, ry: coords.ry, px: coords.px, py: coords.py })
+          hostCall('cursor_overlay', {
+            hwnd: selWin.hwnd, x_norm: coords.rx, y_norm: coords.ry, show: 1,
+          }).catch(() => {})
+        } else {
+          setCursorPos(null)
+          hostCall('cursor_overlay', { show: 0 }).catch(() => {})
+        }
+      }
+      if (!sendMove) return
+      if (now - lastMoveSendRef.current < 16) return
+      lastMoveSendRef.current = now
+      const { rx, ry, inImage } = getImageCoords(e.clientX, e.clientY, rect, dims.w, dims.h)
+      if (!inImage) return
+      hostCall('send_input', {
+        hwnd: selWin.hwnd, type: 'move', x_norm: rx, y_norm: ry, method: mM,
+      }).catch(() => {})
     },
-    [dragging, previewing, isDesktop, mappingEnabled, targetDims, selWin.hwnd, mM, kM],
+    [dragging, previewing, mappingEnabled, targetDims, selWin.hwnd, mM, sendMove],
   )
 
-  // ── Shared click sender — single source of truth for a mapped click ──
-  // Both the real mouseup handler and the Self-Test orchestrator call this,
-  // so an automated sweep hits the identical send_input path a user does.
-  const sendMappedClick = useCallback(
+  // Flash a ripple on the REAL capture target (Monitor canvas keeps only the OS cursor).
+  const flashTargetRipple = useCallback(
     (rx: number, ry: number, button = 'left') => {
-      const rippleId = nextId()
-      setRipples((prev) => [...prev, { id: rippleId, x: rx * 100, y: ry * 100 }])
-      return hostCall('send_input', {
-        hwnd: selWin.hwnd, type: 'click', x_norm: rx, y_norm: ry, button, method: mM,
-      })
-        .then(() => {
-          addLog(
-            `[Mouse] click → hwnd=0x${selWin.hwnd.toString(16)} (${Math.round(rx * 100)}%,${Math.round(ry * 100)}%) [${mM}]`,
-          )
-        })
-        .catch((err: any) => {
-          addLog(`[Mouse] click failed: ${err?.message || err}`)
-        })
+      hostCall('target_ripple', {
+        hwnd: selWin.hwnd, x_norm: rx, y_norm: ry, button,
+      }).catch(() => {})
     },
-    [selWin.hwnd, mM],
+    [selWin.hwnd],
+  )
+
+  // Primitive click = mousedown + mouseup (same path as a real user gesture).
+  const sendMappedClick = useCallback(
+    async (rx: number, ry: number, button = 'left') => {
+      flashTargetRipple(rx, ry, button)
+      await hostCall('send_input', {
+        hwnd: selWin.hwnd, type: 'mousedown', button,
+        x_norm: rx, y_norm: ry, method: mM,
+      })
+      await hostCall('send_input', {
+        hwnd: selWin.hwnd, type: 'mouseup', button,
+        x_norm: rx, y_norm: ry, method: mM,
+      })
+      addLog(
+        `[Mouse] down+up → hwnd=0x${selWin.hwnd.toString(16)} (${Math.round(rx * 100)}%,${Math.round(ry * 100)}%) [${mM}]`,
+      )
+    },
+    [selWin.hwnd, mM, flashTargetRipple],
+  )
+
+  // Primitive drag = mousedown → held moves → mouseup.
+  const sendMappedDrag = useCallback(
+    async (path: { x: number; y: number }[], button = 'left') => {
+      if (!path.length) return
+      const first = path[0]
+      const last = path[path.length - 1]
+      flashTargetRipple(last.x, last.y, button)
+      await hostCall('send_input', {
+        hwnd: selWin.hwnd, type: 'mousedown', button,
+        x_norm: first.x, y_norm: first.y, method: mM,
+      })
+      for (let i = 1; i < path.length; i++) {
+        await hostCall('send_input', {
+          hwnd: selWin.hwnd, type: 'move', button, held: true,
+          x_norm: path[i].x, y_norm: path[i].y, method: mM,
+        })
+      }
+      await hostCall('send_input', {
+        hwnd: selWin.hwnd, type: 'mouseup', button,
+        x_norm: last.x, y_norm: last.y, method: mM,
+      })
+      addLog(
+        `[Mouse] drag ${path.length} pts (down/move/up) → hwnd=0x${selWin.hwnd.toString(16)} [${mM}]`,
+      )
+    },
+    [selWin.hwnd, mM, flashTargetRipple],
   )
 
   // ── Expose imperative API to parent (Self-Test orchestrator) ──
   useEffect(() => {
     if (!apiRef) return
     apiRef.current = {
-      sendClick: (rx, ry, b = 'left') => sendMappedClick(rx, ry, b),
+      sendClick: (rx, ry, b = 'left') =>
+        sendMappedClick(rx, ry, b).catch((err: any) => {
+          addLog(`[Mouse] click failed: ${err?.message || err}`)
+        }),
+      sendWheel: (rx, ry, delta) =>
+        hostCall('send_input', {
+          hwnd: selWin.hwnd, type: 'wheel', x_norm: rx, y_norm: ry, delta, method: mM,
+        }),
+      sendDrag: (path, button = 'left') =>
+        sendMappedDrag(path, button).catch((err: any) => {
+          addLog(`[Mouse] drag failed: ${err?.message || err}`)
+        }),
+      sendText: (text) =>
+        hostCall('send_input', {
+          hwnd: selWin.hwnd, type: 'text', text, method: kM,
+        }),
+      sendKey: (type, key, code, vk) =>
+        hostCall('send_input', {
+          hwnd: selWin.hwnd, type, key, code, vk, method: kM,
+        }),
       ready: () => !!previewing && !!mappingEnabled && !!targetDims && targetDims.w > 0,
     }
     return () => { if (apiRef) apiRef.current = null }
-  }, [apiRef, sendMappedClick, previewing, mappingEnabled, targetDims])
+  }, [apiRef, sendMappedClick, sendMappedDrag, previewing, mappingEnabled, targetDims, selWin.hwnd, mM, kM])
 
-  // ── Mouse up → send click or drag (immediate, no defer) ──
+  // ── Mouse up → IMMEDIATE mouseup (completes press-hold-move like a real user) ──
   const handleMouseUp = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
-      if (!dragging) return
+      if (!buttonHeldRef.current && !dragging) return
       setDragging(false)
-
-      // Suppress if dblclick already handled this pair
-      if (dblclickSuppressRef.current) {
-        dblclickSuppressRef.current = false
-        dragPathRef.current = []
-        dragStartRef.current = null
-        dragCurrentRef.current = null
-        return
-      }
+      hostCall('target_drag', { show: 0 }).catch(() => {})
 
       const dims = targetDims
       const rect = e.currentTarget.getBoundingClientRect()
       const coords = dims && dims.w > 0
         ? getImageCoords(e.clientX, e.clientY, rect, dims.w, dims.h)
         : null
-      const rx = coords?.rx ?? dragStartRef.current?.rx ?? 0
-      const ry = coords?.ry ?? dragStartRef.current?.ry ?? 0
-
-      const path = dragPathRef.current
+      const rx = coords?.rx ?? dragCurrentRef.current?.rx ?? dragStartRef.current?.rx ?? 0
+      const ry = coords?.ry ?? dragCurrentRef.current?.ry ?? dragStartRef.current?.ry ?? 0
       const button = dragButtonRef.current
+      const start = dragStartRef.current
+      const movedPx = start && dims
+        ? Math.hypot((rx - start.rx) * dims.w, (ry - start.ry) * dims.h)
+        : 0
 
-      // Determine click vs drag
-      const movedPoints = path.length > 1
-
-      if (!movedPoints) {
-        // Immediate click — shared path (also used by Self-Test sweep)
-        sendMappedClick(rx, ry, button)
-      } else {
-        // Drag: add final position
-        path.push({ x: rx, y: ry })
-        hostCall('send_input', {
-          hwnd: selWin.hwnd, type: 'drag', button,
-          path, method: mM,
-        })
-          .then(() => {
-            addLog(
-              `[Mouse] drag ${path.length} pts → hwnd=0x${selWin.hwnd.toString(16)} [${mM}]`,
-            )
+      if (buttonHeldRef.current) {
+        buttonHeldRef.current = false
+        if (mappingEnabled && previewing) {
+          // Double-click is just two natural down/up pairs from the browser —
+          // no composite dblclick packet.
+          hostCall('send_input', {
+            hwnd: selWin.hwnd, type: 'mouseup', button,
+            x_norm: rx, y_norm: ry, method: mM,
           })
-          .catch((err: any) => {
-            addLog(`[Mouse] drag failed: ${err?.message || err}`)
-          })
+            .then(() => {
+              flashTargetRipple(rx, ry, button)
+              addLog(
+                `[Mouse] mouseup${movedPx >= 3 ? ' (after drag)' : ''}${e.detail === 2 ? ' detail=2' : ''} → hwnd=0x${selWin.hwnd.toString(16)} (${Math.round(rx * 100)}%,${Math.round(ry * 100)}%) [${mM}]`,
+              )
+            })
+            .catch((err: any) => {
+              addLog(`[Mouse] mouseup failed: ${err?.message || err}`)
+            })
+        }
       }
 
       dragPathRef.current = []
       dragStartRef.current = null
       dragCurrentRef.current = null
     },
-    [dragging, selWin.hwnd, mM, kM, targetDims, sendMappedClick],
-  )
-
-  // ── Double click — suppresses second mouseup click, sends dblclick immediately ──
-  const handleDoubleClick = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
-      if (!previewing || !mappingEnabled) return
-      const dims = targetDims
-      if (!dims || dims.w <= 0 || dims.h <= 0) return
-      const rect = e.currentTarget.getBoundingClientRect()
-      const { rx, ry, inImage } = getImageCoords(e.clientX, e.clientY, rect, dims.w, dims.h)
-      if (!inImage) return
-
-      const button = e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left'
-      // Suppress the second mouseup click — dblclick handles the full pair
-      dblclickSuppressRef.current = true
-      const rippleId = nextId()
-      setRipples((prev) => [...prev, { id: rippleId, x: rx * 100, y: ry * 100 }, { id: rippleId + 1, x: rx * 100, y: ry * 100 }])
-
-      hostCall('send_input', {
-        hwnd: selWin.hwnd, type: 'dblclick', x_norm: rx, y_norm: ry,
-        button, method: mM,
-      })
-        .then(() => {
-          addLog(
-            `[Mouse] dblclick → hwnd=0x${selWin.hwnd.toString(16)} (${Math.round(rx * 100)}%,${Math.round(ry * 100)}%) [${mM}]`,
-          )
-        })
-        .catch((err: any) => {
-          addLog(`[Mouse] dblclick failed: ${err?.message || err}`)
-        })
-    },
-    [isDesktop, previewing, mappingEnabled, selWin.hwnd, mM, kM, targetDims],
+    [dragging, mappingEnabled, previewing, selWin.hwnd, mM, targetDims, flashTargetRipple],
   )
 
   // ── Mouse wheel → normalized delta (deltaMode-aware) ──
@@ -481,12 +590,20 @@ export function MonitorView({
       const rect = e.currentTarget.getBoundingClientRect()
       const { rx, ry, inImage } = getImageCoords(e.clientX, e.clientY, rect, dims.w, dims.h)
       if (!inImage) return
-      // Normalize deltaY to WHEEL_DELTA units based on deltaMode
-      let rawDelta = e.deltaY
-      if (e.deltaMode === 1) rawDelta *= 120 // line mode → pixels
-      else if (e.deltaMode === 2) rawDelta *= 1200 // page mode → ~10 lines
-      const delta = Math.round(rawDelta)
+      // Accumulate high-resolution wheel/trackpad input and emit complete
+      // Win32 WHEEL_DELTA units. A typical Chromium mouse notch is ~100 px.
+      const wheelUnits = e.deltaMode === 0
+        ? e.deltaY * 1.2
+        : e.deltaMode === 1
+          ? e.deltaY * 120
+          : e.deltaY * 1200
+      wheelRemainderRef.current += wheelUnits
+      const steps = wheelRemainderRef.current > 0
+        ? Math.floor(wheelRemainderRef.current / 120)
+        : Math.ceil(wheelRemainderRef.current / 120)
+      const delta = steps * 120
       if (delta === 0) return
+      wheelRemainderRef.current -= delta
 
       hostCall('send_input', {
         hwnd: selWin.hwnd, type: 'wheel', x_norm: rx, y_norm: ry,
@@ -501,108 +618,184 @@ export function MonitorView({
           addLog(`[Mouse] wheel failed: ${err?.message || err}`)
         })
     },
-    [isDesktop, previewing, mappingEnabled, selWin.hwnd, mM, kM, targetDims],
+    [previewing, mappingEnabled, selWin.hwnd, mM, targetDims],
   )
 
-  // ── Keyboard handlers — all keys use individual keydown/keyup ──
-  // System naturally recognizes combos (Ctrl+C) because Ctrl is already held
-  // from a previous keydown. No separate "combo" type needed.
+  // ── Keyboard on IME dock — English per-key; Chinese only after commit ──
+  // While composing, keys stay local so the system IME candidate UI can work
+  // on the Monitor dock. After 上屏, committed text is mapped to the target.
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLDivElement>) => {
-      if (isDesktop || !previewing || !focused || !mappingEnabled) return
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (!previewing || !mappingEnabled) return
+      // Chinese IME: swallow forwarding; let the dock host composition.
+      if (composingRef.current || e.nativeEvent.isComposing || e.keyCode === 229) return
+
+      // English / non-IME: do not insert into the dock; forward the real key.
       e.preventDefault()
 
       const key = e.key
       const code = e.code
       const vk = e.keyCode
-
-      // Allow IME composition keys through (VK_PROCESSKEY = 229).
-      // IME works best with SendInput (Seize mode) which injects at system level.
       const isModifier = key === 'Control' || key === 'Shift' || key === 'Alt' || key === 'Meta'
 
-      // Track for auto-release
-      if (!pressedKeysRef.current.find((k) => k.key === key)) {
+      if (!pressedKeysRef.current.find((k) => k.code === code)) {
         pressedKeysRef.current.push({ key, code, keyCode: vk })
       }
 
-      // All keys use individual keydown/keyup — the system naturally
-      // recognizes combos (Ctrl+C) because Ctrl is already held down from
-      // a previous keydown. No separate "combo" type needed for user input.
       hostCall('send_input', {
         hwnd: selWin.hwnd, type: 'keydown', key, code, vk, method: kM,
       }).catch((err: any) => addLog(`[Key] keydown failed: ${err?.message || err}`))
 
-      // Visual feedback — accumulate modifiers prefix
-      const toastId = nextId()
       const parts: string[] = []
       if (e.ctrlKey) parts.push('Ctrl')
       if (e.altKey) parts.push('Alt')
       if (e.shiftKey && !isModifier) parts.push('Shift')
       if (e.metaKey) parts.push('Win')
       parts.push(key)
-      const label = parts.join('+')
-      setKeyToast({ text: label, id: toastId })
+      setKeyToast({ text: parts.join('+'), id: nextId() })
     },
-    [isDesktop, previewing, focused, mappingEnabled, selWin.hwnd, mM, kM],
+    [previewing, mappingEnabled, selWin.hwnd, kM],
   )
 
   const handleKeyUp = useCallback(
-    (e: React.KeyboardEvent<HTMLDivElement>) => {
-      if (isDesktop || !previewing || !focused || !mappingEnabled) return
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (!previewing || !mappingEnabled) return
+      if (composingRef.current || e.nativeEvent.isComposing || e.keyCode === 229) return
       e.preventDefault()
-
-      // Remove from tracked keys
-      pressedKeysRef.current = pressedKeysRef.current.filter((k) => k.key !== e.key)
 
       hostCall('send_input', {
         hwnd: selWin.hwnd, type: 'keyup',
         key: e.key, code: e.code, vk: e.keyCode, method: kM,
-      }).catch((err: any) => addLog(`[Key] keyup failed: ${err?.message || err}`))
+      })
+        .then(() => {
+          pressedKeysRef.current = pressedKeysRef.current.filter((k) => k.code !== e.code)
+        })
+        .catch((err: any) => addLog(`[Key] keyup failed: ${err?.message || err}`))
     },
-    [isDesktop, previewing, focused, mappingEnabled, selWin.hwnd, mM, kM],
+    [previewing, mappingEnabled, selWin.hwnd, kM],
   )
 
-  // ── Drag selection overlay (lazy-evaluated to avoid stale closure) ──
-  const dragOverlay = dragging && dragStartRef.current && dragCurrentRef.current && (() => {
-    const s = dragStartRef.current!
-    const c = dragCurrentRef.current!
-    const left = Math.min(s.rx, c.rx) * 100
-    const top = Math.min(s.ry, c.ry) * 100
-    const width = Math.abs(c.rx - s.rx) * 100
-    const height = Math.abs(c.ry - s.ry) * 100
-    return (
-      <div
-        className="absolute inset-0 pointer-events-none"
-        style={{ left: `${left}%`, top: `${top}%`, width: `${width}%`, height: `${height}%` }}
-      >
-        <div className="w-full h-full border-2 border-accent/60 bg-accent/10 rounded-sm" />
-      </div>
-    )
-  })()
+  const handleCompositionStart = useCallback(() => {
+    composingRef.current = true
+    setComposing(true)
+  }, [])
+
+  // Dock = IME 上屏落点. Detect new content → map whole string as Unicode to
+  // the last-clicked target caret, then clear the dock (focus stays here).
+  const flushImeDock = useCallback(
+    async (el: HTMLInputElement) => {
+      if (!previewing || !mappingEnabled) return
+      if (composingRef.current || imeFlushingRef.current) return
+      const text = el.value
+      if (!text) return
+
+      // Clear immediately so a concurrent compositionend+input flush cannot double-send.
+      el.value = ''
+      imeFlushingRef.current = true
+      try {
+        await hostCall('send_input', {
+          hwnd: selWin.hwnd,
+          type: 'text',
+          text,
+          method: kM,
+        })
+        setKeyToast({ text, id: nextId() })
+        addLog(`[Key] IME dock → target Unicode (${Array.from(text).length} char(s)) [${kM}]`)
+      } catch (err: any) {
+        addLog(`[Key] IME dock map failed: ${err?.message || err}`)
+        // Put text back so the user can retry / see what failed to map.
+        if (!el.value) el.value = text
+      } finally {
+        imeFlushingRef.current = false
+        // Do NOT steal focus back onto the dock — OS caret must stay on the
+        // target control (SetFocus there). User clicks the dock when they need
+        // another IME composition session.
+      }
+    },
+    [previewing, mappingEnabled, selWin.hwnd, kM],
+  )
+
+  const handleCompositionEnd = useCallback(
+    (e: React.CompositionEvent<HTMLInputElement>) => {
+      // Committed glyphs land in the dock; flush as Unicode on next tick.
+      composingRef.current = false
+      setComposing(false)
+      const el = e.currentTarget
+      window.setTimeout(() => { void flushImeDock(el) }, 0)
+    },
+    [flushImeDock],
+  )
+
+  const handleImeInput = useCallback(
+    (e: React.FormEvent<HTMLInputElement>) => {
+      if (composingRef.current || (e.nativeEvent instanceof InputEvent && e.nativeEvent.isComposing)) {
+        return
+      }
+      const el = e.currentTarget
+      window.setTimeout(() => { void flushImeDock(el) }, 0)
+    },
+    [flushImeDock],
+  )
 
   return (
-    <div className="flex-1 flex flex-col min-h-0">
-      {/* Toolbar */}
-      <div className="flex items-center h-11 px-4 bg-bg-secondary border-b border-border shrink-0 gap-3">
-        {/* Left: target + state (Connection style) */}
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="text-sm font-medium text-text-primary truncate w-[144px]">
+    <div ref={stageRef} className="flex-1 flex flex-col min-h-0">
+      {/* Toolbar — IME strip lives here so preview keeps full width */}
+      <div className="flex items-center h-11 px-4 bg-bg-secondary border-b border-border shrink-0 gap-2">
+        <div className="flex items-center gap-2 min-w-0 shrink-0">
+          <span className="text-sm font-medium text-text-primary truncate max-w-[120px]">
             {selWin.title}
           </span>
           <span className="text-[11px] font-medium text-accent bg-accent/10 px-1.5 py-0.5 rounded shrink-0">
             {stateLabel}
           </span>
         </div>
-        {/* Middle: spacer */}
-        <span className="flex-1" />
-        {/* Input mapping toggle */}
+
+        {/* Compact IME strip — hidden in thin client (controller is external Web/TCP). */}
+        {!THIN_CLIENT && previewing && mappingEnabled ? (
+          <div className="flex-1 min-w-0 flex items-center gap-1.5 max-w-[300px]">
+            <Tooltip text={composing ? t('monitor.ime_dock_composing') : t('monitor.ime_dock_hint')}>
+              <span className={`text-[10px] font-medium shrink-0 ${composing ? 'text-accent' : 'text-text-muted'}`}>
+                {t('monitor.ime_dock_title')}
+              </span>
+            </Tooltip>
+            <input
+              ref={imeInputRef}
+              type="text"
+              aria-label={t('monitor.ime_proxy')}
+              spellCheck={false}
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              defaultValue=""
+              onFocus={() => setFocused(true)}
+              onBlur={handleImeBlur}
+              onKeyDown={handleKeyDown}
+              onKeyUp={handleKeyUp}
+              onCompositionStart={handleCompositionStart}
+              onCompositionEnd={handleCompositionEnd}
+              onInput={handleImeInput}
+              placeholder={t('monitor.ime_dock_placeholder')}
+              className={`flex-1 min-w-0 h-7 px-2 rounded-md text-xs outline-none border transition-colors ${
+                composing
+                  ? 'border-accent bg-accent/5 text-text-primary'
+                  : focused
+                    ? 'border-accent/50 bg-bg-primary text-text-primary'
+                    : 'border-border bg-bg-primary text-text-primary'
+              } placeholder:text-text-tertiary`}
+            />
+          </div>
+        ) : (
+          <span className="flex-1" />
+        )}
+
+        {!THIN_CLIENT && (
         <Tooltip text={t('monitor.mapping_tip', { hotkey: mappingHotkey })}>
           <button
             onClick={() => {
               setMappingEnabled(!mappingEnabled)
               addLog(`[Input] mapping ${!mappingEnabled ? 'ON' : 'OFF'}`)
             }}
-            className={`inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-xs font-medium transition-all duration-150 ${
+            className={`inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-xs font-medium transition-all duration-150 shrink-0 ${
               mappingEnabled
                 ? 'bg-accent/10 text-accent border border-accent/30'
                 : 'border border-border text-text-secondary hover:bg-bg-hover'
@@ -612,7 +805,12 @@ export function MonitorView({
             <span>{t('monitor.mapping')}</span>
           </button>
         </Tooltip>
-        {/* Right: Snapshot → Preview/Stop (right-aligned) */}
+        )}
+        {THIN_CLIENT && (
+          <span className="text-[10px] text-text-muted shrink-0 px-1.5 py-0.5 rounded bg-bg-tertiary">
+            {inputPolicy === 'foreground' ? t('monitor.policy_foreground') : t('monitor.policy_background')}
+          </span>
+        )}
         <ActionBtn
           icon={<Camera className="w-3.5 h-3.5" />}
           label={t('monitor.snapshot')}
@@ -639,19 +837,20 @@ export function MonitorView({
         )}
       </div>
 
-      {/* ── Preview canvas area — contains ScreenshotPanel children + overlays ── */}
-      <div className="flex-1 overflow-hidden p-4">
+      {/* ── Preview canvas (full width) ── */}
+      <div className="flex-1 overflow-hidden p-4 min-h-0">
         <div
           ref={containerRef}
-          tabIndex={!previewing || !mappingEnabled ? undefined : 0}
           className={`w-full h-full rounded-xl bg-bg-secondary ring-1 ring-inset overflow-hidden flex items-center justify-center relative outline-none transition-shadow ${
             !isDesktop && previewing && mappingEnabled
               ? focused
-                ? 'ring-accent shadow-[0_0_0_2px_rgba(38,79,120,0.3)] cursor-crosshair'
-                : 'ring-accent/40 cursor-crosshair hover:ring-accent/70'
+                ? 'ring-accent shadow-[0_0_0_2px_rgba(38,79,120,0.3)]'
+                : 'ring-accent/40 hover:ring-accent/70'
               : 'ring-border'
           }`}
-          onDoubleClick={handleDoubleClick}
+          onContextMenu={(e) => {
+            if (previewing && mappingEnabled) e.preventDefault()
+          }}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
@@ -661,78 +860,30 @@ export function MonitorView({
             setMouseOn(false)
             setCursorPos(null)
             hostCall('cursor_overlay', { show: 0 }).catch(() => {})
-            // Cancel drag on mouse leave — release button in target
-            if (dragging) {
-              setDragging(false)
-              const path = dragPathRef.current
-              const button = dragButtonRef.current
-              if (path.length > 0) {
-                hostCall('send_input', {
-                  hwnd: selWin.hwnd, type: 'click',
-                  x_norm: path[path.length - 1].x, y_norm: path[path.length - 1].y,
-                  button, method: mM,
-                }).catch(() => {})
-                addLog(`[Input] drag cancelled on mouse leave — auto-released mouse button`)
-              }
-              dragPathRef.current = []
-              dragStartRef.current = null
-              dragCurrentRef.current = null
-            }
+            releaseHeldButton('mouse leave')
           }}
-          onKeyDown={handleKeyDown}
-          onKeyUp={handleKeyUp}
-          onFocus={() => setFocused(true)}
-          onBlur={handleBlur}
         >
           {previewing && children}
 
-          {/* Drag selection overlay */}
-          {dragOverlay}
-
-          {/* Click ripples */}
-          {ripples.map((r) => (
-            <div
-              key={r.id}
-              className="absolute w-5 h-5 -ml-2.5 -mt-2.5 rounded-full border-2 border-accent/60 bg-accent/20 pointer-events-none animate-ping-once"
-              style={{ left: `${r.x}%`, top: `${r.y}%` }}
-            />
-          ))}
-
-          {/* Key toast */}
           {keyToast && (
             <div className="absolute bottom-12 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-lg bg-bg-tertiary/95 text-xs text-text-primary font-mono shadow-lg backdrop-blur-sm pointer-events-none z-10">
               [{keyToast.text}]
             </div>
           )}
 
-          {/* Remote-control hint */}
-          {mouseOn && !isDesktop && previewing && mappingEnabled && (
-            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-lg bg-bg-tertiary/90 text-xs text-text-secondary flex items-center gap-1.5 shadow-lg backdrop-blur-sm pointer-events-none z-10">
-              <MousePointer2 className={`w-3.5 h-3.5 ${focused ? 'text-accent animate-pulse' : 'text-text-muted'}`} />
-              {focused
-                ? t('monitor.remote_active', { mm: mouseModeShort, km: keyModeShort })
-                : t('monitor.remote_hover', { mm: mouseModeShort })}
-            </div>
-          )}
-          {mouseOn && isDesktop && previewing && mappingEnabled && (
-            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-lg bg-bg-tertiary/90 text-xs text-text-secondary flex items-center gap-1.5 shadow-lg backdrop-blur-sm pointer-events-none z-10">
-              <MousePointer2 className="w-3.5 h-3.5 text-accent" />
-              {t('monitor.desktop_preview', { state: focused ? t('monitor.desktop_focused') : t('monitor.desktop_unfocused') })}
-            </div>
-          )}
+          {/* Mapping-on: no bottom status chip — it occludes the preview. */}
           {mouseOn && isDesktop && previewing && mappingEnabled && isSelfTarget && selfTargetMode === 'warn' && (
-            <div className="absolute top-12 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-lg bg-error/15 text-xs text-error flex items-center gap-1.5 shadow-lg backdrop-blur-sm pointer-events-none z-10">
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-lg bg-error/15 text-xs text-error flex items-center gap-1.5 shadow-lg backdrop-blur-sm pointer-events-none z-10">
               {t('monitor.self_target_warn')}
             </div>
           )}
-          {mouseOn && !isDesktop && previewing && !mappingEnabled && (
+          {mouseOn && previewing && !mappingEnabled && (
             <div className="absolute bottom-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-lg bg-bg-tertiary/90 text-xs text-text-muted flex items-center gap-1.5 shadow-lg backdrop-blur-sm pointer-events-none z-10">
               <Power className="w-3.5 h-3.5" />
               {t('monitor.preview_no_mapping', { hotkey: mappingHotkey })}
             </div>
           )}
 
-          {/* Empty state */}
           {!previewing && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div className="text-center space-y-1">

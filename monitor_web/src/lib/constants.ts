@@ -53,9 +53,9 @@ export const CAPTURE_MODES = [
 ]
 
 export const MOUSE_MODES = [
-  { v: 'background' as const, name: 'mouse.background.name', eng: 'PostMessage', rec: 'mouse.background.rec',
+  { v: 'background' as const, name: 'mouse.background.name', eng: 'SendMessage', rec: 'mouse.background.rec',
     desc: 'mouse.background.desc' },
-  { v: 'semi' as const, name: 'mouse.semi.name', eng: 'SendMsg-Cursor', rec: 'mouse.semi.rec',
+  { v: 'semi' as const, name: 'mouse.semi.name', eng: 'SendInput-Click', rec: 'mouse.semi.rec',
     desc: 'mouse.semi.desc' },
   { v: 'seize' as const, name: 'mouse.seize.name', eng: 'SendInput', rec: 'mouse.seize.rec',
     desc: 'mouse.seize.desc' },
@@ -71,11 +71,41 @@ export const KEYBOARD_MODES = [
 ]
 
 export const MOUSE_METHOD: Record<string, string> = {
-  seize: 'sendinput', semi: 'sendinput', background: 'postmessage',
+  seize: 'sendinput', semi: 'sendinput', background: 'sendmessage',
 }
 
 export const KEY_METHOD: Record<string, string> = {
-  seize: 'sendinput', postmsg: 'postmessage', sendmsg: 'winapi',
+  seize: 'sendinput', postmsg: 'sendmessage', sendmsg: 'winapi',
+}
+
+/** Target-driven input policy (SSOT for Monitor + remote controller). */
+export type InputPolicy = 'foreground' | 'background'
+
+/**
+ * Desktop → foreground SendInput (may occupy user mouse/keyboard).
+ * Window → background SendMessage, coords must stay inside the window [0,1].
+ * Settings mouseMode/keyMode are ignored under this policy.
+ */
+export function resolveInputMethods(isDesktop: boolean): {
+  mouseMethod: string
+  keyMethod: string
+  sendMove: boolean
+  policy: InputPolicy
+} {
+  if (isDesktop) {
+    return {
+      mouseMethod: 'sendinput',
+      keyMethod: 'sendinput',
+      sendMove: true,
+      policy: 'foreground',
+    }
+  }
+  return {
+    mouseMethod: 'sendmessage',
+    keyMethod: 'sendmessage',
+    sendMove: false,
+    policy: 'background',
+  }
 }
 
 // ── Key code → display name (shared: SettingsView recording + MonitorView matching) ──

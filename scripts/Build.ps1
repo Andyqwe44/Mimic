@@ -11,7 +11,7 @@
 # Modules migrated so far: logger. (capture/input/updater/monitor_app to follow.)
 
 param(
-    [ValidateSet('all', 'logger', 'capture', 'input', 'updater', 'monitor_app')]
+    [ValidateSet('all', 'logger', 'capture', 'input', 'updater', 'monitor_app', 'test_target')]
     [string[]]$Module = @('all'),
     [switch]$Dev
 )
@@ -164,9 +164,9 @@ function Build-MonitorApp {
         }
         $lflags = @('d3d11.lib', 'dxgi.lib', 'windowsapp.lib', 'user32.lib', 'gdi32.lib', 'ole32.lib',
             'oleaut32.lib', 'ws2_32.lib', 'windowscodecs.lib', 'dwmapi.lib', 'shell32.lib', 'shlwapi.lib',
-            'winhttp.lib', 'bcrypt.lib', 'advapi32.lib')
+            'winhttp.lib', 'bcrypt.lib', 'advapi32.lib', 'mfplat.lib', 'mf.lib', 'mfuuid.lib', 'wmcodecdspuuid.lib')
         $linkflags = if ($Dev) { @('/DEBUG:FULL') } else { @('/OPT:REF', '/OPT:ICF', '/Brepro') }
-        $srcs = @('src\main.cpp', 'src\commands.cpp', 'src\virtual_desktop.cpp', 'src\paths.cpp', 'src\sha256_util.cpp', 'src\update_verify.cpp')
+        $srcs = @('src\main.cpp', 'src\commands.cpp', 'src\h264_encoder.cpp', 'src\virtual_desktop.cpp', 'src\paths.cpp', 'src\sha256_util.cpp', 'src\update_verify.cpp')
         $libs = @('dep\WebView2LoaderStatic.lib', "$Root\logger\build\logger.lib") +
         (@('common', 'wgc', 'gdi', 'pw', 'screen', 'desktop') | ForEach-Object { "$Root\capture\build\capture_$_.lib" }) +
         (@('common', 'sendinput', 'winapi', 'postmessage', 'driver') | ForEach-Object { "$Root\input\build\input_$_.lib" })
@@ -184,6 +184,15 @@ function Build-MonitorApp {
         (@('common', 'wgc', 'gdi', 'pw', 'screen', 'desktop') | ForEach-Object { "$Root\capture\build\capture_$_.dll" }) +
         (@('common', 'sendinput', 'winapi', 'postmessage', 'driver') | ForEach-Object { "$Root\input\build\input_$_.dll" })
         foreach ($d in $dlls) { Copy-Item $d "$out\bin\" -Force }
+
+        # Stage test_target next to the exe so launch_test_target can find it.
+        $ttExe = Join-Path $Root 'test_target\build\test_target.exe'
+        $ttUi = Join-Path $Root 'test_target\ui'
+        if (Test-Path $ttExe) {
+            New-Item -ItemType Directory -Force -Path "$out\bin\test_target" | Out-Null
+            Copy-Item $ttExe "$out\bin\test_target\" -Force
+            if (Test-Path $ttUi) { Copy-Item $ttUi "$out\bin\test_target\" -Recurse -Force }
+        }
 
         # Always stage settings.default.json (Dev seeds GameAgentMonitor_Dev; Prod ships in package).
         $settings = Join-Path $Root 'config\settings.default.json'
@@ -204,6 +213,36 @@ function Build-MonitorApp {
     Write-Ok "monitor_app.exe ($cfg)"
 }
 
+function Build-TestTarget {
+    Write-Step 'test_target.exe (WebView2)'
+    $dir = Join-Path $Root 'test_target'
+    $bld = Join-Path $dir 'build'
+    New-Item -ItemType Directory -Force -Path $bld | Out-Null
+    Push-Location $dir
+    try {
+        $wvLib = Join-Path $Root 'monitor_app\dep\WebView2LoaderStatic.lib'
+        if (-not (Test-Path $wvLib)) {
+            throw "WebView2LoaderStatic.lib missing at $wvLib (needed to link test_target)"
+        }
+        $cflags = @('/nologo', '/EHsc', '/std:c++17', '/source-charset:utf-8',
+            '/I', "$Root\monitor_app\dep", '/MT', '/O2', '/DNDEBUG')
+        $libs = @($wvLib, 'user32.lib', 'gdi32.lib', 'ole32.lib', 'oleaut32.lib',
+            'ws2_32.lib', 'shell32.lib', 'shlwapi.lib', 'version.lib', 'advapi32.lib')
+        $clArgs = $cflags + @("/Fo$bld\", "/Fe:$bld\test_target.exe", 'test_target.cpp') +
+            $libs + @('/link', '/SUBSYSTEM:WINDOWS', '/OPT:REF', '/OPT:ICF')
+        cl.exe @clArgs
+        if ($LASTEXITCODE) { throw 'test_target: cl failed' }
+        # Stage ui/ next to the exe for local launches from test_target\build\
+        $uiSrc = Join-Path $dir 'ui'
+        if (Test-Path $uiSrc) {
+            New-Item -ItemType Directory -Force -Path "$bld\ui" | Out-Null
+            Copy-Item "$uiSrc\*" "$bld\ui\" -Recurse -Force
+        }
+    }
+    finally { Pop-Location }
+    Write-Ok 'test_target.exe'
+}
+
 # Dispatch — flat conditionals in dependency order (capture/input/monitor_app link
 # against logger.lib etc). Explicit ifs, not foreach+switch.
 $all = $Module -contains 'all'
@@ -211,4 +250,5 @@ if ($all -or $Module -contains 'logger')      { Build-Logger }
 if ($all -or $Module -contains 'capture')     { Build-Capture }
 if ($all -or $Module -contains 'input')       { Build-Input }
 if ($all -or $Module -contains 'updater')     { Build-Updater }
+if ($all -or $Module -contains 'test_target') { Build-TestTarget }
 if ($all -or $Module -contains 'monitor_app') { Build-MonitorApp }

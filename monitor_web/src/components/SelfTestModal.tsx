@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { X, Crosshair, AlertTriangle } from 'lucide-react'
 import type { SelfTestState, SelfTestSummary } from '../lib/selftest'
 import { useScrollLock } from '../lib/useScrollLock'
+import { Tooltip } from './Toolkit'
 
 // rate 0..1 → red→amber→green
 function rateColor(r: number): string {
@@ -31,15 +32,18 @@ function Heatmap({ summary }: { summary: SelfTestSummary }) {
     <div className="inline-grid gap-1" style={{ gridTemplateColumns: `repeat(${cells.length}, 1fr)` }}>
       {cells.map((row, y) =>
         row.map((rate, x) => (
-          <div
+          <Tooltip
             key={`${x}-${y}`}
-            className="w-11 h-11 rounded flex flex-col items-center justify-center text-[10px] font-mono"
-            style={{ background: rateColor(rate), color: rate > 0.5 ? '#0b1220' : '#fff' }}
-            title={`cell[${x},${y}] ${Math.round(rate * 100)}% (${cellCounts[y][x]} samples)`}
+            text={`cell[${x},${y}] ${Math.round(rate * 100)}% (${cellCounts[y][x]} samples)`}
           >
-            <span className="font-bold">{Math.round(rate * 100)}</span>
-            <span className="opacity-70">{x},{y}</span>
-          </div>
+            <div
+              className="w-11 h-11 rounded flex flex-col items-center justify-center text-[10px] font-mono"
+              style={{ background: rateColor(rate), color: rate > 0.5 ? '#0b1220' : '#fff' }}
+            >
+              <span className="font-bold">{Math.round(rate * 100)}</span>
+              <span className="opacity-70">{x},{y}</span>
+            </div>
+          </Tooltip>
         )),
       )}
     </div>
@@ -84,7 +88,13 @@ export function SelfTestModal({
         {state.phase === 'running' && (
           <div className="space-y-3">
             <div className="text-sm text-text-secondary">
-              {t('selftest.running', { done: state.done, total: state.total || '?' })}
+              {t('selftest.running', {
+                done: state.done,
+                total: state.total || '?',
+                step: state.step === 'scenarios'
+                  ? t('selftest.step_scenarios')
+                  : t('selftest.step_grid'),
+              })}
             </div>
             <div className="h-2 rounded-full bg-bg-tertiary overflow-hidden">
               <div
@@ -164,6 +174,29 @@ export function SelfTestModal({
                 <Heatmap summary={s} />
               </div>
 
+              {/* Interaction scenarios */}
+              {s.scenarios && s.scenarios.length > 0 && (
+                <div>
+                  <div className="text-xs text-text-muted mb-2">
+                    {t('selftest.scenarios_title')}
+                  </div>
+                  <div className="space-y-1">
+                    {s.scenarios.map((sc) => (
+                      <div
+                        key={sc.id}
+                        className="flex items-center gap-2 text-xs px-2 py-1.5 rounded-md bg-bg-primary ring-1 ring-inset ring-border"
+                      >
+                        <span className={sc.ok ? 'text-success' : 'text-error'}>
+                          {sc.ok ? '✓' : '✗'}
+                        </span>
+                        <span className="text-text-primary font-medium w-24 shrink-0">{sc.label}</span>
+                        <span className="text-text-muted truncate">{sc.detail}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Diagnosis hint */}
               <div className="text-[11px] text-text-muted leading-relaxed border-t border-border pt-3">
                 {s.received < s.total && <div>{t('selftest.diag_missed')}</div>}
@@ -171,7 +204,11 @@ export function SelfTestModal({
                 {Math.abs(s.meanDx) > 3 || Math.abs(s.meanDy) > 3 ? (
                   <div>{t('selftest.diag_systematic', { dx: s.meanDx.toFixed(1), dy: s.meanDy.toFixed(1) })}</div>
                 ) : null}
-                {s.received === s.total && s.cellMatch === s.total && s.meanAbs <= 1.5 && (
+                {s.scenarios?.some((x) => !x.ok) && (
+                  <div>{t('selftest.diag_scenario_fail')}</div>
+                )}
+                {s.received === s.total && s.cellMatch === s.total && s.meanAbs <= 1.5
+                  && (!s.scenarios?.length || s.scenarios.every((x) => x.ok)) && (
                   <div className="text-success">{t('selftest.diag_perfect')}</div>
                 )}
               </div>

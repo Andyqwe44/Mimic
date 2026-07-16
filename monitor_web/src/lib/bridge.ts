@@ -192,8 +192,27 @@ export function addLog(msg: string) {
 // C++ selftest client forwards each test_target report as {type:'selftest', data:{...}}.
 // The orchestrator subscribes here to receive geometry ('hello') + per-click reports.
 export type SelfTestMsg =
-  | { type: 'hello'; client_w: number; client_h: number; grid: number; cell: number; pad: number; hit_margin: number }
-  | { type: 'click'; seq: number; btn: number; x: number; y: number; gx: number; gy: number; hit: boolean }
+  | {
+      type: 'hello'
+      client_w: number; client_h: number
+      win_w?: number; win_h?: number
+      client_off_x?: number; client_off_y?: number
+      grid: number; cell: number; pad: number; hit_margin: number
+      version?: number; port?: number
+      regions?: Record<string, { x: number; y: number; w: number; h: number }>
+    }
+  | { type: 'click'; seq: number; btn: number; x: number; y: number; gx: number; gy: number; hit: boolean; target?: string }
+  | { type: 'wheel'; seq?: number; delta: number; x: number; y: number; scrollTop?: number }
+  | { type: 'scroll'; seq?: number; scrollTop: number; scrollLeft?: number }
+  | { type: 'drag'; seq?: number; x0: number; y0: number; x1: number; y1: number; boxX?: number; boxY?: number }
+  | { type: 'button'; seq?: number; id: string; label?: string }
+  | { type: 'text'; seq?: number; text: string; length?: number }
+  | { type: 'keydown' | 'keyup'; seq?: number; key: string; code?: string; vk?: number; target?: string }
+  | { type: 'contextmenu'; seq?: number; x: number; y: number; where?: string }
+  | { type: 'dblclick'; seq?: number; btn: number; x: number; y: number }
+  | { type: 'reset'; ok: boolean }
+  | { type: 'menu'; action: string }
+  | { type: 'ui_ready' }
   | { type: 'disconnected' }
 
 const _selfTestListeners = new Set<(m: SelfTestMsg) => void>()

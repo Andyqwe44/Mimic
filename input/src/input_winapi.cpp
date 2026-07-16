@@ -42,15 +42,18 @@ std::string input_winapi(HWND hWnd, const InputArgs& a) {
                       (a.button == "middle") ? WM_MBUTTONDOWN : WM_LBUTTONDOWN;
         UINT upMsg   = (a.button == "right") ? WM_RBUTTONUP :
                       (a.button == "middle") ? WM_MBUTTONUP : WM_LBUTTONUP;
+        UINT dblMsg  = (a.button == "right") ? WM_RBUTTONDBLCLK :
+                       (a.button == "middle") ? WM_MBUTTONDBLCLK : WM_LBUTTONDBLCLK;
         WPARAM wDown = (a.button == "right") ? MK_RBUTTON :
                       (a.button == "middle") ? MK_MBUTTON : MK_LBUTTON;
         LPARAM lp = MAKELPARAM(clientX, clientY);
-        auto doClick = [&]() {
+        if (a.type == "click") {
             SendMessageW(hWnd, downMsg, wDown, lp);
             SendMessageW(hWnd, upMsg, 0, lp);
-        };
-        doClick();
-        if (a.type == "dblclick") { Sleep(GetDoubleClickTime() / 2); doClick(); }
+        } else {
+            SendMessageW(hWnd, dblMsg, wDown, lp);
+            SendMessageW(hWnd, upMsg, 0, lp);
+        }
     }
     else if (a.type == "move") {
         SendMessageW(hWnd, WM_MOUSEMOVE, 0, MAKELPARAM(clientX, clientY));
@@ -74,12 +77,9 @@ std::string input_winapi(HWND hWnd, const InputArgs& a) {
     }
     else if (a.type == "keydown" || a.type == "keyup" || a.type == "keypress") {
         if (a.vk == 0) { detach(); return "{\"ok\":false,\"error\":\"key requires valid vk\"}"; }
-        WORD s = scan_from_vk((WORD)a.vk);
         auto doKey = [&](bool up) {
             UINT msg = up ? WM_KEYUP : WM_KEYDOWN;
-            LPARAM lp = MAKELPARAM(1, s);
-            if (up) lp |= (1 << 31) | (1 << 30);
-            SendMessageW(hWnd, msg, (WPARAM)a.vk, lp);
+            SendMessageW(hWnd, msg, (WPARAM)a.vk, key_message_lparam((WORD)a.vk, up));
         };
         if (a.type == "keypress") { doKey(false); Sleep(5); doKey(true); }
         else { doKey(a.type == "keyup"); }
@@ -89,24 +89,17 @@ std::string input_winapi(HWND hWnd, const InputArgs& a) {
         struct { bool ac; WORD vk; } m[] = {{a.ctrlKey,VK_CONTROL},{a.shiftKey,VK_SHIFT},{a.altKey,VK_MENU},{a.metaKey,VK_LWIN}};
         auto dk = [&](WORD kv, bool up) {
             UINT msg = up ? WM_KEYUP : WM_KEYDOWN;
-            LPARAM lp = MAKELPARAM(1, scan_from_vk(kv));
-            if (up) lp |= (1 << 31) | (1 << 30);
-            SendMessageW(hWnd, msg, (WPARAM)kv, lp);
+            SendMessageW(hWnd, msg, (WPARAM)kv, key_message_lparam(kv, up));
         };
         for (auto& md : m) { if (md.ac) dk(md.vk, false); }
         dk((WORD)a.vk, false); Sleep(5); dk((WORD)a.vk, true);
         for (int i = 3; i >= 0; i--) { if (m[i].ac) dk(m[i].vk, true); }
     }
     else if (a.type == "text") {
-        if (a.text.empty()) { detach(); return "{\"ok\":false,\"error\":\"text requires 'text' field\"}"; }
-        int wl = MultiByteToWideChar(CP_UTF8, 0, a.text.c_str(), (int)a.text.size(), nullptr, 0);
-        if (wl <= 0) { detach(); return "{\"ok\":false,\"error\":\"UTF8->UTF16 failed\"}"; }
-        std::vector<wchar_t> wb(wl + 1);
-        MultiByteToWideChar(CP_UTF8, 0, a.text.c_str(), (int)a.text.size(), wb.data(), wl);
-        for (int i = 0; i < wl; i++) {
-            SendMessageW(hWnd, WM_CHAR, wb[i], MAKELPARAM(1, 1));
-            Sleep(5);
-        }
+        HWND keyHwnd = input_keyboard_target(hWnd);
+        if (!keyHwnd) keyHwnd = hWnd;
+        std::string terr = input_deliver_committed_text(keyHwnd, a.text, a.focus);
+        if (!terr.empty()) { detach(); return "{\"ok\":false,\"error\":\"" + terr + "\"}"; }
     }
     else { detach(); return "{\"ok\":false,\"error\":\"unknown type: " + a.type + "\"}"; }
 

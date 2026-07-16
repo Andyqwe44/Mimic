@@ -14,6 +14,8 @@ release/*.exe
 
 # WebView2 runtime cache (auto-generated next to .exe)
 **/*.exe.WebView2/
+test_target/build/
+test_target/**/WebView2UserData/
 
 # Generated code
 monitor_app/src/embedded_assets.h

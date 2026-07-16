@@ -402,6 +402,13 @@ export function DevToolsView({
                     total: 625, received: 618, cellMatch: 607, hitMatch: 582,
                     meanDx: 0.8, meanDy: -1.2, meanAbs: 2.1, maxAbs: 5.4,
                     cells, cellCounts, points: [], aborted: false,
+                    scenarios: [
+                      { id: 'right_click', label: 'Right click', ok: true, detail: 'btn=2 grid[2,2]' },
+                      { id: 'wheel', label: 'Scroll wheel', ok: true, detail: 'delta=120' },
+                      { id: 'drag', label: 'Drag', ok: true, detail: 'box=(120,50)' },
+                      { id: 'button', label: 'Button A', ok: true, detail: 'id=btn-a' },
+                      { id: 'text', label: 'Text input', ok: false, detail: 'no feedback (demo)' },
+                    ],
                   },
                 })
               }],

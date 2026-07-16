@@ -28,7 +28,7 @@
 
   "bottombar": {
     "tcp": "TCP :9999",
-    "agent_online": "Agent Online",
+    "agent_online": "Controller Online",
     "waiting_connection": "Waiting",
     "update": "Update",
     "update_title": "Update available — click to install"
@@ -112,13 +112,15 @@
     "stream_auto_tip": "Auto-select stream method (currently only WGC supports real-time streaming)",
     "dxgi_stream_tip": "DXGI streaming not implemented, only WGC supports live preview",
     "render_method": "Render Method",
+    "input_policy": "Input Policy",
+    "input_policy_desc": "Desktop target → foreground SendInput (may occupy mouse/keyboard). Window target → background SendMessage, coordinates clamped to the window [0,1]. Remote controller uses the same rules over TCP.",
     "mouse_mode": "Mouse Mode",
     "mouse_hint": "Virtual cursor always visible — local mouse unaffected",
     "keyboard_mode": "Keyboard Mode",
     "keyboard_hint": "Click the preview to focus, then keystrokes are forwarded to the target window",
     "keyboard_note1": "• Regular keys — {keydown} / {keyup}",
     "keyboard_note2": "• Combos — auto-detected (e.g. Ctrl+C, Ctrl pressed first then C)",
-    "keyboard_note3": "• {esc} or external click → releases focus, auto-releases all held keys",
+    "keyboard_note3": "• Click outside the preview → releases focus and all held keys",
     "self_target": "Self-Target Avoidance",
     "self_target_hint": "During desktop capture, mapped coordinates may land on GAM's own window",
     "self_target_warn": "Visual Warning",
@@ -209,11 +211,16 @@
     "preview_tip": "Start live preview",
     "no_preview": "No preview active",
     "no_preview_hint": "Click Preview button to start real-time preview",
-    "remote_active": "Remote control · Mouse {mm} · Keyboard {km} · Esc to release",
-    "remote_hover": "Hover to move cursor · Click to control · Mouse {mm}",
-    "desktop_preview": "Desktop preview · SendInput (forced) · {state}",
+    "remote_active": "Remote control · Mouse {mm} · Keyboard {km}",
+    "remote_hover": "Hover to move · Click to control · Type in toolbar IME · Mouse {mm}",
+    "desktop_preview": "Desktop remote control · Mouse {mm} · Keyboard {km} · {state}",
     "desktop_focused": "Click/keyboard active",
-    "desktop_unfocused": "Click to focus",
+    "desktop_unfocused": "Type in the toolbar IME field",
+    "ime_proxy": "Monitor IME",
+    "ime_dock_title": "IME",
+    "ime_dock_hint": "Focus here · commit → Unicode to last click caret",
+    "ime_dock_composing": "Composing… lands here then maps automatically",
+    "ime_dock_placeholder": "Type…",
     "self_target_warn": "⚠ Mapped target is GAM's own window — switch to \"Exclude from Capture\" in Settings",
     "preview_no_mapping": "Previewing · Press {hotkey} or click \"Mapping\" to enable control",
     "mouse_seize": "Seize",
@@ -221,7 +228,9 @@
     "mouse_bg": "Bg",
     "key_seize": "Seize",
     "key_sendmsg": "SendMsg",
-    "key_postmsg": "PostMsg"
+    "key_postmsg": "PostMsg",
+    "policy_foreground": "Desktop · foreground",
+    "policy_background": "Window · background"
   },
 
   "update": {
@@ -346,9 +355,9 @@
   "mouse": {
     "background": {
       "name": "Background",
-      "eng": "PostMessage",
+      "eng": "SendMessage",
       "rec": "Recommended",
-      "desc": "Fully background, never grabs mouse. Virtual cursor + PostMessage click forwarding. Window may drift but local use unaffected. Recommended to minimize target window."
+      "desc": "Fully background and never grabs the real mouse. Desktop and window targets use point hit-testing plus synchronous SendMessage without activating the target; the virtual circle appears only at the real mapped position."
     },
     "semi": {
       "name": "Semi",
@@ -360,16 +369,16 @@
       "name": "Seize",
       "eng": "SendInput",
       "rec": "Foreground",
-      "desc": "Foreground mode, fully grabs mouse. Virtual cursor + real-time cursor sync. SendInput synthesizes system input on same path as real hardware."
+      "desc": "Compatibility mode that explicitly grabs and moves the real mouse. SendInput follows the hardware input path; use only for apps that reject background messages."
     }
   },
 
   "keyboard": {
     "postmsg": {
       "name": "PostMsg",
-      "eng": "PostMessage",
+      "eng": "SendMessage",
       "rec": "Recommended",
-      "desc": "Async non-blocking, fast & stable. Posts WM_KEYDOWN/WM_KEYUP messages directly to target window queue."
+      "desc": "Synchronous background dispatch. Sends WM_KEYDOWN/WM_KEYUP directly to the last clicked target control without activating its window."
     },
     "sendmsg": {
       "name": "SendMsg",
@@ -387,19 +396,19 @@
 
   "devtools": {
     "test_target": "Test Target",
-    "test_target_desc": "Launch a standalone test window to verify input mapping",
+    "test_target_desc": "Launch a WebView2 multi-control test window (grid/buttons/scroll/drag/input); reports via TCP",
     "test_target_launch": "Launch",
     "test_target_close": "Close",
-    "test_target_launch_tip": "Open GAM Test Target window — can be captured by GAM for mouse/keyboard mapping tests",
-    "test_target_close_tip": "Close GAM Test Target test window",
+    "test_target_launch_tip": "Open GAM Test Target (WebView2) — capture it and test mouse/keyboard mapping",
+    "test_target_close_tip": "Close the GAM Test Target window",
 
     "selftest": "Self-Test",
-    "selftest_desc": "Run automated full workflow (select → preview → mapping → dense clicks), compare test_target feedback",
+    "selftest_desc": "Auto-launches fixed-size Test Target, runs mapping self-test, then closes it. For manual tests use Launch above.",
     "selftest_density_tip": "Per-cell sampling density (N×N sub-grid). Higher = finer, takes longer.",
     "selftest_density_unit": "/cell",
     "selftest_run": "Self-Test",
     "selftest_running": "Running",
-    "selftest_run_tip": "One-click self-test: reuses real user operation path, dense full-window clicks with feedback comparison",
+    "selftest_run_tip": "One-click self-test: real user input path, grid calibration + interaction scenarios",
     "selftest_running_tip": "Self-test in progress…",
 
     "frame_dump": "Frame Dump",
@@ -445,7 +454,9 @@
 
   "selftest": {
     "title": "Self-Test · Mapping Calibration",
-    "running": "Sweeping clicks & comparing feedback… {done}/{total}",
+    "running": "{step} & comparing feedback… {done}/{total}",
+    "step_grid": "Sweeping grid",
+    "step_scenarios": "Running scenarios",
     "abort": "Abort",
     "close": "Close",
     "error_prefix": "Self-test failed: {error}",
@@ -457,10 +468,12 @@
     "stat_offset": "Offset px",
     "stat_error": "Error mean/max",
     "heatmap_title": "Cell hit-rate heatmap (expected vs actual)",
+    "scenarios_title": "Interaction scenarios (right / wheel / drag / button / text)",
     "diag_missed": "• Some clicks received no feedback → input forwarding may be interrupted (check mouse mode / target window)",
     "diag_large_error": "• Average pixel error is large → possible coordinate offset / scaling / DPI mismatch",
     "diag_systematic": "• Systematic offset ({dx}, {dy})px detected → constant offset, consider calibrating origin",
-    "diag_perfect": "• Mapping accurate — all hits in expected cells, pixel error within rounding tolerance ✓"
+    "diag_scenario_fail": "• Some interaction scenarios got no expected feedback → check wheel/drag/text mapping",
+    "diag_perfect": "• Mapping accurate — grid and interaction scenarios all passed ✓"
   },
 
   "loading": {

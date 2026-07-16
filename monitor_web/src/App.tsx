@@ -1106,6 +1106,22 @@ export default function App() {
     setDevMode(on)
   }, [leaveDevModeCleanup])
 
+  const closeTestTargetAfterSelfTest = useCallback(async () => {
+    // Self-test owns the lifecycle: stop preview, then close the window.
+    // Manual testing must use DevTools → Test Target → Launch.
+    try {
+      if (previewingRef.current) await stopStream()
+      setMappingEnabled(false)
+      const r: any = await hostCall('find_test_target')
+      if (r?.hwnd) {
+        await hostCall('launch_test_target') // toggle → close
+        addLog('[SelfTest] test_target closed (use DevTools Launch for manual tests)')
+      }
+    } catch (e: any) {
+      addLog(`[SelfTest] close test_target failed: ${e?.message || e}`)
+    }
+  }, [stopStream, setMappingEnabled])
+
   const runSelfTestFlow = useCallback(
     async (perCell: number) => {
       if (selfTest.phase === 'running') return
@@ -1113,7 +1129,7 @@ export default function App() {
       setSelfTest({ phase: 'running', done: 0, total: 0 })
       addLog(`[SelfTest] start (perCell=${perCell})`)
       try {
-        // 1 — ensure the test_target window is running (never toggle-close it)
+        // 1 — ensure the test_target window is running (never toggle-close it here)
         let hwnd = (await hostCall('find_test_target'))?.hwnd || 0
         if (!hwnd) {
           await hostCall('launch_test_target')
@@ -1123,6 +1139,8 @@ export default function App() {
           }
         }
         if (!hwnd) throw new Error('test_target 窗口未找到')
+        // TCP server starts with the HWND; give accept() a moment before connect.
+        await sleep(300)
 
         // 2 — select it as the capture target (same state a user selection sets)
         if (opStateRef.current === 'streaming') await stopStream()
@@ -1139,24 +1157,50 @@ export default function App() {
         }
         if (!monitorApiRef.current?.ready()) throw new Error('预览/映射未就绪')
 
-        // 4 — dense sweep (reuses sendMappedClick via the imperative api)
+        // 4 — dense sweep + interaction scenarios (real send_input paths)
+        const api = monitorApiRef.current!
         const summary = await runSelfTest({
           perCell,
-          sendClick: (rx, ry, b) => monitorApiRef.current!.sendClick(rx, ry, b),
-          onProgress: (done, total) =>
-            setSelfTest((s) => (s.phase === 'running' ? { ...s, done, total } : s)),
+          api: {
+            sendClick: (rx, ry, b) => api.sendClick(rx, ry, b),
+            sendWheel: (rx, ry, d) => api.sendWheel(rx, ry, d),
+            sendDrag: (path, b) => api.sendDrag(path, b),
+            sendText: (text) => api.sendText(text),
+            sendKey: (type, key, code, vk) => api.sendKey(type, key, code, vk),
+          },
+          onProgress: (done, total, step) =>
+            setSelfTest((s) => (s.phase === 'running' ? { ...s, done, total, step } : s)),
           shouldAbort: () => selfTestAbort.current,
         })
         setSelfTest({ phase: 'done', summary })
+        const scenOk = summary.scenarios.filter((x) => x.ok).length
+        const pct = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 100) : 0)
         addLog(
-          `[SelfTest] done recv=${summary.received}/${summary.total} cell=${Math.round((summary.cellMatch / summary.total) * 100)}% off=(${summary.meanDx.toFixed(1)},${summary.meanDy.toFixed(1)})`,
+          `[SelfTest] done recv=${summary.received}/${summary.total} (${pct(summary.received, summary.total)}%) ` +
+          `cell=${pct(summary.cellMatch, summary.total)}% hit=${pct(summary.hitMatch, summary.total)}% ` +
+          `scen=${scenOk}/${summary.scenarios.length} ` +
+          `off=(${summary.meanDx.toFixed(1)},${summary.meanDy.toFixed(1)}) ` +
+          `err=${summary.meanAbs.toFixed(1)}/${summary.maxAbs.toFixed(1)}` +
+          (summary.aborted ? ' ABORTED' : ''),
         )
+        for (const sc of summary.scenarios) {
+          addLog(`[SelfTest] scenario ${sc.ok ? 'OK' : 'FAIL'} ${sc.id}: ${sc.detail}`)
+        }
+        // Compact per-row heatmap line for log history (no need to copy the modal).
+        if (summary.cells?.length) {
+          const rows = summary.cells.map((row, y) =>
+            `y${y}=[` + row.map((r) => Math.round(r * 100)).join(',') + ']',
+          )
+          addLog(`[SelfTest] heatmap ${rows.join(' ')}`)
+        }
       } catch (e: any) {
         setSelfTest({ phase: 'error', error: e?.message || String(e) })
         addLog(`[SelfTest] error: ${e?.message || e}`)
+      } finally {
+        await closeTestTargetAfterSelfTest()
       }
     },
-    [selfTest.phase, stopStream, setMappingEnabled],
+    [selfTest.phase, stopStream, setMappingEnabled, closeTestTargetAfterSelfTest],
   )
 
   // ── Cleanup on unmount: stop any active stream ──

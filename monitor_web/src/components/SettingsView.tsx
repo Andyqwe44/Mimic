@@ -12,6 +12,7 @@ import {
   COLLAPSIBLE_HEADER, SELECTABLE_BTN, CAPTURE_METHODS, RENDER_METHODS,
   MOUSE_MODES, KEYBOARD_MODES, codeToName,
 } from '../lib/constants'
+import { THIN_CLIENT } from '../lib/features'
 import type { WindowInfo } from '../lib/types'
 
 // ── Darken hex color by percentage (0–100) for hover state ──
@@ -517,7 +518,18 @@ export function SettingsView({
               })}
             </div>
           </div>
-          {/* ── Mouse Mode ── */}
+          {/* ── Input policy (thin client) or legacy mouse/keyboard modes ── */}
+          {THIN_CLIENT ? (
+          <div className="border-t border-border pt-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-text-muted inline-flex items-center gap-1">
+                <MousePointer2 className="w-3.5 h-3.5" /> {t('settings.input_policy')}
+              </span>
+            </div>
+            <p className="text-xs text-text-secondary leading-relaxed">{t('settings.input_policy_desc')}</p>
+          </div>
+          ) : (
+          <>
           <div className="border-t border-border pt-3 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs text-text-muted inline-flex items-center gap-1">
@@ -557,7 +569,6 @@ export function SettingsView({
               })}
             </div>
           </div>
-          {/* ── Keyboard Mode ── */}
           <div className="border-t border-border pt-3 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs text-text-muted inline-flex items-center gap-1">
@@ -602,6 +613,8 @@ export function SettingsView({
               <div>{t('settings.keyboard_note3', { esc: <code className="text-accent bg-accent/10 px-1 rounded">Esc</code> })}</div>
             </div>
           </div>
+          </>
+          )}
           {/* ── Self-target avoidance mode ── */}
           <div className="border-t border-border pt-3 space-y-2">
             <div className="flex items-center justify-between">
@@ -666,6 +679,7 @@ export function SettingsView({
         </div>
       </SettingsCard>
 
+      {!THIN_CLIENT && (
       <SettingsCard icon={<Cpu className="w-4 h-4 text-text-secondary" />} title={t('settings.model')}>
         <div className="text-xs text-text-muted mb-2">
           {t('settings.model_desc')}
@@ -691,6 +705,7 @@ export function SettingsView({
           </Tooltip>
         </div>
       </SettingsCard>
+      )}
 
       <SettingsCard icon={<Sun className="w-4 h-4 text-text-secondary" />} title={t('settings.general')}>
         <div className="space-y-3">
@@ -888,6 +903,7 @@ export function SettingsView({
             </button>
             </Tooltip>
           </div>
+          {!THIN_CLIENT && (
           <div className="flex items-center gap-2">
             <label className="text-sm text-text-secondary w-24 shrink-0">{t('settings.mapping_key')}</label>
             {recording ? (
@@ -937,6 +953,7 @@ export function SettingsView({
               </>
             )}
           </div>
+          )}
         </div>
       </SettingsCard>
 

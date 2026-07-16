@@ -34,9 +34,25 @@ LOG_DEBUG("tag", "format", args...);  // Dev only
 
 `hostCall(cmd, args)` ↔ `HandleWebMessage` → `{"id", "result"}`；失败显式 error。
 
-关键：`list_windows` / `capture_window` / `capture_stream_*` / `send_input` / `get_version` / `read_live_log` / `get_settings` / `set_settings`。
+关键：`list_windows` / `capture_window` / `capture_stream_*` / `send_input` / `get_version` / `read_live_log` / `get_settings` / `set_settings` / `set_mapping_controller`。
 
 Settings：用户数据在 `paths_get_appdata_dir()`（Prod=`GameAgentMonitor`，Dev=`GameAgentMonitor_Dev`）；优先 `set_settings` 整包原子写；启动用 `settings_get_boot_json` + `AddScriptToExecuteOnDocumentCreated`。
+
+## 薄客户端 + 远端控制（当前框架）
+
+本机 `monitor_app` = **捕获 + 执行**。推理/人工遥控在外部（`controller_web` + `bridge.py`，或 Python 模型）。
+
+| 目标 | 输入 | 安全 |
+|------|------|------|
+| 桌面 `hwnd=0` | 前台 `sendinput`（可占用键鼠） | 坐标仍限制在虚拟屏 `[0,1]` |
+| 具体窗口 | 后台 `sendmessage` | **坐标必须在窗口 `[0,1]`**；TCP `CONTROL_MSG` **强制**当前 stream 的 `g_control_hwnd`，禁止模型改目标窗 |
+
+- 本机预览：SharedBuffer BGRA（不变）
+- TCP `:9999` 下行：**H.264 Annex-B**（`PAYLOAD_TYPE_H264_STREAM=2`）；失败才 BGRA fallback。上行：`CONTROL_MSG=3` JSON
+- **不用 MJPEG**。浏览器经 `controller_web/bridge.py` WebSocket↔TCP
+- `THIN_CLIENT` 下本机 Mapping/IME/DevTools/Model 卡隐藏；生产不依赖预览映射
+
+文本上屏：后台 `WM_CHAR`；`focus:true` 仅测试需要插入符时显式打开。
 
 ## Windows 路径（铁律 9）
 

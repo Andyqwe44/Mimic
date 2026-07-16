@@ -504,6 +504,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         }
         break;
     }
+    case WM_SELFTEST_EVENT:
+        // test_target TCP reader queued lines — deliver on STA thread.
+        selftest_drain_to_webview();
+        break;
     case WM_DESTROY:
         g_webviewController = nullptr;
         g_webview = nullptr;

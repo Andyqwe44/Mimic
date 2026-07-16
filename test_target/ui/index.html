@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>GAM Test Target</title>
+<style>
+  :root {
+    --bg: #282c34;
+    --panel: #1e222a;
+    --border: #3a4250;
+    --text: #dee8f6;
+    --muted: #96a5be;
+    --accent: #90ee90;
+    --danger: #ee9090;
+    --btn: #3d4a63;
+    --btn-hover: #4a5a78;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    width: 640px; height: 720px;
+    overflow: hidden;
+    background: var(--bg);
+    color: var(--text);
+    font: 13px/1.4 "Segoe UI", "Microsoft YaHei", sans-serif;
+    user-select: none;
+  }
+  #app { position: relative; width: 640px; height: 720px; }
+
+  /* Grid — must match C++ / selftest geometry: pad=10 cell=60 grid=5 */
+  #grid {
+    position: absolute; left: 10px; top: 10px; width: 300px; height: 300px;
+  }
+  .cell {
+    position: absolute; width: 60px; height: 60px;
+    border: 1px solid #505864;
+  }
+  .cell .gutter {
+    position: absolute; inset: 1px;
+    background: #2e343e;
+  }
+  .cell:nth-child(odd) .gutter { background: #343a46; }
+  .cell .hit {
+    position: absolute; left: 16px; top: 16px; right: 16px; bottom: 16px;
+    background: #465060;
+    border: 1px solid #78b482;
+    display: flex; align-items: center; justify-content: center;
+    color: #96a5be; font-size: 11px;
+  }
+  .cell.flash-left .hit { background: #90ee90; color: #0b1220; }
+  .cell.flash-right .hit { background: #ee9090; color: #0b1220; }
+
+  #buttons {
+    position: absolute; left: 10px; top: 320px; width: 620px; height: 36px;
+    display: flex; gap: 8px; align-items: center;
+  }
+  button.tt {
+    height: 32px; padding: 0 14px; border: 1px solid var(--border);
+    border-radius: 6px; background: var(--btn); color: var(--text);
+    cursor: pointer; font: inherit;
+  }
+  button.tt:hover { background: var(--btn-hover); }
+  button.tt.active { outline: 2px solid var(--accent); }
+  #btn-reset { margin-left: auto; }
+
+  #scroll-panel {
+    position: absolute; left: 10px; top: 366px; width: 300px; height: 160px;
+    border: 1px solid var(--border); border-radius: 8px; background: var(--panel);
+    overflow: auto; padding: 8px;
+  }
+  #scroll-panel .label {
+    position: sticky; top: 0; background: var(--panel); color: var(--muted);
+    font-size: 11px; padding-bottom: 4px; z-index: 1;
+  }
+  #scroll-inner { height: 720px; }
+  #scroll-inner .row {
+    height: 36px; margin: 4px 0; border-radius: 4px;
+    background: #323846; display: flex; align-items: center; padding: 0 10px;
+    color: var(--muted);
+  }
+
+  #drag-pad {
+    position: absolute; left: 320px; top: 366px; width: 310px; height: 160px;
+    border: 1px solid var(--border); border-radius: 8px; background: var(--panel);
+    overflow: hidden; touch-action: none;
+  }
+  #drag-pad .label {
+    position: absolute; left: 8px; top: 6px; color: var(--muted); font-size: 11px;
+    pointer-events: none;
+  }
+  #drag-box {
+    position: absolute; left: 40px; top: 50px; width: 56px; height: 56px;
+    border-radius: 8px; background: #5b8def; border: 1px solid #8eb6ff;
+    cursor: grab; display: flex; align-items: center; justify-content: center;
+    font-size: 11px; color: #fff;
+  }
+  #drag-box.dragging { cursor: grabbing; background: #3f6fd0; }
+
+  #input-wrap {
+    position: absolute; left: 10px; top: 538px; width: 620px; height: 110px;
+  }
+  #input-wrap .label { color: var(--muted); font-size: 11px; margin-bottom: 4px; }
+  #text-input {
+    width: 100%; height: 84px; resize: none;
+    border: 1px solid var(--border); border-radius: 8px;
+    background: #1e222a; color: var(--text);
+    padding: 8px; font: 14px/1.4 "Microsoft YaHei", "Segoe UI", sans-serif;
+    outline: none; user-select: text;
+  }
+  #text-input:focus { border-color: #6a8cff; }
+
+  #status {
+    position: absolute; left: 10px; top: 660px; width: 620px; height: 48px;
+    color: var(--muted); font-size: 11px; white-space: pre-wrap;
+    overflow: hidden;
+  }
+  #ctx-menu {
+    display: none; position: absolute; z-index: 20;
+    min-width: 140px; background: #222833; border: 1px solid var(--border);
+    border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.45); padding: 4px;
+  }
+  #ctx-menu div {
+    padding: 6px 10px; border-radius: 4px; cursor: pointer;
+  }
+  #ctx-menu div:hover { background: #334058; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="grid"></div>
+
+  <div id="buttons">
+    <button class="tt" id="btn-a" data-id="btn-a">按钮 A</button>
+    <button class="tt" id="btn-b" data-id="btn-b">按钮 B</button>
+    <button class="tt" id="btn-c" data-id="btn-c">按钮 C</button>
+    <button class="tt" id="btn-reset" data-id="btn-reset">重置</button>
+  </div>
+
+  <div id="scroll-panel">
+    <div class="label">滚动区 · Scroll</div>
+    <div id="scroll-inner"></div>
+  </div>
+
+  <div id="drag-pad">
+    <div class="label">拖拽区 · 按住蓝块拖动 / 右键菜单</div>
+    <div id="drag-box">DRAG</div>
+  </div>
+
+  <div id="input-wrap">
+    <div class="label">输入框 (English / 中文输入法)</div>
+    <textarea id="text-input" spellcheck="false" placeholder="Click here and type…"></textarea>
+  </div>
+
+  <div id="status">Ready. Waiting for mapped input from Game Agent Monitor…</div>
+  <div id="ctx-menu">
+    <div data-action="ping">菜单项 Ping</div>
+    <div data-action="clear">清空状态</div>
+  </div>
+</div>
+<script>
+(function () {
+  const GRID = 5, CELL = 60, PAD = 10, HIT_MARGIN = 16;
+  const CLIENT_W = 640, CLIENT_H = 720;
+
+  let seq = 0;
+  let hits = 0, misses = 0;
+  let lastBtn = 0, lastGx = -1, lastGy = -1;
+
+  function post(obj) {
+    obj.seq = ++seq;
+    const line = JSON.stringify(obj);
+    try {
+      if (window.chrome && chrome.webview) chrome.webview.postMessage(line);
+    } catch (_) {}
+  }
+
+  function log(msg, level) {
+    post({ type: 'log', level: level || 'INFO', tag: 'tt', msg: String(msg) });
+  }
+
+  function setStatus(s) {
+    document.getElementById('status').textContent = s;
+  }
+
+  // ── Build grid ──
+  const gridEl = document.getElementById('grid');
+  for (let gy = 0; gy < GRID; gy++) {
+    for (let gx = 0; gx < GRID; gx++) {
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      cell.style.left = (gx * CELL) + 'px';
+      cell.style.top = (gy * CELL) + 'px';
+      cell.dataset.gx = String(gx);
+      cell.dataset.gy = String(gy);
+      cell.innerHTML = '<div class="gutter"></div><div class="hit">' + gx + ',' + gy + '</div>';
+      gridEl.appendChild(cell);
+    }
+  }
+
+  // ── Scroll filler ──
+  const inner = document.getElementById('scroll-inner');
+  for (let i = 1; i <= 18; i++) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.textContent = '滚动行 #' + i;
+    inner.appendChild(row);
+  }
+
+  function classifyPoint(x, y) {
+    const rx = x - PAD, ry = y - PAD;
+    const gx = rx >= 0 ? Math.floor(rx / CELL) : -1;
+    const gy = ry >= 0 ? Math.floor(ry / CELL) : -1;
+    const inGrid = gx >= 0 && gx < GRID && gy >= 0 && gy < GRID;
+    const lx = inGrid ? rx - gx * CELL : -1;
+    const ly = inGrid ? ry - gy * CELL : -1;
+    const hit = inGrid &&
+      lx >= HIT_MARGIN && lx < CELL - HIT_MARGIN &&
+      ly >= HIT_MARGIN && ly < CELL - HIT_MARGIN;
+    return { gx: inGrid ? gx : -1, gy: inGrid ? gy : -1, hit, inGrid };
+  }
+
+  function flashCell(gx, gy, btn) {
+    const cells = gridEl.querySelectorAll('.cell');
+    cells.forEach((c) => c.classList.remove('flash-left', 'flash-right'));
+    if (gx < 0 || gy < 0) return;
+    const idx = gy * GRID + gx;
+    const el = cells[idx];
+    if (!el) return;
+    el.classList.add(btn === 2 ? 'flash-right' : 'flash-left');
+    setTimeout(() => el.classList.remove('flash-left', 'flash-right'), 500);
+  }
+
+  function reportClick(btn, x, y, extra) {
+    const c = classifyPoint(x, y);
+    if (c.hit) {
+      hits++; lastBtn = btn; lastGx = c.gx; lastGy = c.gy;
+      flashCell(c.gx, c.gy, btn);
+    } else {
+      misses++;
+    }
+    const labels = ['Left', 'Middle', 'Right'];
+    setStatus(
+      (c.hit ? 'HIT' : 'MISS') + ' ' + (labels[btn] || '?') +
+      ' grid[' + c.gx + ',' + c.gy + '] client(' + x + ',' + y + ')' +
+      ' hits=' + hits + ' miss=' + misses
+    );
+    post(Object.assign({
+      type: 'click', btn: btn, x: x, y: y,
+      gx: c.gx, gy: c.gy, hit: !!c.hit,
+    }, extra || {}));
+  }
+
+  // Capture phase so we see events even when WebView receives injected input.
+  document.addEventListener('mousedown', (e) => {
+    const btn = e.button; // 0/1/2
+    const x = Math.round(e.clientX), y = Math.round(e.clientY);
+    const target = e.target && e.target.closest
+      ? (e.target.closest('button.tt') ? 'button'
+        : e.target.closest('#drag-box') ? 'drag'
+        : e.target.closest('#scroll-panel') ? 'scroll'
+        : e.target.closest('#text-input') ? 'input'
+        : e.target.closest('#grid') ? 'grid'
+        : 'other')
+      : 'other';
+
+    if (btn === 2) {
+      // context menu handled separately; still report click
+      reportClick(2, x, y, { target: target });
+      return;
+    }
+    if (target === 'button' || target === 'drag') {
+      // buttons / drag box report their own specialized events; still emit click for calibration
+    }
+    reportClick(btn, x, y, { target: target });
+  }, true);
+
+  document.addEventListener('dblclick', (e) => {
+    post({
+      type: 'dblclick', btn: e.button, x: Math.round(e.clientX), y: Math.round(e.clientY),
+    });
+    setStatus('DBLCLICK at (' + Math.round(e.clientX) + ',' + Math.round(e.clientY) + ')');
+  }, true);
+
+  // ── Buttons ──
+  document.querySelectorAll('button.tt').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      document.querySelectorAll('button.tt').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      const id = btn.dataset.id || 'btn';
+      const label = btn.textContent || id;
+      setStatus('BUTTON ' + id + ' clicked');
+      post({ type: 'button', id: id, label: label });
+      if (id === 'btn-reset') {
+        hits = 0; misses = 0; lastGx = -1; lastGy = -1;
+        document.getElementById('text-input').value = '';
+        const box = document.getElementById('drag-box');
+        box.style.left = '40px'; box.style.top = '50px';
+        document.getElementById('scroll-panel').scrollTop = 0;
+        document.querySelectorAll('button.tt').forEach((b) => b.classList.remove('active'));
+        post({ type: 'reset', ok: true });
+        setStatus('Reset complete');
+      }
+    });
+  });
+
+  // ── Scroll / wheel ──
+  const scrollPanel = document.getElementById('scroll-panel');
+  scrollPanel.addEventListener('wheel', (e) => {
+    // Let native scroll happen; report after a tick so scrollTop is updated.
+    const x = Math.round(e.clientX), y = Math.round(e.clientY);
+    const delta = e.deltaY;
+    setTimeout(() => {
+      post({
+        type: 'wheel',
+        delta: Math.round(delta),
+        x: x, y: y,
+        scrollTop: Math.round(scrollPanel.scrollTop),
+      });
+      setStatus('WHEEL delta=' + Math.round(delta) + ' scrollTop=' + Math.round(scrollPanel.scrollTop));
+    }, 0);
+  }, { passive: true });
+
+  scrollPanel.addEventListener('scroll', () => {
+    post({
+      type: 'scroll',
+      scrollTop: Math.round(scrollPanel.scrollTop),
+      scrollLeft: Math.round(scrollPanel.scrollLeft),
+    });
+  });
+
+  // ── Drag box ──
+  const pad = document.getElementById('drag-pad');
+  const box = document.getElementById('drag-box');
+  let dragging = false;
+  let dragOrigin = null;
+  let startLeft = 0, startTop = 0;
+
+  box.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    dragging = true;
+    box.classList.add('dragging');
+    const br = pad.getBoundingClientRect();
+    dragOrigin = { x: e.clientX, y: e.clientY };
+    startLeft = box.offsetLeft;
+    startTop = box.offsetTop;
+    e.preventDefault();
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!dragging || !dragOrigin) return;
+    const dx = e.clientX - dragOrigin.x;
+    const dy = e.clientY - dragOrigin.y;
+    const maxX = pad.clientWidth - box.offsetWidth - 4;
+    const maxY = pad.clientHeight - box.offsetHeight - 4;
+    const nx = Math.max(4, Math.min(maxX, startLeft + dx));
+    const ny = Math.max(22, Math.min(maxY, startTop + dy));
+    box.style.left = nx + 'px';
+    box.style.top = ny + 'px';
+  });
+
+  window.addEventListener('mouseup', (e) => {
+    if (!dragging || !dragOrigin) return;
+    dragging = false;
+    box.classList.remove('dragging');
+    const x0 = Math.round(dragOrigin.x), y0 = Math.round(dragOrigin.y);
+    const x1 = Math.round(e.clientX), y1 = Math.round(e.clientY);
+    post({
+      type: 'drag',
+      x0: x0, y0: y0, x1: x1, y1: y1,
+      boxX: box.offsetLeft, boxY: box.offsetTop,
+    });
+    setStatus('DRAG (' + x0 + ',' + y0 + ')→(' + x1 + ',' + y1 + ') box=' + box.offsetLeft + ',' + box.offsetTop);
+    dragOrigin = null;
+  });
+
+  // ── Context menu on drag pad ──
+  const ctx = document.getElementById('ctx-menu');
+  pad.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    ctx.style.display = 'block';
+    ctx.style.left = Math.min(e.clientX, CLIENT_W - 160) + 'px';
+    ctx.style.top = Math.min(e.clientY, CLIENT_H - 80) + 'px';
+    post({ type: 'contextmenu', x: Math.round(e.clientX), y: Math.round(e.clientY), where: 'drag' });
+    setStatus('CONTEXTMENU at (' + Math.round(e.clientX) + ',' + Math.round(e.clientY) + ')');
+  });
+  document.addEventListener('click', () => { ctx.style.display = 'none'; });
+  ctx.querySelectorAll('div').forEach((item) => {
+    item.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const action = item.dataset.action;
+      post({ type: 'menu', action: action });
+      if (action === 'clear') setStatus('Status cleared');
+      else setStatus('MENU ' + action);
+      ctx.style.display = 'none';
+    });
+  });
+
+  // ── Keyboard / text ──
+  const textInput = document.getElementById('text-input');
+  textInput.addEventListener('keydown', (e) => {
+    post({
+      type: 'keydown',
+      key: e.key, code: e.code, vk: e.keyCode || 0,
+      target: 'input',
+    });
+  });
+  textInput.addEventListener('keyup', (e) => {
+    post({
+      type: 'keyup',
+      key: e.key, code: e.code, vk: e.keyCode || 0,
+      target: 'input',
+    });
+  });
+  textInput.addEventListener('input', () => {
+    post({ type: 'text', text: textInput.value, length: textInput.value.length });
+    setStatus('TEXT len=' + textInput.value.length + ' value="' + textInput.value.slice(0, 40) + '"');
+  });
+
+  // Ready handshake payload for host (host also sends TCP hello with geometry)
+  post({
+    type: 'ui_ready',
+    client_w: CLIENT_W,
+    client_h: CLIENT_H,
+    grid: GRID, cell: CELL, pad: PAD, hit_margin: HIT_MARGIN,
+  });
+  log('WebView UI ready ' + CLIENT_W + 'x' + CLIENT_H);
+})();
+</script>
+</body>
+</html>

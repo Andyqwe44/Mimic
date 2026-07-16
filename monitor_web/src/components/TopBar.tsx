@@ -5,6 +5,7 @@ import { ActionBtn, ThemeBtn, Tooltip } from './Toolkit'
 import { addLog } from '../lib/bridge'
 import { useTranslation } from 'react-i18next'
 import { GAP, H, PAD, RADIUS, TEXT } from '../lib/design'
+import { THIN_CLIENT } from '../lib/features'
 
 const LOCALES: Array<{ code: string; abbr: string; tipKey: string }> = [
   { code: 'en', abbr: 'En', tipKey: 'settings.language_en' },
@@ -76,7 +77,7 @@ export function TopBar({
       tip: t('topbar.settings_tip'),
     },
   ]
-  if (devMode) {
+  if (devMode && !THIN_CLIENT) {
     tabs.push({
       id: 'DevTools' as const,
       icon: <Cpu className={H.iconSm} />,

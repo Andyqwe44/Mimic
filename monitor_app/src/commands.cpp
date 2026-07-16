@@ -40,6 +40,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <cerrno>
+#include <algorithm>
+#include <cmath>
 
 #pragma comment(lib, "winhttp.lib")
 
@@ -456,24 +458,85 @@ static std::string cmd_capture_window(uint64_t hwnd, const std::string& method) 
 static std::atomic<bool> g_streaming{false};
 static std::thread g_stream_thread;
 static WgcStreamHandle* g_stream_handle = nullptr;
-// ── TCP broadcast server (port 9999, wire protocol) ──────
+// Active remote-control target (forced onto CONTROL_MSG actions).
+static std::atomic<uint64_t> g_control_hwnd{0};
+
+// Fwd: remote CONTROL_MSG → send_input (defined with input dispatch).
+static std::string execute_remote_control_json(const std::string& actionJson);
+
+// ── TCP server (port 9999): H.264 NAL out + CONTROL_MSG JSON in ──
+#include "../../protocol/protocol.h"
+#include "h264_encoder.h"
+
+struct TcpClient {
+    SOCKET sock = INVALID_SOCKET;
+    std::thread reader;
+    std::atomic<bool> alive{true};
+};
+
 static std::mutex g_tcp_mutex;
-static std::vector<SOCKET> g_tcp_clients;
+static std::vector<TcpClient*> g_tcp_clients;
 static SOCKET g_tcp_listen = INVALID_SOCKET;
 static std::thread g_tcp_accept_thread;
 static std::atomic<bool> g_tcp_running{false};
 
+static bool tcp_recv_exact(SOCKET s, char* buf, int n) {
+    int got = 0;
+    while (got < n) {
+        int r = recv(s, buf + got, n - got, 0);
+        if (r <= 0) return false;
+        got += r;
+    }
+    return true;
+}
+
+static void tcp_client_reader(TcpClient* c) {
+    while (g_tcp_running && c->alive) {
+        uint8_t hdr[PROTOCOL_FRAME_HEADER];
+        if (!tcp_recv_exact(c->sock, (char*)hdr, (int)PROTOCOL_FRAME_HEADER)) break;
+        uint32_t payload_size = 0, type_tag = 0;
+        if (!protocol_parse_header(hdr, payload_size, type_tag)) {
+            LOG_WARN("cmd", "TCP: bad frame header from client");
+            break;
+        }
+        if (payload_size > 1024 * 1024) {
+            LOG_WARN("cmd", "TCP: control payload too large (%u)", payload_size);
+            break;
+        }
+        std::vector<char> body(payload_size ? payload_size : 1);
+        if (payload_size > 0 && !tcp_recv_exact(c->sock, body.data(), (int)payload_size)) break;
+
+        if (type_tag == PAYLOAD_TYPE_CONTROL_MSG) {
+            std::string json(body.data(), body.data() + payload_size);
+            if (json.find("\"cmd\":\"ping\"") != std::string::npos)
+                continue;
+            std::string result = execute_remote_control_json(json);
+            if (result.find("\"ok\":false") != std::string::npos)
+                LOG_WARN("cmd", "TCP control rejected: %s", result.c_str());
+        } else if (type_tag != PAYLOAD_TYPE_NONE) {
+            LOG_DEBUG("cmd", "TCP: ignoring inbound type_tag=%u", type_tag);
+        }
+    }
+    c->alive = false;
+}
+
 static void tcp_accept_loop() {
     while (g_tcp_running) {
-        SOCKET c = accept(g_tcp_listen, nullptr, nullptr);
-        if (c == INVALID_SOCKET) {
+        SOCKET s = accept(g_tcp_listen, nullptr, nullptr);
+        if (s == INVALID_SOCKET) {
             if (g_tcp_running) { Sleep(100); continue; }
             else break;
         }
         int flag = 1;
-        setsockopt(c, IPPROTO_TCP, TCP_NODELAY, (const char*)&flag, sizeof(flag));
-        std::lock_guard<std::mutex> lk(g_tcp_mutex);
-        g_tcp_clients.push_back(c);
+        setsockopt(s, IPPROTO_TCP, TCP_NODELAY, (const char*)&flag, sizeof(flag));
+        auto* c = new TcpClient();
+        c->sock = s;
+        c->reader = std::thread(tcp_client_reader, c);
+        {
+            std::lock_guard<std::mutex> lk(g_tcp_mutex);
+            g_tcp_clients.push_back(c);
+        }
+        LOG("cmd", "TCP controller connected");
     }
 }
 
@@ -486,15 +549,17 @@ static bool tcp_server_start() {
     setsockopt(g_tcp_listen, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse));
     sockaddr_in addr = {};
     addr.sin_family = AF_INET;
-    addr.sin_port = htons(9999);
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = htons(PROTOCOL_DEFAULT_TCP_PORT);
+    // LAN-visible so phone / another PC / Python can reach the agent.
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
     if (bind(g_tcp_listen, (sockaddr*)&addr, sizeof(addr)) != 0) {
         closesocket(g_tcp_listen); g_tcp_listen = INVALID_SOCKET; WSACleanup(); return false;
     }
     listen(g_tcp_listen, SOMAXCONN);
     g_tcp_running = true;
     g_tcp_accept_thread = std::thread(tcp_accept_loop);
-    LOG("cmd", "TCP server started on port 9999");
+    LOG("cmd", "TCP server started on 0.0.0.0:%u (frames out + CONTROL_MSG in)",
+        PROTOCOL_DEFAULT_TCP_PORT);
     return true;
 }
 
@@ -503,63 +568,197 @@ static void tcp_server_stop() {
     if (g_tcp_listen != INVALID_SOCKET) { closesocket(g_tcp_listen); g_tcp_listen = INVALID_SOCKET; }
     if (g_tcp_accept_thread.joinable()) g_tcp_accept_thread.join();
     std::lock_guard<std::mutex> lk(g_tcp_mutex);
-    for (auto s : g_tcp_clients) closesocket(s);
+    for (auto* c : g_tcp_clients) {
+        c->alive = false;
+        if (c->sock != INVALID_SOCKET) closesocket(c->sock);
+        if (c->reader.joinable()) c->reader.join();
+        delete c;
+    }
     g_tcp_clients.clear();
     WSACleanup();
 }
 
-static void tcp_broadcast_frame(const uint8_t* bgra, int w, int h) {
-    // Wire protocol: magic(4) + body_size(4 LE) + type_tag(4 LE) + body
-    // type_tag 1 = BGRA: w(4)+h(4)+ch(4)+reserved(4)+pixels(w*h*ch)
-    uint32_t magic = 0x4D415246; // "FRAM"
-    uint32_t body_size = 16 + (uint32_t)(w * h * 4); // 12 header + pixels
-    uint32_t type_tag = 1;
-    uint32_t zero = 0;
+static bool tcp_send_all(SOCKET s, const char* data, int n) {
+    int sent = 0;
+    while (sent < n) {
+        int r = send(s, data + sent, n - sent, 0);
+        if (r == SOCKET_ERROR) return false;
+        sent += r;
+    }
+    return true;
+}
 
-    char hdr[12];
-    memcpy(hdr, &magic, 4);
-    memcpy(hdr + 4, &body_size, 4);
-    memcpy(hdr + 8, &type_tag, 4);
+// H.264 body: [w:4][h:4][flags:4][reserved:4][annexb NALs...]
+// flags bit0 = keyframe. Prefer this over raw BGRA for remote controllers.
+static void tcp_broadcast_h264(const H264Packet& pkt) {
+    uint32_t flags = pkt.keyframe ? 1u : 0u;
+    uint32_t body_size = 16 + (uint32_t)pkt.annexb.size();
+    uint8_t hdr[PROTOCOL_FRAME_HEADER];
+    protocol_build_header(hdr, body_size, PAYLOAD_TYPE_H264_STREAM);
+    uint32_t meta[4] = { (uint32_t)pkt.w, (uint32_t)pkt.h, flags, 0u };
 
+    std::lock_guard<std::mutex> lk(g_tcp_mutex);
+    for (auto it = g_tcp_clients.begin(); it != g_tcp_clients.end(); ) {
+        TcpClient* c = *it;
+        if (!c->alive ||
+            !tcp_send_all(c->sock, (const char*)hdr, PROTOCOL_FRAME_HEADER) ||
+            !tcp_send_all(c->sock, (const char*)meta, 16) ||
+            (!pkt.annexb.empty() &&
+             !tcp_send_all(c->sock, (const char*)pkt.annexb.data(), (int)pkt.annexb.size()))) {
+            c->alive = false;
+            if (c->sock != INVALID_SOCKET) { closesocket(c->sock); c->sock = INVALID_SOCKET; }
+            if (c->reader.joinable()) c->reader.detach();
+            delete c;
+            it = g_tcp_clients.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+static void tcp_broadcast_bgra_fallback(const uint8_t* bgra, int w, int h) {
+    uint32_t body_size = 16 + (uint32_t)(w * h * 4);
+    uint8_t hdr[PROTOCOL_FRAME_HEADER];
+    protocol_build_header(hdr, body_size, PAYLOAD_TYPE_BGRA_FRAME);
     uint32_t frame_hdr[4] = {(uint32_t)w, (uint32_t)h, 4u, 0u};
 
     std::lock_guard<std::mutex> lk(g_tcp_mutex);
     for (auto it = g_tcp_clients.begin(); it != g_tcp_clients.end(); ) {
-        if (send(*it, hdr, 12, 0) == SOCKET_ERROR ||
-            send(*it, (const char*)frame_hdr, 16, 0) == SOCKET_ERROR ||
-            send(*it, (const char*)bgra, w * h * 4, 0) == SOCKET_ERROR) {
-            closesocket(*it);
+        TcpClient* c = *it;
+        if (!c->alive ||
+            !tcp_send_all(c->sock, (const char*)hdr, PROTOCOL_FRAME_HEADER) ||
+            !tcp_send_all(c->sock, (const char*)frame_hdr, 16) ||
+            !tcp_send_all(c->sock, (const char*)bgra, w * h * 4)) {
+            c->alive = false;
+            if (c->sock != INVALID_SOCKET) { closesocket(c->sock); c->sock = INVALID_SOCKET; }
+            if (c->reader.joinable()) c->reader.detach();
+            delete c;
             it = g_tcp_clients.erase(it);
-        } else { ++it; }
+        } else {
+            ++it;
+        }
     }
 }
 
+static H264Encoder g_h264;
+static std::mutex g_h264_mtx;
+
 static std::string cmd_capture_stream_stop(); // fwd decl for cmd_capture_stream_start
 
-// ── Self-test client (connects to test_target 127.0.0.1:9998, JSON-lines) ──
+// ── Self-test client (connects to test_target 127.0.0.1:19998, JSON-lines) ──
 // Reads reports from test_target and forwards each to the frontend tagged
-// type:"selftest". Each line is already a JSON object → nested directly.
+// type:"selftest". Log lines ({"type":"log",...}) are written into GAM's
+// logger so the Monitor UI owns the log pipeline.
+//
+// Handshake: the first "hello" line is read SYNCHRONOUSLY in selftest_connect
+// and returned in the command result (avoids racing PostWebMessage vs JS
+// subscribe). Subsequent lines are queued and drained on the main STA thread
+// via WM_SELFTEST_EVENT (WebView2 PostWebMessage is not reliable off-thread).
 static SOCKET            g_st_sock = INVALID_SOCKET;
 static std::thread       g_st_thread;
 static std::atomic<bool> g_st_running{false};
+static constexpr int     SELFTEST_DEFAULT_PORT = 19998;
+static std::string       g_st_pending;          // bytes left after sync hello read
+static std::mutex        g_st_q_mtx;
+static std::vector<std::string> g_st_q;         // lines waiting for main-thread drain
+
+static std::string st_extract_json_str(const std::string& obj, const char* key) {
+    std::string pat = std::string("\"") + key + "\":\"";
+    size_t p = obj.find(pat);
+    if (p == std::string::npos) return {};
+    p += pat.size();
+    std::string out;
+    for (size_t i = p; i < obj.size(); ++i) {
+        char c = obj[i];
+        if (c == '\\' && i + 1 < obj.size()) {
+            char n = obj[++i];
+            if (n == 'n') out.push_back('\n');
+            else if (n == 'r') out.push_back('\r');
+            else if (n == 't') out.push_back('\t');
+            else out.push_back(n);
+            continue;
+        }
+        if (c == '"') break;
+        out.push_back(c);
+    }
+    return out;
+}
+
+static void st_enqueue_event(const std::string& jsonObj) {
+    {
+        std::lock_guard<std::mutex> lk(g_st_q_mtx);
+        g_st_q.push_back(jsonObj);
+    }
+    HWND hwnd = (HWND)get_main_hwnd();
+    if (hwnd) PostMessageW(hwnd, WM_SELFTEST_EVENT, 0, 0);
+}
 
 static void st_forward(const std::string& jsonObj) {
-    PostJsonToWebView("{\"type\":\"selftest\",\"data\":" + jsonObj + "}");
+    // test_target logs → GAM logger (tag tt). LOG() notifies the UI itself.
+    if (jsonObj.find("\"type\":\"log\"") != std::string::npos) {
+        std::string msg = st_extract_json_str(jsonObj, "msg");
+        std::string level = st_extract_json_str(jsonObj, "level");
+        if (msg.empty()) msg = jsonObj;
+        if (level == "ERROR")      LOG_ERROR("tt", "%s", msg.c_str());
+        else if (level == "WARN")  LOG_WARN("tt", "%s", msg.c_str());
+        else if (level == "DEBUG") LOG_DEBUG("tt", "%s", msg.c_str());
+        else                       LOG("tt", "%s", msg.c_str());
+        return;
+    }
+    st_enqueue_event(jsonObj);
+}
+
+void selftest_drain_to_webview() {
+    std::vector<std::string> batch;
+    {
+        std::lock_guard<std::mutex> lk(g_st_q_mtx);
+        batch.swap(g_st_q);
+    }
+    for (const auto& line : batch) {
+        PostJsonToWebView("{\"type\":\"selftest\",\"data\":" + line + "}");
+    }
 }
 
 static void st_cleanup() {
     g_st_running = false;
     if (g_st_sock != INVALID_SOCKET) { closesocket(g_st_sock); g_st_sock = INVALID_SOCKET; }
     if (g_st_thread.joinable()) g_st_thread.join();
+    g_st_pending.clear();
+    std::lock_guard<std::mutex> lk(g_st_q_mtx);
+    g_st_q.clear();
+}
+
+// Read one JSON-line with timeout. Any extra bytes stay in g_st_pending for the reader.
+static bool st_recv_line_timeout(SOCKET s, std::string& line, int timeout_ms) {
+    DWORD tv = (DWORD)timeout_ms;
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
+    char tmp[1024];
+    for (;;) {
+        size_t nl = g_st_pending.find('\n');
+        if (nl != std::string::npos) {
+            line = g_st_pending.substr(0, nl);
+            g_st_pending.erase(0, nl + 1);
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            DWORD infinite = 0;
+            setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char*)&infinite, sizeof(infinite));
+            return !line.empty();
+        }
+        int n = recv(s, tmp, sizeof(tmp), 0);
+        if (n <= 0) {
+            DWORD infinite = 0;
+            setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char*)&infinite, sizeof(infinite));
+            return false;
+        }
+        g_st_pending.append(tmp, n);
+    }
 }
 
 static void st_reader_loop() {
-    std::string buf;
+    std::string buf = std::move(g_st_pending);
+    g_st_pending.clear();
     char tmp[1024];
-    while (g_st_running) {
-        int n = recv(g_st_sock, tmp, sizeof(tmp), 0);
-        if (n <= 0) break;
-        buf.append(tmp, n);
+    // Flush any leftover lines from the sync hello read first.
+    auto flush_lines = [&]() {
         size_t nl;
         while ((nl = buf.find('\n')) != std::string::npos) {
             std::string line = buf.substr(0, nl);
@@ -567,15 +766,22 @@ static void st_reader_loop() {
             if (!line.empty() && line.back() == '\r') line.pop_back();
             if (!line.empty()) st_forward(line);
         }
+    };
+    flush_lines();
+    while (g_st_running) {
+        int n = recv(g_st_sock, tmp, sizeof(tmp), 0);
+        if (n <= 0) break;
+        buf.append(tmp, n);
+        flush_lines();
     }
     g_st_running = false;
-    st_forward(R"({"type":"disconnected"})");   // notify frontend link dropped
+    st_forward(R"({"type":"disconnected"})");
     LOG("cmd", "selftest reader exited");
 }
 
 static std::string cmd_selftest_connect(int port) {
     st_cleanup();                       // idempotent — drop any stale connection
-    if (port <= 0) port = 9998;
+    if (port <= 0) port = SELFTEST_DEFAULT_PORT;
     SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (s == INVALID_SOCKET) return R"({"ok":false,"error":"socket failed"})";
     sockaddr_in a{};
@@ -589,11 +795,24 @@ static std::string cmd_selftest_connect(int port) {
         snprintf(e, sizeof(e), "{\"ok\":false,\"error\":\"connect failed (%d)\"}", err);
         return e;
     }
+
+    // Block until test_target greets us — this is the reliable handshake.
+    // (Pushing hello only via PostWebMessage raced the JS subscriber / STA.)
+    std::string hello;
+    if (!st_recv_line_timeout(s, hello, 2500) ||
+        hello.find("\"type\":\"hello\"") == std::string::npos) {
+        closesocket(s);
+        LOG_WARN("cmd", "selftest: no hello from test_target (got '%s')",
+                 hello.empty() ? "<empty>" : hello.substr(0, 80).c_str());
+        return R"st({"ok":false,"error":"no hello from test_target (is it listening on :19998?)"})st";
+    }
+
     g_st_sock = s;
     g_st_running = true;
     g_st_thread = std::thread(st_reader_loop);
-    LOG("cmd", "selftest connected to 127.0.0.1:%d", port);
-    return R"({"ok":true})";
+    LOG("cmd", "selftest connected to 127.0.0.1:%d (hello %zub)", port, hello.size());
+    // Return hello inline so the frontend never depends on the push path for geometry.
+    return std::string("{\"ok\":true,\"hello\":") + hello + "}";
 }
 
 static std::string cmd_selftest_disconnect() {
@@ -631,23 +850,59 @@ static std::string cmd_capture_stream_start(uint64_t hwnd, const std::string& me
         LOG("cmd", "stream_start: FAILED");
         return R"({"ok":false,"error":"wgc_stream_start failed"})";
     }
+    g_control_hwnd.store(hwnd);
     g_streaming = true;
 
     g_stream_thread = std::thread([transport]() {
         CoInitializeEx(nullptr, COINIT_MULTITHREADED);
         std::vector<uint8_t> buf(MAX_PX);
+        int enc_w = 0, enc_h = 0;
+        bool h264_give_up = false; // sticky: do not spam SetInputType every frame
         while (g_streaming) {
             int w, h, ch;
             int size = wgc_stream_read(g_stream_handle, buf.data(), MAX_PX, &w, &h, &ch);
             if (size > 0 && w > 0 && h > 0 && w <= 3840 && h <= 2160) {
-                // SharedBuffer via bridge: stream thread (MTA) → PostMessage → main STA thread
+                // Local Monitor preview: SharedBuffer (BGRA) — unchanged.
                 stream_bridge_push_frame(buf.data(), w, h);
-                tcp_broadcast_frame(buf.data(), w, h);
-                // Developer mode: dump stream frame to disk
+
+                // Remote controllers: H.264 NAL over TCP (type=2). BGRA fallback
+                // only if encoder unavailable. Skip encode when no TCP clients.
+                bool have_clients = false;
+                {
+                    std::lock_guard<std::mutex> lk(g_tcp_mutex);
+                    have_clients = !g_tcp_clients.empty();
+                }
+                if (have_clients) {
+                    std::lock_guard<std::mutex> lk(g_h264_mtx);
+                    int ew = w & ~1, eh = h & ~1;
+                    if (!h264_give_up && (!g_h264.ready() || enc_w != ew || enc_h != eh)) {
+                        if (!g_h264.init(ew, eh, 60, 4000)) {
+                            LOG_WARN("cmd", "H.264 init failed — TCP fallback to BGRA (sticky)");
+                            h264_give_up = true;
+                            enc_w = enc_h = 0;
+                        } else {
+                            enc_w = ew; enc_h = eh;
+                            h264_give_up = false;
+                        }
+                    }
+                    if (g_h264.ready()) {
+                        std::vector<H264Packet> pkts;
+                        if (g_h264.encode_bgra(buf.data(), w, h, pkts) && !pkts.empty()) {
+                            for (const auto& p : pkts) tcp_broadcast_h264(p);
+                        }
+                    } else if (h264_give_up) {
+                        tcp_broadcast_bgra_fallback(buf.data(), w, h);
+                    }
+                }
+
                 dump_frame_if_enabled(buf.data(), w, h, true);
             } else {
                 Sleep(1);
             }
+        }
+        {
+            std::lock_guard<std::mutex> lk(g_h264_mtx);
+            g_h264.shutdown();
         }
         CoUninitialize();
     });
@@ -665,6 +920,11 @@ static std::string cmd_capture_stream_stop() {
         if (g_stream_thread.joinable()) g_stream_thread.join();
         wgc_stream_stop(g_stream_handle);
         g_stream_handle = nullptr;
+    }
+    g_control_hwnd.store(0);
+    {
+        std::lock_guard<std::mutex> lk(g_h264_mtx);
+        g_h264.shutdown();
     }
     LOG("cmd", "stream_stop");
     return R"({"ok":true})";
@@ -851,129 +1111,325 @@ void dump_frame_if_enabled(const uint8_t* bgra, int w, int h, bool is_stream) {
 }
 
 
-// ── Cursor overlay: transparent circular window shown on real screen ──
-// Pre-rendered 32x32 BGRA bitmap with per-pixel alpha → UpdateLayeredWindow.
-static HWND g_overlay_hwnd = nullptr;
-static HBITMAP g_overlay_bmp = nullptr;
-static int g_overlay_size = 32;
-static int g_overlay_half = 16;
+// ── Target-screen feedback overlays (NOT on the Monitor canvas) ──
+// Cursor circle / click ripple / drag rect are topmost layered popups on the
+// real desktop at the mapped capture point. HTTRANSPARENT so they never steal
+// hits. Class names are skipped by background input hit-testing.
+static HWND g_cursor_hwnd = nullptr;
+static HBITMAP g_cursor_bmp = nullptr;
+static constexpr int CURSOR_SZ = 32;
+static constexpr int CURSOR_HALF = 16;
 
-static void cursor_overlay_init() {
+static HWND g_ripple_hwnd = nullptr;
+static HBITMAP g_ripple_bmp = nullptr;
+static constexpr int RIPPLE_SZ = 56;
+static constexpr int RIPPLE_HALF = 28;
+static constexpr UINT_PTR TIMER_RIPPLE_HIDE = 1;
+
+static HWND g_drag_hwnd = nullptr;
+static HBITMAP g_drag_bmp = nullptr;
+static int g_drag_bmp_w = 0, g_drag_bmp_h = 0;
+
+static bool overlay_norm_to_screen(HWND h, double nx, double ny, int& sx, int& sy) {
+    // Match input/WGC: window capture uses full window rect (incl. chrome).
+    if (h) {
+        RECT wr{};
+        if (!GetWindowRect(h, &wr)) return false;
+        sx = wr.left + (int)(nx * (double)(wr.right - wr.left));
+        sy = wr.top + (int)(ny * (double)(wr.bottom - wr.top));
+        return true;
+    }
+    sx = GetSystemMetrics(SM_XVIRTUALSCREEN) +
+         (int)(nx * (double)GetSystemMetrics(SM_CXVIRTUALSCREEN));
+    sy = GetSystemMetrics(SM_YVIRTUALSCREEN) +
+         (int)(ny * (double)GetSystemMetrics(SM_CYVIRTUALSCREEN));
+    return true;
+}
+
+static HWND create_overlay_popup(const wchar_t* className, WNDPROC proc, int w, int h) {
     WNDCLASSEXW wc = {};
     wc.cbSize = sizeof(wc);
-    wc.hInstance = GetModuleHandle(nullptr);
-    wc.lpszClassName = L"GAM_CursorOverlay";
-    wc.lpfnWndProc = DefWindowProcW;
+    wc.hInstance = GetModuleHandleW(nullptr);
+    wc.lpszClassName = className;
+    wc.lpfnWndProc = proc;
     RegisterClassExW(&wc);
+    return CreateWindowExW(
+        WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED | WS_EX_TRANSPARENT,
+        className, L"", WS_POPUP, 0, 0, w, h,
+        nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+}
 
-    int SZ = g_overlay_size, H = g_overlay_half;
+static void present_layered(HWND hwnd, HBITMAP bmp, int dstX, int dstY, int w, int h) {
+    if (!hwnd || !bmp || w <= 0 || h <= 0) return;
+    HDC hdcScreen = GetDC(nullptr);
+    HDC hdcMem = CreateCompatibleDC(hdcScreen);
+    HBITMAP oldBmp = (HBITMAP)SelectObject(hdcMem, bmp);
+    POINT ptDst = { dstX, dstY };
+    POINT ptSrc = { 0, 0 };
+    SIZE sz = { w, h };
+    BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+    UpdateLayeredWindow(hwnd, hdcScreen, &ptDst, &sz, hdcMem, &ptSrc, 0, &bf, ULW_ALPHA);
+    SelectObject(hdcMem, oldBmp);
+    DeleteDC(hdcMem);
+    ReleaseDC(nullptr, hdcScreen);
+    SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                 SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+}
 
-    g_overlay_hwnd = CreateWindowExW(
-        WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED,
-        L"GAM_CursorOverlay", L"",
-        WS_POPUP,
-        0, 0, SZ, SZ,
-        nullptr, nullptr, GetModuleHandle(nullptr), nullptr);
+static LRESULT CALLBACK cursor_overlay_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_NCHITTEST) return HTTRANSPARENT;
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
 
-    // Pre-render 32×32 BGRA bitmap with anti-aliased circle
-    // Channels: B G R A (little-endian BGRA as DWORD)
-    BITMAPV5HEADER bi = {};
-    bi.bV5Size = sizeof(BITMAPV5HEADER);
-    bi.bV5Width = SZ;
-    bi.bV5Height = -SZ; // top-down
-    bi.bV5Planes = 1;
-    bi.bV5BitCount = 32;
-    bi.bV5Compression = BI_RGB;
+static LRESULT CALLBACK ripple_overlay_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_NCHITTEST) return HTTRANSPARENT;
+    if (msg == WM_TIMER && wp == TIMER_RIPPLE_HIDE) {
+        KillTimer(hwnd, TIMER_RIPPLE_HIDE);
+        ShowWindow(hwnd, SW_HIDE);
+        return 0;
+    }
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
 
+static LRESULT CALLBACK drag_overlay_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_NCHITTEST) return HTTRANSPARENT;
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+static HBITMAP make_circle_bitmap(int SZ, int half, bool ringOnly, BYTE accentR, BYTE accentG, BYTE accentB) {
+    BITMAPINFO bi = {};
+    bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bi.bmiHeader.biWidth = SZ;
+    bi.bmiHeader.biHeight = -SZ;
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    bi.bmiHeader.biCompression = BI_RGB;
     DWORD* pixels = nullptr;
     HDC hdcScreen = GetDC(nullptr);
-    g_overlay_bmp = CreateDIBSection(hdcScreen, (BITMAPINFO*)&bi, DIB_RGB_COLORS,
-                                      (void**)&pixels, nullptr, 0);
+    HBITMAP bmp = CreateDIBSection(hdcScreen, &bi, DIB_RGB_COLORS, (void**)&pixels, nullptr, 0);
     ReleaseDC(nullptr, hdcScreen);
+    if (!pixels || !bmp) return nullptr;
 
-    if (!pixels || !g_overlay_bmp) return;
-
-    float cx = (float)H, cy = (float)H;
-    float outerR = (float)H - 2.0f;   // outer ring radius
-    float innerR = (float)(H - 4);     // inner hole radius (ring thickness)
-    float dotR = (float)H * 0.38f;     // center dot radius
+    float cx = (float)half, cy = (float)half;
+    float outerR = (float)half - 2.0f;
+    float innerR = ringOnly ? (float)half - 6.0f : (float)(half - 4);
+    float dotR = ringOnly ? 0.0f : (float)half * 0.38f;
 
     for (int y = 0; y < SZ; y++) {
         for (int x = 0; x < SZ; x++) {
             float dx = (float)x - cx + 0.5f;
             float dy = (float)y - cy + 0.5f;
             float dist = sqrtf(dx * dx + dy * dy);
-
-            // Anti-aliased ring
             float outerAlpha = fmaxf(0.0f, fminf(1.0f, outerR - dist + 0.5f));
             float innerAlpha = fmaxf(0.0f, fminf(1.0f, dist - innerR + 0.5f));
             float ringAlpha = outerAlpha * innerAlpha;
-
-            // Anti-aliased center dot
-            float dotAlpha = fmaxf(0.0f, fminf(1.0f, dotR - dist + 0.5f));
-
+            float dotAlpha = dotR > 0 ? fmaxf(0.0f, fminf(1.0f, dotR - dist + 0.5f)) : 0.0f;
             float alpha = fmaxf(ringAlpha, dotAlpha);
-            BYTE a = (BYTE)(alpha * 220.0f);  // overall opacity
-
-            // Accent blue #3B82F6 → RGB(59, 130, 246)
-            BYTE b = 59, g = 130, r = 246;
-
-            // Premultiplied alpha for UpdateLayeredWindow
-            pixels[y * SZ + x] = ((DWORD)a << 24) | ((DWORD)(r * a / 255) << 16) |
-                                 ((DWORD)(g * a / 255) << 8) | (DWORD)(b * a / 255);
+            BYTE a = (BYTE)(alpha * (ringOnly ? 200.0f : 220.0f));
+            pixels[y * SZ + x] = ((DWORD)a << 24) |
+                ((DWORD)(accentR * a / 255) << 16) |
+                ((DWORD)(accentG * a / 255) << 8) |
+                (DWORD)(accentB * a / 255);
         }
     }
+    return bmp;
+}
 
-    ShowWindow(g_overlay_hwnd, SW_HIDE);
+static void cursor_overlay_init() {
+    if (g_cursor_hwnd) return;
+    g_cursor_hwnd = create_overlay_popup(L"GAM_CursorOverlay", cursor_overlay_wndproc, CURSOR_SZ, CURSOR_SZ);
+    // Accent blue #3B82F6
+    g_cursor_bmp = make_circle_bitmap(CURSOR_SZ, CURSOR_HALF, false, 59, 130, 246);
+    if (g_cursor_hwnd) ShowWindow(g_cursor_hwnd, SW_HIDE);
+}
+
+static void ripple_overlay_init() {
+    if (g_ripple_hwnd) return;
+    g_ripple_hwnd = create_overlay_popup(L"GAM_RippleOverlay", ripple_overlay_wndproc, RIPPLE_SZ, RIPPLE_SZ);
+    // Amber/green flash for left; we'll tint via separate bitmaps if needed — default accent.
+    g_ripple_bmp = make_circle_bitmap(RIPPLE_SZ, RIPPLE_HALF, true, 96, 210, 140);
+    if (g_ripple_hwnd) ShowWindow(g_ripple_hwnd, SW_HIDE);
+}
+
+static void drag_overlay_init() {
+    if (g_drag_hwnd) return;
+    g_drag_hwnd = create_overlay_popup(L"GAM_DragOverlay", drag_overlay_wndproc, 8, 8);
+    if (g_drag_hwnd) ShowWindow(g_drag_hwnd, SW_HIDE);
 }
 
 static void cursor_overlay_show(int screenX, int screenY) {
-    if (!g_overlay_hwnd) cursor_overlay_init();
-    if (!g_overlay_hwnd || !g_overlay_bmp) return;
-
-    HDC hdcScreen = GetDC(nullptr);
-    HDC hdcMem = CreateCompatibleDC(hdcScreen);
-    HBITMAP oldBmp = (HBITMAP)SelectObject(hdcMem, g_overlay_bmp);
-
-    POINT ptDst = { screenX - g_overlay_half, screenY - g_overlay_half };
-    POINT ptSrc = { 0, 0 };
-    SIZE sz = { g_overlay_size, g_overlay_size };
-    BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-
-    UpdateLayeredWindow(g_overlay_hwnd, hdcScreen, &ptDst, &sz, hdcMem, &ptSrc, 0, &bf, ULW_ALPHA);
-
-    SelectObject(hdcMem, oldBmp);
-    DeleteDC(hdcMem);
-    ReleaseDC(nullptr, hdcScreen);
-
-    SetWindowPos(g_overlay_hwnd, HWND_TOPMOST, 0, 0, 0, 0,
-                 SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+    cursor_overlay_init();
+    if (!g_cursor_hwnd || !g_cursor_bmp) return;
+    present_layered(g_cursor_hwnd, g_cursor_bmp,
+                    screenX - CURSOR_HALF, screenY - CURSOR_HALF, CURSOR_SZ, CURSOR_SZ);
 }
 
 static void cursor_overlay_hide() {
-    if (g_overlay_hwnd) ShowWindow(g_overlay_hwnd, SW_HIDE);
+    if (g_cursor_hwnd) ShowWindow(g_cursor_hwnd, SW_HIDE);
+}
+
+static void ripple_overlay_show(int screenX, int screenY, bool rightButton) {
+    ripple_overlay_init();
+    if (!g_ripple_hwnd) return;
+    // Rebuild tint for right-click (red-ish) vs left (green-ish).
+    if (g_ripple_bmp) { DeleteObject(g_ripple_bmp); g_ripple_bmp = nullptr; }
+    g_ripple_bmp = rightButton
+        ? make_circle_bitmap(RIPPLE_SZ, RIPPLE_HALF, true, 238, 120, 120)
+        : make_circle_bitmap(RIPPLE_SZ, RIPPLE_HALF, true, 96, 210, 140);
+    if (!g_ripple_bmp) return;
+    present_layered(g_ripple_hwnd, g_ripple_bmp,
+                    screenX - RIPPLE_HALF, screenY - RIPPLE_HALF, RIPPLE_SZ, RIPPLE_SZ);
+    KillTimer(g_ripple_hwnd, TIMER_RIPPLE_HIDE);
+    SetTimer(g_ripple_hwnd, TIMER_RIPPLE_HIDE, 420, nullptr);
+}
+
+static void ripple_overlay_hide() {
+    if (g_ripple_hwnd) {
+        KillTimer(g_ripple_hwnd, TIMER_RIPPLE_HIDE);
+        ShowWindow(g_ripple_hwnd, SW_HIDE);
+    }
+}
+
+static void drag_overlay_hide() {
+    if (g_drag_hwnd) ShowWindow(g_drag_hwnd, SW_HIDE);
+}
+
+static void drag_overlay_show(int x0, int y0, int x1, int y1) {
+    drag_overlay_init();
+    if (!g_drag_hwnd) return;
+    int left = (std::min)(x0, x1);
+    int top = (std::min)(y0, y1);
+    int w = (std::max)(2, abs(x1 - x0));
+    int h = (std::max)(2, abs(y1 - y0));
+    // Cap bitmap size for pathological drags across huge virtual desktops.
+    if (w > 4096) w = 4096;
+    if (h > 4096) h = 4096;
+
+    if (g_drag_bmp && (g_drag_bmp_w != w || g_drag_bmp_h != h)) {
+        DeleteObject(g_drag_bmp);
+        g_drag_bmp = nullptr;
+    }
+    if (!g_drag_bmp) {
+        BITMAPINFO bi = {};
+        bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        bi.bmiHeader.biWidth = w;
+        bi.bmiHeader.biHeight = -h;
+        bi.bmiHeader.biPlanes = 1;
+        bi.bmiHeader.biBitCount = 32;
+        bi.bmiHeader.biCompression = BI_RGB;
+        DWORD* pixels = nullptr;
+        HDC hdcScreen = GetDC(nullptr);
+        g_drag_bmp = CreateDIBSection(hdcScreen, &bi, DIB_RGB_COLORS, (void**)&pixels, nullptr, 0);
+        ReleaseDC(nullptr, hdcScreen);
+        if (!pixels || !g_drag_bmp) return;
+        g_drag_bmp_w = w;
+        g_drag_bmp_h = h;
+        // Premultiplied accent fill + brighter 2px border.
+        const BYTE br = 59, bg = 130, bb = 246;
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                bool edge = x < 2 || y < 2 || x >= w - 2 || y >= h - 2;
+                BYTE a = edge ? 200 : 48;
+                pixels[y * w + x] = ((DWORD)a << 24) |
+                    ((DWORD)(br * a / 255) << 16) |
+                    ((DWORD)(bg * a / 255) << 8) |
+                    (DWORD)(bb * a / 255);
+            }
+        }
+    }
+    present_layered(g_drag_hwnd, g_drag_bmp, left, top, w, h);
+}
+
+static void target_overlays_hide_all() {
+    cursor_overlay_hide();
+    ripple_overlay_hide();
+    drag_overlay_hide();
 }
 
 // ── Input forwarding (delegated to per-method libs) ──────────
 #include "../../input/include/input_methods.h"
+#include "../../input/include/input_common.h"
 
 static std::string cmd_send_input(const std::string& args) {
     InputArgs a = parse_input_args(args);
+    a.ignore_hwnd = (uint64_t)(uintptr_t)get_main_hwnd();
 
-    // Desktop (hwnd=0): only sendinput works (uses virtual screen coords).
-    // winapi/postmessage need a real window handle for thread attach / message routing.
-    if (a.hwnd == 0 && a.method != "sendinput")
-        return "{\"ok\":false,\"error\":\"desktop input only supports sendinput method\"}";
+    // Desktop PostMessage performs explicit point hit-testing and child-window
+    // routing. WinAPI still requires a concrete target thread/window.
+    if (a.hwnd == 0 && a.method == "winapi")
+        return "{\"ok\":false,\"error\":\"desktop input does not support winapi method\"}";
     HWND hWnd = (HWND)(uintptr_t)a.hwnd;
     if (hWnd != nullptr && !IsWindow(hWnd))
         return "{\"ok\":false,\"error\":\"invalid window handle\"}";
 
+    // Window targets: keep all pointer ops inside the window (model hallucination guard).
+    if (input_type_uses_norm_coords(a.type)) {
+        std::string err = input_validate_norm_bounds(hWnd, a.x_norm, a.y_norm);
+        if (!err.empty())
+            return std::string("{\"ok\":false,\"error\":\"") + err + "\"}";
+        for (const auto& pt : a.dragPath) {
+            err = input_validate_norm_bounds(hWnd, pt.first, pt.second);
+            if (!err.empty())
+                return std::string("{\"ok\":false,\"error\":\"") + err + "\"}";
+        }
+    }
+
     if (a.method == "sendinput")    return input_sendinput(hWnd, a);
     if (a.method == "winapi")       return input_winapi(hWnd, a);
     if (a.method == "postmessage")  return input_postmessage(hWnd, a);
+    if (a.method == "sendmessage")  return input_postmessage(hWnd, a);
     if (a.method == "driver")       return input_driver(hWnd, a);
 
     return "{\"ok\":false,\"error\":\"unknown input method: " + a.method + "\"}";
+}
+
+// Apply target-driven policy: desktop=foreground SendInput, window=background SendMessage.
+// Forces hwnd to g_control_hwnd so a hallucinating model cannot retarget another window.
+static std::string execute_remote_control_json(const std::string& actionJson) {
+    uint64_t hwnd = g_control_hwnd.load();
+    const char* method = (hwnd == 0) ? "sendinput" : "sendmessage";
+
+    // Strip caller hwnd/method if present, then inject authoritative values.
+    std::string body = actionJson;
+    // Minimal merge: wrap fields into a fresh args object via string concat of known keys.
+    // actionJson is expected to be a flat JSON object with type/x_norm/...
+    if (body.empty() || body[0] != '{')
+        return "{\"ok\":false,\"error\":\"control message must be a JSON object\"}";
+
+    char prefix[128];
+    snprintf(prefix, sizeof(prefix),
+             "{\"hwnd\":%llu,\"method\":\"%s\",",
+             (unsigned long long)hwnd, method);
+    // Replace leading '{' with prefix (already contains '{')
+    std::string merged = std::string(prefix) + body.substr(1);
+    return cmd_send_input(merged);
+}
+
+// Test-harness only: keep GAM above targets while preview-mapping so same-box
+// z-order does not thrash. Production agent path never calls this.
+static bool g_mapping_controller_on = false;
+
+static void mapping_controller_apply(bool on) {
+    HWND hwnd = (HWND)get_main_hwnd();
+    if (!hwnd || !IsWindow(hwnd)) return;
+    if (on) {
+        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+        LockSetForegroundWindow(LSFW_LOCK);
+        LOG("cmd", "mapping_controller: TOPMOST + LSFW_LOCK");
+    } else {
+        SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+        LockSetForegroundWindow(LSFW_UNLOCK);
+        LOG("cmd", "mapping_controller: restored (NOTOPMOST + LSFW_UNLOCK)");
+    }
+    g_mapping_controller_on = on;
+}
+
+static std::string cmd_set_mapping_controller(const std::string& args) {
+    bool on = json_get_bool(args, "on");
+    mapping_controller_apply(on);
+    return on ? R"({"ok":true,"on":true})" : R"({"ok":true,"on":false})";
 }
 
 // ── Auto-update (WinHTTP) ──────────────────────────────────
@@ -2146,6 +2602,9 @@ std::string dispatch_command(const std::string& json) {
     else if (cmd == "send_input") {
         result = cmd_send_input(args);
     }
+    else if (cmd == "set_mapping_controller") {
+        result = cmd_set_mapping_controller(args);
+    }
     else if (cmd == "get_version") {
         result = "\"" APP_VERSION "\"";
     }
@@ -2205,20 +2664,46 @@ std::string dispatch_command(const std::string& json) {
             LOG("cmd", "launch_test_target: close existing window hwnd=0x%llx", (unsigned long long)(uintptr_t)hTest);
             result = R"({"ok":true,"action":"closed"})";
         } else {
-            char exeDir[MAX_PATH];
-            GetModuleFileNameA(nullptr, exeDir, MAX_PATH);
-            char* lastSlash = strrchr(exeDir, '\\');
+            char exePath[MAX_PATH];
+            GetModuleFileNameA(nullptr, exePath, MAX_PATH);
+            char* lastSlash = strrchr(exePath, '\\');
             if (lastSlash) *lastSlash = '\0';
-            char* p = strrchr(exeDir, '\\'); if (p) *p = '\0';
-            p = strrchr(exeDir, '\\'); if (p) *p = '\0';
-            std::string path = std::string(exeDir) + "\\test_target\\test_target.exe";
-            LOG("cmd", "launch_test_target: %s", path.c_str());
-            HINSTANCE h = ShellExecuteA(nullptr, "open", path.c_str(), nullptr, nullptr, SW_SHOW);
-            if ((INT_PTR)h > 32) {
-                result = R"({"ok":true,"action":"launched"})";
+            std::string exeDir = exePath;
+
+            // Prefer staged copy next to monitor_app.exe, then repo checkout path.
+            auto exists = [](const std::string& p) -> bool {
+                DWORD a = GetFileAttributesA(p.c_str());
+                return a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY);
+            };
+            std::string candidates[] = {
+                exeDir + "\\test_target\\test_target.exe",
+                exeDir + "\\..\\..\\..\\test_target\\build\\test_target.exe",
+                exeDir + "\\..\\..\\..\\test_target\\test_target.exe",
+            };
+            std::string path;
+            for (const auto& c : candidates) {
+                char full[MAX_PATH] = {};
+                if (GetFullPathNameA(c.c_str(), MAX_PATH, full, nullptr) && exists(full)) {
+                    path = full;
+                    break;
+                }
+            }
+            if (path.empty()) {
+                result = R"tt({"ok":false,"error":"test_target.exe not found (build with -Module test_target)"})tt";
             } else {
-                result = "{\"ok\":false,\"error\":\"failed to launch, code=" +
-                         std::to_string((int)(INT_PTR)h) + "\"}";
+                LOG("cmd", "launch_test_target: %s", path.c_str());
+                // Working directory = exe folder so relative ui/ resolves if needed.
+                std::string workDir = path;
+                size_t slash = workDir.find_last_of("\\/");
+                if (slash != std::string::npos) workDir.resize(slash);
+                HINSTANCE h = ShellExecuteA(nullptr, "open", path.c_str(), nullptr,
+                                           workDir.c_str(), SW_SHOW);
+                if ((INT_PTR)h > 32) {
+                    result = R"({"ok":true,"action":"launched"})";
+                } else {
+                    result = "{\"ok\":false,\"error\":\"failed to launch, code=" +
+                             std::to_string((int)(INT_PTR)h) + "\"}";
+                }
             }
         }
     }
@@ -2277,29 +2762,63 @@ std::string dispatch_command(const std::string& json) {
         }
     }
     else if (cmd == "cursor_overlay") {
+        // Hover marker on the REAL capture target (not the Monitor canvas).
         int show = json_get_int(args, "show");
         if (!show) {
             cursor_overlay_hide();
             result = R"({"ok":true})";
         } else {
-            uint64_t hwnd = json_get_uint64(args, "hwnd");
+            HWND h = (HWND)(uintptr_t)json_get_uint64(args, "hwnd");
             double x_norm = json_get_double(args, "x_norm");
             double y_norm = json_get_double(args, "y_norm");
-            HWND h = (HWND)(uintptr_t)hwnd;
             int sx = 0, sy = 0;
-            if (h) {
-                RECT wr;
-                if (GetWindowRect(h, &wr)) {
-                    sx = wr.left + (int)(x_norm * (double)(wr.right - wr.left));
-                    sy = wr.top  + (int)(y_norm * (double)(wr.bottom - wr.top));
-                }
+            if (!overlay_norm_to_screen(h, x_norm, y_norm, sx, sy)) {
+                result = R"({"ok":false,"error":"failed to map overlay coordinates"})";
             } else {
-                sx = GetSystemMetrics(SM_XVIRTUALSCREEN) + (int)(x_norm * (double)GetSystemMetrics(SM_CXVIRTUALSCREEN));
-                sy = GetSystemMetrics(SM_YVIRTUALSCREEN) + (int)(y_norm * (double)GetSystemMetrics(SM_CYVIRTUALSCREEN));
+                cursor_overlay_show(sx, sy);
+                result = R"({"ok":true})";
             }
-            cursor_overlay_show(sx, sy);
+        }
+    }
+    else if (cmd == "target_ripple") {
+        // Click flash on the real target screen.
+        HWND h = (HWND)(uintptr_t)json_get_uint64(args, "hwnd");
+        double x_norm = json_get_double(args, "x_norm");
+        double y_norm = json_get_double(args, "y_norm");
+        std::string button = json_get_str(args, "button");
+        int sx = 0, sy = 0;
+        if (!overlay_norm_to_screen(h, x_norm, y_norm, sx, sy)) {
+            result = R"({"ok":false,"error":"failed to map ripple coordinates"})";
+        } else {
+            ripple_overlay_show(sx, sy, button == "right");
             result = R"({"ok":true})";
         }
+    }
+    else if (cmd == "target_drag") {
+        // Drag selection rectangle on the real target screen.
+        int show = json_get_int(args, "show");
+        if (!show) {
+            drag_overlay_hide();
+            result = R"({"ok":true})";
+        } else {
+            HWND h = (HWND)(uintptr_t)json_get_uint64(args, "hwnd");
+            double x0 = json_get_double(args, "x0");
+            double y0 = json_get_double(args, "y0");
+            double x1 = json_get_double(args, "x1");
+            double y1 = json_get_double(args, "y1");
+            int sx0 = 0, sy0 = 0, sx1 = 0, sy1 = 0;
+            if (!overlay_norm_to_screen(h, x0, y0, sx0, sy0) ||
+                !overlay_norm_to_screen(h, x1, y1, sx1, sy1)) {
+                result = R"({"ok":false,"error":"failed to map drag overlay coordinates"})";
+            } else {
+                drag_overlay_show(sx0, sy0, sx1, sy1);
+                result = R"({"ok":true})";
+            }
+        }
+    }
+    else if (cmd == "target_overlays_hide") {
+        target_overlays_hide_all();
+        result = R"({"ok":true})";
     }
     else if (cmd == "screen_info") {
         int sx = GetSystemMetrics(SM_XVIRTUALSCREEN);
@@ -2446,6 +2965,7 @@ void backend_shutdown() {
         if (g_stream_thread.joinable()) g_stream_thread.join();
         if (g_stream_handle) { wgc_stream_stop(g_stream_handle); g_stream_handle = nullptr; }
     }
+    if (g_mapping_controller_on) mapping_controller_apply(false);
     LOG("cmd", "backend shutdown");
     g_mta_running = false;
     if (g_mta_thread.joinable()) g_mta_thread.join();

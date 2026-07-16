@@ -31,9 +31,10 @@
 
 typedef enum {
     PAYLOAD_TYPE_NONE         = 0,   // unchanged / heartbeat
-    PAYLOAD_TYPE_BGRA_FRAME   = 1,   // BGRA pixel frame: [w:4][h:4][ch:4][reserved:4][pixels...]
-    PAYLOAD_TYPE_H264_STREAM  = 2,   // H.264 NAL units (future)
-    PAYLOAD_TYPE_CONTROL_MSG  = 3,   // JSON control message (future)
+    PAYLOAD_TYPE_BGRA_FRAME   = 1,   // BGRA: [w:4][h:4][ch:4][reserved:4][pixels...] (fallback only)
+    PAYLOAD_TYPE_H264_STREAM  = 2,   // H.264 Annex-B: [w:4][h:4][flags:4][reserved:4][nal...]
+                                     // flags bit0 = keyframe. Preferred remote video path.
+    PAYLOAD_TYPE_CONTROL_MSG  = 3,   // JSON action (mousedown/up/move/key/text…). Agent fills hwnd/method.
     PAYLOAD_TYPE_CAPABILITIES = 4,   // capability bitmask (future)
 } PayloadType;
 

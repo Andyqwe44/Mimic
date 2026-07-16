@@ -58,6 +58,14 @@ static constexpr UINT WM_UPDATE_PROGRESS = WM_USER + 101;
 // startup gap to avoid a white flash. See app_post_show_window (main.cpp).
 static constexpr UINT WM_APP_SHOW_WINDOW = WM_USER + 102;
 
+// Self-test TCP reader thread → main STA thread → PostJsonToWebView.
+// Avoids calling WebView2 PostWebMessageAsJson off the UI thread (hello was
+// silently dropped, causing "no geometry" on self-test start).
+static constexpr UINT WM_SELFTEST_EVENT = WM_USER + 103;
+
+/// Drain queued test_target JSON lines to the WebView (main thread only).
+void selftest_drain_to_webview();
+
 struct UpdateProgress {
     bool active = false;       // download thread running
     bool succeeded = false;    // all files done OK

@@ -9,6 +9,7 @@
 #include "../../logger/logger.h"
 #include <cstdlib>
 #include <cstring>
+#include <vector>
 
 // ═══ Key mapping ════════════════════════════════════════════
 
@@ -54,17 +55,25 @@ WORD vk_from_name(const std::string& name) {
 }
 
 WORD scan_from_vk(WORD vk) {
-    return (WORD)MapVirtualKeyA(vk, MAPVK_VK_TO_VSC);
+    return (WORD)MapVirtualKeyW(vk, MAPVK_VK_TO_VSC_EX);
 }
 
 bool is_extended_key(WORD vk) {
     WORD scan = scan_from_vk(vk);
-    return (scan & 0xE000) != 0; // E0/E1 scan prefix = extended keyboard key
+    return (scan & 0xFF00) == 0xE000 || (scan & 0xFF00) == 0xE100;
+}
+
+LPARAM key_message_lparam(WORD vk, bool keyUp) {
+    WORD scan = scan_from_vk(vk);
+    LPARAM lp = 1 | ((LPARAM)(scan & 0x00FF) << 16);
+    if (is_extended_key(vk)) lp |= (1 << 24);
+    if (keyUp) lp |= (1LL << 31) | (1 << 30);
+    return lp;
 }
 
 // ═══ Coordinate conversion ══════════════════════════════════
 
-bool norm_to_screen(HWND hWnd, double nx, double ny, DWORD& absX, DWORD& absY) {
+bool norm_to_screen_point(HWND hWnd, double nx, double ny, POINT& screenPoint) {
     int sx, sy;
     if (hWnd == nullptr || hWnd == (HWND)0) {
         // Desktop: map normalized coords directly to virtual screen
@@ -79,19 +88,31 @@ bool norm_to_screen(HWND hWnd, double nx, double ny, DWORD& absX, DWORD& absY) {
         // (title bar, borders). Use GetWindowRect to match the captured image.
         RECT wr;
         if (!GetWindowRect(hWnd, &wr)) {
-            LOG("input", "norm_to_screen: GetWindowRect FAILED for hwnd=0x%llx", (unsigned long long)(uintptr_t)hWnd);
-            absX = 0; absY = 0;
+            LOG("input", "norm_to_screen_point: GetWindowRect FAILED for hwnd=0x%llx",
+                (unsigned long long)(uintptr_t)hWnd);
+            screenPoint = { 0, 0 };
             return false;
         }
         sx = wr.left + (int)(nx * (double)(wr.right - wr.left));
         sy = wr.top  + (int)(ny * (double)(wr.bottom - wr.top));
     }
+    screenPoint = { sx, sy };
+    return true;
+}
+
+bool norm_to_screen(HWND hWnd, double nx, double ny, DWORD& absX, DWORD& absY) {
+    POINT screenPoint = {};
+    if (!norm_to_screen_point(hWnd, nx, ny, screenPoint)) {
+        absX = 0;
+        absY = 0;
+        return false;
+    }
     int vsX = GetSystemMetrics(SM_XVIRTUALSCREEN);
     int vsY = GetSystemMetrics(SM_YVIRTUALSCREEN);
     int vsW = GetSystemMetrics(SM_CXVIRTUALSCREEN);
     int vsH = GetSystemMetrics(SM_CYVIRTUALSCREEN);
-    absX = (DWORD)(((double)(sx - vsX) / (double)vsW) * 65535.0);
-    absY = (DWORD)(((double)(sy - vsY) / (double)vsH) * 65535.0);
+    absX = (DWORD)(((double)(screenPoint.x - vsX) / (double)vsW) * 65535.0);
+    absY = (DWORD)(((double)(screenPoint.y - vsY) / (double)vsH) * 65535.0);
     return true;
 }
 
@@ -111,6 +132,26 @@ bool norm_to_client(HWND hWnd, double nx, double ny, int& cx, int& cy) {
     cx = (int)(nx * (cr.right - cr.left));
     cy = (int)(ny * (cr.bottom - cr.top));
     return true;
+}
+
+bool input_type_uses_norm_coords(const std::string& type) {
+    return type == "click" || type == "dblclick" || type == "mousedown" ||
+           type == "mouseup" || type == "move" || type == "drag" || type == "wheel";
+}
+
+std::string input_validate_norm_bounds(HWND hWnd, double nx, double ny) {
+    if (!(nx == nx) || !(ny == ny)) // NaN
+        return "invalid coordinates (NaN)";
+    if (hWnd == nullptr || hWnd == (HWND)0) {
+        // Desktop: normalized virtual-screen coords; still require finite range.
+        if (nx < 0.0 || nx > 1.0 || ny < 0.0 || ny > 1.0)
+            return "desktop coordinates out of range [0,1]";
+        return {};
+    }
+    // Window: hard isolation — never operate outside the capture window.
+    if (nx < 0.0 || nx > 1.0 || ny < 0.0 || ny > 1.0)
+        return "coordinates outside target window [0,1]";
+    return {};
 }
 
 // ═══ Drag path JSON parser ══════════════════════════════════
@@ -158,6 +199,8 @@ InputArgs parse_input_args(const std::string& argsJson) {
     a.shiftKey = json_get_bool(argsJson, "shiftKey");
     a.altKey   = json_get_bool(argsJson, "altKey");
     a.metaKey  = json_get_bool(argsJson, "metaKey");
+    a.held     = json_get_bool(argsJson, "held");
+    a.focus    = json_get_bool(argsJson, "focus");
     a.text   = json_get_str(argsJson, "text");
     a.dragPath = parse_drag_path(argsJson);
 
@@ -175,4 +218,84 @@ InputArgs parse_input_args(const std::string& argsJson) {
     }
 
     return a;
+}
+
+// ═══ Keyboard / committed-text target ═══════════════════════
+
+static HWND g_last_capture_root = nullptr;
+static HWND g_last_keyboard_target = nullptr;
+
+void input_remember_keyboard_target(HWND captureHwnd, HWND targetHwnd) {
+    g_last_capture_root = captureHwnd;
+    g_last_keyboard_target = targetHwnd;
+}
+
+HWND input_keyboard_target(HWND captureHwnd) {
+    if (g_last_keyboard_target && IsWindow(g_last_keyboard_target)) {
+        // Desktop capture passes hwnd=0 — accept any remembered target.
+        if (!captureHwnd ||
+            (g_last_capture_root == captureHwnd &&
+             (g_last_keyboard_target == captureHwnd ||
+              IsChild(captureHwnd, g_last_keyboard_target)))) {
+            return g_last_keyboard_target;
+        }
+    }
+
+    if (!captureHwnd || !IsWindow(captureHwnd)) return nullptr;
+    DWORD tid = GetWindowThreadProcessId(captureHwnd, nullptr);
+    GUITHREADINFO info = {};
+    info.cbSize = sizeof(info);
+    if (tid && GetGUIThreadInfo(tid, &info) && info.hwndFocus &&
+        (info.hwndFocus == captureHwnd || IsChild(captureHwnd, info.hwndFocus))) {
+        return info.hwndFocus;
+    }
+    return captureHwnd;
+}
+
+bool input_focus_hwnd(HWND hwnd) {
+    if (!hwnd || !IsWindow(hwnd)) return false;
+    DWORD tidTarget = GetWindowThreadProcessId(hwnd, nullptr);
+    DWORD tidCur = GetCurrentThreadId();
+    if (tidTarget && tidTarget != tidCur)
+        AttachThreadInput(tidCur, tidTarget, TRUE);
+    SetFocus(hwnd);
+    if (tidTarget && tidTarget != tidCur)
+        AttachThreadInput(tidCur, tidTarget, FALSE);
+    return true;
+}
+
+std::string input_deliver_committed_text(
+    HWND keyHwnd, const std::string& utf8, bool allow_focus) {
+    if (!keyHwnd || !IsWindow(keyHwnd))
+        return "no text target; click a mapped control first";
+    if (utf8.empty()) return "text requires 'text' field";
+
+    int wl = MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), (int)utf8.size(), nullptr, 0);
+    if (wl <= 0) return "UTF8->UTF16 failed";
+    std::vector<wchar_t> wb(wl + 1);
+    MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), (int)utf8.size(), wb.data(), wl);
+
+    // Production default: no SetFocus — must not steal the user's foreground
+    // keyboard focus. Test harness may pass focus=true explicitly.
+    if (allow_focus) {
+        if (!input_focus_hwnd(keyHwnd))
+            return "failed to focus text target";
+    }
+
+    for (int i = 0; i < wl; i++) {
+        // Background Unicode: PostMessage so we never activate/raise the target.
+        if (!PostMessageW(keyHwnd, WM_CHAR, (WPARAM)wb[i], MAKELPARAM(1, 1))) {
+            DWORD err = GetLastError();
+            char detail[96] = {};
+            snprintf(detail, sizeof(detail), "PostMessage WM_CHAR failed error=%lu",
+                     (unsigned long)err);
+            return detail;
+        }
+        Sleep(5);
+    }
+
+    LOG("input", "text: committed %d char(s) via WM_CHAR%s → 0x%llx",
+        wl, allow_focus ? "+SetFocus" : " (background)",
+        (unsigned long long)(uintptr_t)keyHwnd);
+    return {};
 }

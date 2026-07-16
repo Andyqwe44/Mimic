@@ -15,8 +15,10 @@
 // ── Parsed input arguments (one-time parse from JSON) ──
 struct InputArgs {
     uint64_t hwnd = 0;
-    std::string type;       // click|dblclick|move|drag|wheel|keydown|keyup|keypress|combo|text
-    std::string method;     // sendinput|winapi|postmessage|driver
+    // click|dblclick|mousedown|mouseup|move|drag|wheel|keydown|keyup|keypress|combo|text
+    std::string type;
+    std::string method;     // sendinput|winapi|postmessage|sendmessage|driver
+    uint64_t ignore_hwnd = 0; // desktop point routing skips this root window
     std::string button;     // left|right|middle
     double x_norm = 0.5;   // normalized X (0-1)
     double y_norm = 0.5;   // normalized Y (0-1)
@@ -28,8 +30,10 @@ struct InputArgs {
     bool shiftKey = false;
     bool altKey   = false;
     bool metaKey  = false;
-    std::string text;      // for text type
-    std::vector<std::pair<double, double>> dragPath; // for drag type
+    bool held     = false; // move while button held (text selection / drag)
+    bool focus    = false; // text: optional SetFocus (test only; prod default off)
+    std::string text;      // for text type (IME commit)
+    std::vector<std::pair<double, double>> dragPath; // batch drag (self-test)
 };
 
 // ── Parse JSON args string → InputArgs struct ──

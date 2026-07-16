@@ -376,21 +376,16 @@ Streaming (`capture_stream_start`):
 | `dxgi` | Returns error — not implemented |
 | unknown | Returns error |
 
-### Input methods (3-mode mouse + keyboard)
+### Input policy (thin client · 2026-07)
 
-Mouse modes:
-| Mode | Move | Click method | Description |
-|------|------|-------------|-------------|
-| Background (default) | ❌ virtual only | PostMessage | 全后台不抢鼠标 |
-| Semi | ❌ virtual only | SendInput | 点击时短暂抢鼠标 |
-| Seize | ✅ 60fps | SendInput | 前台完全抢鼠标 |
+| Target | Policy | Wire method |
+|--------|--------|-------------|
+| Desktop `hwnd=0` | Foreground (may occupy user mouse/keyboard) | `sendinput` |
+| Window | Background; coords must stay in window `[0,1]` | `sendmessage` |
 
-Keyboard modes:
-| Mode | Method | Description |
-|------|--------|-------------|
-| PostMsg (default) | PostMessage | 异步高效 |
-| SendMsg | WinAPI | 同步稳定 |
-| Seize | SendInput | 前台独占 |
+Remote `CONTROL_MSG` actions are forced onto the active stream `hwnd` (cannot retarget). Atomic types: `mousedown`/`mouseup`/`move(+held)`/`keydown`/`keyup`/`text`. Local Mapping/IME scaffolding is off when `THIN_CLIENT` (`monitor_web/src/lib/features.ts`).
+
+TCP video: prefer H.264 type=2 (MF MFT); local preview stays SharedBuffer BGRA. Web controllers use `controller_web/` + `bridge.py` (WS:9997 ↔ TCP:9999). **Not MJPEG.**
 
 ### Streaming pipeline
 

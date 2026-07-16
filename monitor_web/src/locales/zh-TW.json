@@ -28,7 +28,7 @@
 
   "bottombar": {
     "tcp": "TCP :9999",
-    "agent_online": "Agent 線上",
+    "agent_online": "控制端線上",
     "waiting_connection": "等待連線",
     "update": "更新",
     "update_title": "有可用更新 — 點擊安裝"
@@ -112,13 +112,15 @@
     "stream_auto_tip": "自動選擇串流傳輸方式（目前僅 WGC 支援即時串流）",
     "dxgi_stream_tip": "DXGI 串流未實作，僅 WGC 支援即時預覽",
     "render_method": "渲染方式",
+    "input_policy": "輸入策略",
+    "input_policy_desc": "桌面目標 → 前景 SendInput（可占用鍵鼠）。視窗目標 → 背景 SendMessage，座標限制在視窗 [0,1] 內。遠端控制端經 TCP 使用同一規則。",
     "mouse_mode": "滑鼠模式",
     "mouse_hint": "虛擬指示器常駐 — 不影響本機滑鼠使用",
     "keyboard_mode": "鍵盤模式",
     "keyboard_hint": "點擊預覽畫面取得焦點後，鍵盤輸入轉發到目標視窗",
     "keyboard_note1": "• 一般按鍵 — {keydown} / {keyup}",
     "keyboard_note2": "• 組合鍵 — 自動識別（Ctrl+C 等，Ctrl 先按下再按 C）",
-    "keyboard_note3": "• {esc} 或外部點擊 → 釋放焦點，自動放開所有已按下按鍵",
+    "keyboard_note3": "• 點擊預覽區外部 → 釋放焦點，自動放開所有已按下按鍵",
     "self_target": "自指規避",
     "self_target_hint": "桌面擷取時，映射座標可能落在 GAM 自身視窗",
     "self_target_warn": "紅色警告",
@@ -209,11 +211,16 @@
     "preview_tip": "開始即時預覽",
     "no_preview": "未開始預覽",
     "no_preview_hint": "點擊右上角「預覽」開始即時預覽",
-    "remote_active": "遠端控制中 · 滑鼠{mm} · 鍵盤{km} · Esc 釋放",
-    "remote_hover": "懸停移動游標 · 點擊控制 · 滑鼠{mm}",
-    "desktop_preview": "桌面預覽 · SendInput（強制） · {state}",
+    "remote_active": "遠端控制中 · 滑鼠{mm} · 鍵盤{km}",
+    "remote_hover": "懸停移動游標 · 點擊控制 · 頂欄輸入法鍵入 · 滑鼠{mm}",
+    "desktop_preview": "桌面遠端控制 · 滑鼠{mm} · 鍵盤{km} · {state}",
     "desktop_focused": "點擊/鍵盤已啟用",
-    "desktop_unfocused": "點擊取得焦點",
+    "desktop_unfocused": "在頂欄輸入法框鍵入",
+    "ime_proxy": "Monitor 輸入法",
+    "ime_dock_title": "輸入法",
+    "ime_dock_hint": "焦點在此 · 上屏後 Unicode 映射到上次點擊處",
+    "ime_dock_composing": "組字中… 上屏落入此框後自動映射",
+    "ime_dock_placeholder": "輸入…",
     "self_target_warn": "⚠ 映射目標為 GAM 自身視窗 — 可在設定中切換為「排除視窗」模式",
     "preview_no_mapping": "預覽中 · 按 {hotkey} 或點擊「映射」啟用控制",
     "mouse_seize": "Seize",
@@ -221,7 +228,9 @@
     "mouse_bg": "Bg",
     "key_seize": "Seize",
     "key_sendmsg": "SendMsg",
-    "key_postmsg": "PostMsg"
+    "key_postmsg": "PostMsg",
+    "policy_foreground": "桌面 · 前景",
+    "policy_background": "視窗 · 背景"
   },
 
   "update": {
@@ -346,9 +355,9 @@
   "mouse": {
     "background": {
       "name": "背景",
-      "eng": "PostMessage",
+      "eng": "SendMessage",
       "rec": "推薦",
-      "desc": "全背景，完全不搶滑鼠。虛擬指示器 + PostMessage 轉發點擊，視窗可能亂飛但不影響使用，建議目標視窗最小化"
+      "desc": "全背景，完全不搶真實滑鼠。桌面和視窗均透過位置命中與同步 SendMessage 操作目標控制項；不啟用目標視窗，虛擬圓圈只顯示在真實映射位置"
     },
     "semi": {
       "name": "半背景",
@@ -360,16 +369,16 @@
       "name": "搶佔",
       "eng": "SendInput",
       "rec": "前景",
-      "desc": "前景模式，完全搶佔滑鼠。虛擬指示器 + 即時游標同步，SendInput 合成系統輸入，與真實硬體走相同路徑"
+      "desc": "相容模式，會明確搶佔並移動真實滑鼠。SendInput 合成系統輸入，與真實硬體走相同路徑，僅用於不接受背景訊息的程式"
     }
   },
 
   "keyboard": {
     "postmsg": {
       "name": "PostMsg",
-      "eng": "PostMessage",
+      "eng": "SendMessage",
       "rec": "推薦",
-      "desc": "非同步非阻塞，高效穩定。直接向目標視窗佇列投遞 WM_KEYDOWN/WM_KEYUP 訊息"
+      "desc": "全背景同步投遞。直接向最後點擊的目標控制項分發 WM_KEYDOWN/WM_KEYUP，不啟用目標視窗"
     },
     "sendmsg": {
       "name": "SendMsg",
@@ -387,19 +396,19 @@
 
   "devtools": {
     "test_target": "測試目標",
-    "test_target_desc": "啟動獨立測試視窗，用於驗證輸入映射",
+    "test_target_desc": "啟動 WebView2 多功能測試視窗（網格/按鈕/滾動/拖曳/輸入），經 TCP 回報映射結果與日誌",
     "test_target_launch": "啟動",
     "test_target_close": "關閉",
-    "test_target_launch_tip": "開啟 GAM Test Target 測試視窗，可被 GAM 擷取並測試滑鼠/鍵盤映射",
+    "test_target_launch_tip": "開啟 GAM Test Target（WebView2），可被擷取並測試滑鼠/鍵盤映射",
     "test_target_close_tip": "關閉 GAM Test Target 測試視窗",
 
     "selftest": "映射自檢",
-    "selftest_desc": "自動跑完整流程（選窗→預覽→映射→密集點擊），比對 test_target 回饋校準映射",
+    "selftest_desc": "自動啟動固定尺寸 Test Target → 預覽映射自檢 → 結束後關閉視窗。手動測請用上方「啟動」",
     "selftest_density_tip": "每格採樣密度（N×N 子網格）。越大越細，用時越久。",
     "selftest_density_unit": "/格",
     "selftest_run": "自檢",
     "selftest_running": "執行中",
-    "selftest_run_tip": "一鍵自檢：復用真實使用者操作路徑，全窗密集點擊並比對回饋",
+    "selftest_run_tip": "一鍵自檢：復用真實使用者操作路徑，網格校準 + 互動場景，比對 TCP 回饋",
     "selftest_running_tip": "自檢進行中…",
 
     "frame_dump": "幀儲存",
@@ -445,7 +454,9 @@
 
   "selftest": {
     "title": "映射自檢",
-    "running": "正在掃描點擊並比對回饋… {done}/{total}",
+    "running": "正在{step}並比對回饋… {done}/{total}",
+    "step_grid": "掃描網格",
+    "step_scenarios": "跑互動場景",
     "abort": "中止",
     "close": "關閉",
     "error_prefix": "自檢失敗：{error}",
@@ -457,10 +468,12 @@
     "stat_offset": "偏移向量 px",
     "stat_error": "誤差 均值/最大",
     "heatmap_title": "格子命中率熱力圖（預期格 vs 實收格）",
+    "scenarios_title": "互動場景（右鍵 / 滾輪 / 拖曳 / 按鈕 / 文字）",
     "diag_missed": "• 有未收到回饋的點 → 輸入轉發鏈路可能中斷（檢查滑鼠模式/目標視窗）",
     "diag_large_error": "• 平均像素誤差偏大 → 可能存在座標偏移/縮放/DPI 不匹配",
     "diag_systematic": "• 存在系統性偏移 ({dx},{dy})px → 常數偏移，建議校準原點",
-    "diag_perfect": "• 映射精確，全部命中預期格，像素誤差在取整範圍內 ✓"
+    "diag_scenario_fail": "• 部分互動場景未收到預期回饋 → 檢查對應控制項映射（滾輪/拖曳/輸入）",
+    "diag_perfect": "• 映射精確，網格與互動場景均通過 ✓"
   },
 
   "loading": {
