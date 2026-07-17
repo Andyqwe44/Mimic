@@ -73,3 +73,5 @@ tmp/
 # === Test artifacts ===
 test/frames/*.bgra
 test/video.mp4
+
+scripts/cdn/_last_release_dryrun.log
