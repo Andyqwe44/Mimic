@@ -1,29 +1,40 @@
 # GAM Web Controller
 
-React + Tailwind UI styled like **Game Agent Monitor**. Connects to the agent’s embedded WebSocket (`:9997`).
+React + Tailwind UI styled like **Game Agent Monitor**. Served by standalone **`controller_server.exe`** (not embedded in the agent).
 
-## Flow
+## Topology
 
 ```
-Browser (this UI) --WS:9997--> monitor_app
-  WebCodecs H.264 decode         CONTROL JSON (needs accept_control gate)
+Browser (this UI) --WS--> controller_server --WS--> GAM agent (outbound connect)
+  WebCodecs H.264 decode     relay only           CONTROL JSON + config
 ```
+
+Agent fills **server IP:port** and connects outbound. Browser only talks to the server (LAN or public IP).
 
 ## Dev
 
 ```powershell
+# Terminal 1 — relay + static (after build)
+powershell -File scripts\Build.ps1 -Module controller_server
+.\controller_server\build\controller_server.exe
+
+# Terminal 2 — optional Vite HMR for UI only
 cd controller_web
-npm install
-npm run dev          # http://0.0.0.0:8080 → connect ws://<host>:9997
+npm run dev   # then point browser at vite; WS still to :9997
 ```
 
-Production/static is built by `scripts\Build.ps1` into `monitor_app\build(_dev)\controller\` and served by the agent at `http://<host>:9997`.
+## Settings (server UI)
+
+- **Capture**: WGC (DXGI stream not implemented yet)
+- **Codec**: H.264
+- **Input**: Background PostMessage / Foreground Seize (SendInput)
+
+Changes are pushed to the connected agent as `{"type":"config",...}`.
 
 ## Agent gates
 
-1. **发送画面** — start H.264 push  
-2. **接受控制** — apply mouse/keyboard from this page  
+On the agent PC:
 
-## Note on latency
-
-Agent must use **hardware** H.264 when possible. Soft 1080p encode was ~8 fps / multi-second lag; soft path now scales to 1280 and drops frames under WS backpressure.
+1. **Connect** to this server  
+2. **发送画面** — push H.264  
+3. **接受控制** — apply mouse/keyboard from this page  

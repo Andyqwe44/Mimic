@@ -15,5 +15,7 @@
   "normalSecondaryAccent": "#F97316",
   "devAccent": "#EF4444",
   "devSecondaryAccent": "#22C55E",
-  "locale": "en"
+  "locale": "en",
+  "serverHost": "127.0.0.1",
+  "serverPort": "9997"
 }

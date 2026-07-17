@@ -1,18 +1,16 @@
 /**
- * GAM Controller — React UI matching Game Agent Monitor chrome.
- * WebSocket → agent :9997 · WebCodecs H.264 · atomic input JSON.
+ * GAM Controller — served by controller_server (relay).
+ * Same-origin WebSocket · WebCodecs H.264 · settings → agent via relay.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Cable, Moon, Sun, Unplug } from 'lucide-react'
+import { Cable, Moon, Sun, Unplug, Settings2 } from 'lucide-react'
 
 function defaultWsUrl() {
   const host = window.location.hostname || '127.0.0.1'
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
-  // Served from agent :9997 → same origin WS. Vite :8080 → agent :9997.
-  if (window.location.port === '9997') return `${proto}://${host}:9997`
-  if (window.location.port === '8080' || window.location.port === '')
-    return `${proto}://${host}:9997`
-  return `${proto}://${host}:9997`
+  const port = window.location.port
+  if (port) return `${proto}://${host}:${port}`
+  return `${proto}://${host}`
 }
 
 function annexbHasIdr(u8: Uint8Array) {
@@ -28,15 +26,27 @@ function annexbHasIdr(u8: Uint8Array) {
   return false
 }
 
+type CaptureMode = 'wgc' | 'dxgi'
+type InputMode = 'seize' | 'postmsg'
+
 export function App() {
   const [dark, setDark] = useState(() =>
     window.matchMedia('(prefers-color-scheme: dark)').matches)
-  const [host, setHost] = useState(defaultWsUrl)
   const [status, setStatus] = useState('Disconnected')
   const [connected, setConnected] = useState(false)
+  const [agentOnline, setAgentOnline] = useState(false)
   const [fps, setFps] = useState(0)
   const [dims, setDims] = useState('')
   const [latencyMs, setLatencyMs] = useState<number | null>(null)
+  const [showSettings, setShowSettings] = useState(true)
+
+  const [capture, setCapture] = useState<CaptureMode>('wgc')
+  const [codec] = useState('h264')
+  const [inputMode, setInputMode] = useState<InputMode>('postmsg')
+  const [agentCapture, setAgentCapture] = useState<string | null>(null)
+  const [agentInput, setAgentInput] = useState<string | null>(null)
+  const [gateStream, setGateStream] = useState(false)
+  const [gateControl, setGateControl] = useState(false)
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const wsRef = useRef<WebSocket | null>(null)
@@ -46,7 +56,6 @@ export function App() {
   const framesRef = useRef(0)
   const lastFpsTsRef = useRef(performance.now())
   const buttonDownRef = useRef(false)
-  /** Map agent GetTickCount64-low32 → performance.now() origin (first keyframe). */
   const tickOriginRef = useRef<{ agent: number; local: number } | null>(null)
   const latSumRef = useRef(0)
   const latNRef = useRef(0)
@@ -55,11 +64,15 @@ export function App() {
     document.documentElement.classList.toggle('dark', dark)
   }, [dark])
 
-  const sendAction = useCallback((obj: Record<string, unknown>) => {
+  const sendJson = useCallback((obj: Record<string, unknown>) => {
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return
     ws.send(JSON.stringify(obj))
   }, [])
+
+  const pushConfig = useCallback((c: CaptureMode, i: InputMode) => {
+    sendJson({ type: 'config', capture: c, codec: 'h264', input: i })
+  }, [sendJson])
 
   const closeDecoder = () => {
     try { decoderRef.current?.close() } catch { /* */ }
@@ -98,7 +111,6 @@ export function App() {
         setStatus('Decoder error: ' + e.message)
       },
     })
-    // Baseline Level 4.0 — required for 1080p30 (avc1.42E01E Level 3.0 cannot).
     decoderRef.current.configure({
       codec: 'avc1.42E028',
       optimizeForLatency: true,
@@ -112,6 +124,7 @@ export function App() {
     wsRef.current = null
     closeDecoder()
     setConnected(false)
+    setAgentOnline(false)
     setStatus('Disconnected')
     setFps(0)
     setLatencyMs(null)
@@ -122,7 +135,7 @@ export function App() {
 
   const connect = useCallback(() => {
     disconnect()
-    const url = host.trim()
+    const url = defaultWsUrl()
     setStatus('Connecting…')
     needKeyRef.current = true
     tickOriginRef.current = null
@@ -131,16 +144,42 @@ export function App() {
     wsRef.current = ws
     ws.onopen = () => {
       setConnected(true)
-      setStatus('Connected · waiting for IDR…')
+      setStatus('Connected · waiting for agent…')
+      ws.send(JSON.stringify({ role: 'browser', ver: 1 }))
+      ws.send(JSON.stringify({
+        type: 'config',
+        capture,
+        codec: 'h264',
+        input: inputMode,
+      }))
     }
     ws.onclose = () => {
       setConnected(false)
+      setAgentOnline(false)
       setStatus('Disconnected')
       needKeyRef.current = true
     }
     ws.onerror = () => setStatus('WebSocket error')
     ws.onmessage = (ev) => {
-      if (typeof ev.data === 'string') return
+      if (typeof ev.data === 'string') {
+        try {
+          const msg = JSON.parse(ev.data as string)
+          if (msg.type === 'agent_status') {
+            setAgentOnline(!!msg.online)
+            setStatus(msg.online ? 'Agent online' : 'Waiting for agent…')
+          } else if (msg.type === 'status') {
+            setAgentOnline(true)
+            if (typeof msg.allow_stream === 'boolean') setGateStream(msg.allow_stream)
+            if (typeof msg.accept_control === 'boolean') setGateControl(msg.accept_control)
+            if (typeof msg.capture === 'string') setAgentCapture(msg.capture)
+            if (typeof msg.input === 'string') setAgentInput(msg.input)
+          } else if (msg.type === 'config_ack') {
+            if (typeof msg.capture === 'string') setAgentCapture(msg.capture)
+            if (typeof msg.input === 'string') setAgentInput(msg.input)
+          }
+        } catch { /* ignore */ }
+        return
+      }
       const buf = new Uint8Array(ev.data as ArrayBuffer)
       if (buf.byteLength < 16) return
       const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
@@ -153,8 +192,10 @@ export function App() {
       const decoder = decoderRef.current
       if (!decoder || decoder.state === 'closed') return
       const key = ((flags & 1) !== 0) || annexbHasIdr(annexb)
-      if (needKeyRef.current && !key) return
-      // Drop if decoder already has work — keep glass-to-glass tight.
+      if (needKeyRef.current && !key) {
+        sendJson({ type: 'need_key' })
+        return
+      }
       if (decoder.decodeQueueSize > 0) return
       const now = performance.now()
       if (agentTs) {
@@ -187,17 +228,23 @@ export function App() {
         setStatus('decode: ' + (e instanceof Error ? e.message : String(e)))
       }
     }
-  }, [host, disconnect, ensureDecoder])
+  }, [disconnect, ensureDecoder, capture, inputMode, sendJson])
 
   useEffect(() => () => disconnect(), [disconnect])
+
+  // Auto-connect on load (same-origin server).
+  useEffect(() => {
+    connect()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.repeat) return
-      sendAction({ type: 'keydown', key: e.key, code: e.code })
+      sendJson({ type: 'keydown', key: e.key, code: e.code })
     }
     const onKeyUp = (e: KeyboardEvent) => {
-      sendAction({ type: 'keyup', key: e.key, code: e.code })
+      sendJson({ type: 'keyup', key: e.key, code: e.code })
     }
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keyup', onKeyUp)
@@ -205,7 +252,7 @@ export function App() {
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
     }
-  }, [sendAction])
+  }, [sendJson])
 
   const normFromEvent = (e: React.PointerEvent) => {
     const canvas = canvasRef.current
@@ -220,19 +267,41 @@ export function App() {
     }
   }
 
+  const selectCapture = (c: CaptureMode) => {
+    if (c === 'dxgi') return // stream not implemented
+    setCapture(c)
+    pushConfig(c, inputMode)
+  }
+  const selectInput = (i: InputMode) => {
+    setInputMode(i)
+    pushConfig(capture, i)
+  }
+
   return (
     <div className="h-full flex flex-col bg-bg-primary">
-      {/* Top bar — mirrors GAM TopBar chrome */}
       <header className="shrink-0 h-11 px-3 flex items-center gap-2 border-b border-border bg-bg-secondary">
         <div className="text-sm font-semibold text-text-primary tracking-tight mr-1">
           GAM <span className="text-accent">Controller</span>
         </div>
-        <input
-          className="flex-1 min-w-0 h-8 px-2.5 rounded-md text-xs bg-bg-primary border border-border text-text-primary outline-none focus:ring-1 focus:ring-accent/50"
-          value={host}
-          onChange={(e) => setHost(e.target.value)}
-          spellCheck={false}
-        />
+        <span className={`text-[11px] px-1.5 py-0.5 rounded ${
+          agentOnline ? 'bg-emerald-500/15 text-emerald-500' : 'bg-bg-tertiary text-text-muted'
+        }`}>
+          {agentOnline ? 'Agent online' : 'No agent'}
+        </span>
+        <span className="text-[11px] text-text-tertiary tabular-nums">
+          stream {gateStream ? 'ON' : 'off'} · control {gateControl ? 'ON' : 'off'}
+        </span>
+        <div className="flex-1" />
+        <button
+          type="button"
+          onClick={() => setShowSettings((v) => !v)}
+          className={`h-8 w-8 rounded-md flex items-center justify-center ${
+            showSettings ? 'bg-accent/15 text-accent' : 'text-text-secondary hover:bg-bg-hover'
+          }`}
+          aria-label="Settings"
+        >
+          <Settings2 className="w-4 h-4" />
+        </button>
         <button
           type="button"
           onClick={() => (connected ? disconnect() : connect())}
@@ -255,53 +324,126 @@ export function App() {
         </button>
       </header>
 
-      {/* Stage */}
-      <main className="flex-1 min-h-0 p-3">
-        <div className="h-full rounded-xl bg-bg-secondary ring-1 ring-inset ring-border overflow-hidden flex items-center justify-center relative">
-          <canvas
-            ref={canvasRef}
-            width={640}
-            height={360}
-            className="max-w-full max-h-full bg-black cursor-crosshair touch-none"
-            onContextMenu={(e) => e.preventDefault()}
-            onPointerDown={(e) => {
-              ;(e.target as HTMLCanvasElement).setPointerCapture(e.pointerId)
-              const c = normFromEvent(e)
-              if (!c.in) return
-              buttonDownRef.current = true
-              const button = e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left'
-              sendAction({ type: 'mousedown', button, x_norm: c.x_norm, y_norm: c.y_norm })
-            }}
-            onPointerMove={(e) => {
-              if (!buttonDownRef.current) return
-              const c = normFromEvent(e)
-              if (!c.in) return
-              sendAction({ type: 'move', held: true, button: 'left', x_norm: c.x_norm, y_norm: c.y_norm })
-            }}
-            onPointerUp={(e) => {
-              if (!buttonDownRef.current) return
-              buttonDownRef.current = false
-              const c = normFromEvent(e)
-              const button = e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left'
-              sendAction({ type: 'mouseup', button, x_norm: c.x_norm, y_norm: c.y_norm })
-            }}
-          />
-          {!connected && (
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="text-center space-y-1 px-4">
-                <div className="text-sm text-text-muted">Not connected</div>
-                <div className="text-xs text-text-tertiary">
-                  Open stream gate on agent, then Connect
+      <div className="flex-1 min-h-0 flex">
+        <main className="flex-1 min-w-0 p-3">
+          <div className="h-full rounded-xl bg-bg-secondary ring-1 ring-inset ring-border overflow-hidden flex items-center justify-center relative">
+            <canvas
+              ref={canvasRef}
+              width={640}
+              height={360}
+              className="max-w-full max-h-full bg-black cursor-crosshair touch-none"
+              onContextMenu={(e) => e.preventDefault()}
+              onPointerDown={(e) => {
+                ;(e.target as HTMLCanvasElement).setPointerCapture(e.pointerId)
+                const c = normFromEvent(e)
+                if (!c.in) return
+                buttonDownRef.current = true
+                const button = e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left'
+                sendJson({ type: 'mousedown', button, x_norm: c.x_norm, y_norm: c.y_norm })
+              }}
+              onPointerMove={(e) => {
+                if (!buttonDownRef.current) return
+                const c = normFromEvent(e)
+                if (!c.in) return
+                sendJson({ type: 'move', held: true, button: 'left', x_norm: c.x_norm, y_norm: c.y_norm })
+              }}
+              onPointerUp={(e) => {
+                if (!buttonDownRef.current) return
+                buttonDownRef.current = false
+                const c = normFromEvent(e)
+                const button = e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left'
+                sendJson({ type: 'mouseup', button, x_norm: c.x_norm, y_norm: c.y_norm })
+              }}
+            />
+            {(!connected || !agentOnline) && (
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="text-center space-y-1 px-4">
+                  <div className="text-sm text-text-muted">
+                    {!connected ? 'Not connected to relay' : 'Waiting for agent'}
+                  </div>
+                  <div className="text-xs text-text-tertiary">
+                    On the agent PC: connect to this server, then open the stream gate
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
-        </div>
-      </main>
+            )}
+          </div>
+        </main>
 
-      {/* Bottom status — mirrors GAM BottomBar tone */}
+        {showSettings && (
+          <aside className="w-64 shrink-0 border-l border-border bg-bg-secondary p-3 space-y-4 overflow-y-auto">
+            <div>
+              <div className="text-xs font-semibold text-text-secondary mb-2">Capture</div>
+              <div className="flex flex-col gap-1.5">
+                {(['wgc', 'dxgi'] as CaptureMode[]).map((m) => {
+                  const disabled = m === 'dxgi'
+                  const active = capture === m
+                  return (
+                    <button
+                      key={m}
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => selectCapture(m)}
+                      className={`text-left text-xs px-2.5 py-2 rounded-lg border transition-colors disabled:opacity-40 ${
+                        active
+                          ? 'border-accent bg-accent/10 text-text-primary'
+                          : 'border-border bg-bg-primary text-text-secondary hover:bg-bg-hover'
+                      }`}
+                    >
+                      {m.toUpperCase()}
+                      {disabled && <span className="ml-1 text-text-muted">(stream N/A)</span>}
+                      {agentCapture && active && (
+                        <span className="block text-[10px] text-text-tertiary mt-0.5">
+                          agent: {agentCapture}
+                        </span>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-text-secondary mb-2">Codec</div>
+              <div className="text-xs px-2.5 py-2 rounded-lg border border-accent bg-accent/10">
+                H.264 <span className="text-text-muted">({codec})</span>
+              </div>
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-text-secondary mb-2">Input</div>
+              <div className="flex flex-col gap-1.5">
+                {([
+                  { v: 'postmsg' as InputMode, label: 'Background (PostMessage)' },
+                  { v: 'seize' as InputMode, label: 'Foreground (Seize / SendInput)' },
+                ]).map((m) => {
+                  const active = inputMode === m.v
+                  return (
+                    <button
+                      key={m.v}
+                      type="button"
+                      onClick={() => selectInput(m.v)}
+                      className={`text-left text-xs px-2.5 py-2 rounded-lg border transition-colors ${
+                        active
+                          ? 'border-accent bg-accent/10 text-text-primary'
+                          : 'border-border bg-bg-primary text-text-secondary hover:bg-bg-hover'
+                      }`}
+                    >
+                      {m.label}
+                      {agentInput && active && (
+                        <span className="block text-[10px] text-text-tertiary mt-0.5">
+                          agent: {agentInput}
+                        </span>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          </aside>
+        )}
+      </div>
+
       <footer className="shrink-0 h-8 px-3 flex items-center justify-between border-t border-border bg-bg-secondary text-[11px] text-text-tertiary">
-        <span className="truncate">{status}{dims && connected ? '' : ''}</span>
+        <span className="truncate">{status}</span>
         <span className="shrink-0 tabular-nums">
           {connected ? `${fps} fps` : '—'}
           {latencyMs != null ? ` · ~${latencyMs} ms` : ''}

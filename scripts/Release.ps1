@@ -1,39 +1,35 @@
-# Release.ps1 — one-command release pipeline (all PowerShell).
+# Release.ps1 — build → CDN shelf → thin Setups → verify → git (source only) → Gitee (2 exes).
 #
-# Replaces release.sh + build_release.cmd. The version is read from version.h
-# (铁律 8, single source), so bumping that file is the only manual edit.
+#   powershell -File scripts\Release.ps1
+#   powershell -File scripts\Release.ps1 -DryRun
 #
-#   powershell -File scripts\Release.ps1            # full: build -> verify -> push -> Gitee
-#   powershell -File scripts\Release.ps1 -DryRun    # build -> verify only (no git, no publish)
-#
-# Chain: frontend(npm) -> native build(Build.ps1) -> assemble release\ ->
-#        version.json -> installer(ISCC) -> isolated verify -> git push -> Gitee -> raw check.
+# Binaries live on http://47.107.43.5/mimic/ — NOT in git.
+# Gitee Release attaches only MimicClient_Setup + MimicServer_Setup (thin downloaders).
 
 [CmdletBinding()]
 param(
-    [switch]$DryRun,        # skip git push + Gitee publish (build + verify only)
-    [switch]$Interactive    # human Y/N at the verify gate instead of log polling
+    [switch]$DryRun,
+    [switch]$Interactive,
+    [switch]$SkipVerify   # skip isolated Verify.ps1 (CDN-only dry runs)
 )
 
 . "$PSScriptRoot\lib\Common.ps1"
 
 $root = Get-RepoRoot
 $ver = Get-AppVersion
-Write-Step "Release v$ver$(if ($DryRun) { ' (dry-run: no git, no publish)' })"
+$cdnBase = 'http://47.107.43.5/mimic'
+Write-Step "Release v$ver$(if ($DryRun) { ' (dry-run: no git, no Gitee)' })"
 
-# 1. Frontend — before the native build; monitor_app stages dist into build\frontend.
+# 1. Frontend
 Write-Step 'frontend (npm run build)'
 Push-Location (Join-Path $root 'monitor_web')
 try { npm run build; if ($LASTEXITCODE) { throw 'npm build failed' } } finally { Pop-Location }
 Write-Ok 'dist'
 
-# 2. Native modules — one VS Dev Shell builds libs + app and stages
-#    monitor_app\build\{bin,frontend,config} (the package layout). Throws on error.
+# 2. Native
 & "$PSScriptRoot\Build.ps1" -Module all
 
-# 3. Assemble release\GameAgentMonitor from monitor_app\build\{bin,frontend,config}.
-#    Copy only those three subdirs — NOT build\ root, which also holds loose
-#    compile artifacts (app.res + *.obj) that must not ship in the package.
+# 3. Assemble local release\GameAgentMonitor (CDN source; gitignored)
 Write-Step 'assemble release'
 $rel = Join-Path $root 'release\GameAgentMonitor'
 if (Test-Path $rel) { Remove-Item -Recurse -Force $rel }
@@ -43,9 +39,6 @@ foreach ($sub in 'bin', 'frontend', 'config') {
 }
 Write-Ok 'release\GameAgentMonitor'
 
-# 3b. Normalize text files to LF before hashing. Gitee/GitHub raw serve git blobs
-#     as LF; a CRLF checkout would make version.json sha256 disagree with downloads
-#     (seen on config/settings.default.json: 451 CRLF vs 432 LF → update fails).
 Write-Step 'normalize release EOL (LF)'
 $textExt = @('.json', '.html', '.css', '.js', '.mjs', '.cjs', '.map', '.txt', '.md', '.svg', '.xml')
 $nFix = 0
@@ -64,85 +57,88 @@ Get-ChildItem -Path $rel -Recurse -File | Where-Object {
 }
 Write-Ok "LF-normalized $nFix file(s)"
 
-# 4. version.json (SHA256 manifest).
-# Schema 2 (default): 0.3.31 jump-pad clients (KNOWN_SCHEMA=2) can still incremental-update.
-# Flip to -Schema 3 only after the fleet is on >=0.3.32 (otherwise they get needs_full_installer).
-$migMsg = 'Repo migrated to mimic. After install, click Check Update again. Multi-round manual updates are required.'
-if ($ver -eq '0.3.32' -or $ver -eq '0.3.31') {
-    # UTF-8 via Base64 so the script stays ASCII-safe under Windows PowerShell 5.1.
-    $migMsg = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(
-        '5LuT5bqT5bey6L+B56e75YiwIG1pbWlj44CC5pys5qyh5Y+v6IO95piv6Lez5p2/5Y2H57qn55qE5LiA5q2l77ya5a6J6KOF5a6M5oiQ5ZCO6K+35YaN5qyh54K55Ye744CM5qOA5p+l5pu05paw44CN44CC6ZyA6KaB5aSa6L2u5omL5Yqo5pON5L2c5omN6IO95Y2H5Yiw5pyA5paw54mI77yM5Y+q5pu05paw5LiA5qyh5LiN562J5LqO5bey5Yiw5pyA5paw44CC'))
-}
-& "$PSScriptRoot\New-VersionJson.ps1" -ReleaseDir $rel -Version $ver -Schema 2 -JumpPad '0.3.31' -Message $migMsg
+# 4. version.json (CDN download_base / sources)
+& "$PSScriptRoot\New-VersionJson.ps1" -ReleaseDir $rel -Version $ver -Schema 3 -JumpPad '0.3.31'
 
-# 5. Installer (Inno Setup).
-Write-Step 'installer (ISCC)'
+# 5. Pack MimicServer tree + push both shelves to Aliyun CDN (must be live before thin Setup)
+Write-Step 'pack MimicServer'
+& "$PSScriptRoot\Pack-MimicServer.ps1" -Version $ver
+Write-Step 'publish CDN'
+& "$PSScriptRoot\Publish-Cdn.ps1" -Version $ver
+Write-Ok 'CDN live'
+
+# 6. Thin installers (download payload.zip at install time)
+Write-Step 'thin installers (ISCC)'
 $iscc = 'C:\Program Files\Inno Setup 6\ISCC.exe'
-if (Test-Path $iscc) {
-    & $iscc "/DMyAppVersion=$ver" (Join-Path $root 'installer\setup.iss') | Out-Null
-    if ($LASTEXITCODE) { Write-Warn2 'ISCC failed' } else { Write-Ok "GameAgentMonitor_Setup_v$ver.exe" }
-}
-else { Write-Warn2 'Inno Setup 6 not found - installer skipped' }
+$clientSetup = Join-Path $root "release\MimicClient_Setup_v$ver.exe"
+$serverSetup = Join-Path $root "release\MimicServer_Setup_v$ver.exe"
+if (-not (Test-Path $iscc)) { throw 'Inno Setup 6 not found' }
+& $iscc "/DMyAppVersion=$ver" (Join-Path $root 'installer\setup.iss') | Out-Null
+if ($LASTEXITCODE -or -not (Test-Path $clientSetup)) { throw 'MimicClient_Setup ISCC failed' }
+Write-Ok (Split-Path $clientSetup -Leaf)
+& $iscc "/DMyAppVersion=$ver" (Join-Path $root 'installer\setup_server.iss') | Out-Null
+if ($LASTEXITCODE -or -not (Test-Path $serverSetup)) { throw 'MimicServer_Setup ISCC failed' }
+Write-Ok (Split-Path $serverSetup -Leaf)
 
-# 6. Isolated verify gate - run as a CHILD process so its exit code is isolated
-#    (a bare exit in the same runspace would kill this script).
-Write-Step 'isolated verify (gate)'
-$vArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "$PSScriptRoot\Verify.ps1", '-Version', $ver)
-if ($Interactive) { $vArgs += '-Interactive' }
-& powershell.exe @vArgs
-if ($LASTEXITCODE -ne 0) { throw 'isolated verification failed - nothing pushed, nothing published' }
+# 7. Isolated verify (optional)
+if (-not $SkipVerify) {
+    Write-Step 'isolated verify (gate)'
+    $vArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "$PSScriptRoot\Verify.ps1", '-Version', $ver)
+    if ($Interactive) { $vArgs += '-Interactive' }
+    & powershell.exe @vArgs
+    if ($LASTEXITCODE -ne 0) { throw 'isolated verification failed - nothing pushed, nothing published' }
+} else {
+    Write-Warn2 'SkipVerify — isolated Verify.ps1 skipped'
+}
 
 if ($DryRun) {
-    Write-Host "`n==================== dry-run $ver OK (built + verified; not published) ====================" -ForegroundColor Green
+    Write-Host "`n==================== dry-run $ver OK (CDN + setups; not published) ====================" -ForegroundColor Green
+    Write-Host "  CDN:    $cdnBase/client/version.json"
+    Write-Host "  Client: $clientSetup"
+    Write-Host "  Server: $serverSetup"
     return
 }
 
-# 7. Git commit + tag + push. Native git writes progress/banners to stderr; under
-#    $ErrorActionPreference='Stop' that becomes a terminating RemoteException, so
-#    relax it here and check $LASTEXITCODE explicitly on the pushes that matter.
-#    `git add -A` folds source + docs into the commit (the release binaries are
-#    already tracked); `-f` force-adds the release payload past *.dll/*.exe ignores.
-Write-Step 'git commit + tag + push'
+# 8. Git — source only (release/ is gitignored)
+Write-Step 'git commit + tag + push (source only)'
 $eap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
 try {
     git add -A
-    git add -f release\GameAgentMonitor monitor_app\src\version.h installer\setup.iss
-    git commit -m "release: v$ver" 2>&1 | Write-Host   # no-op if nothing staged; fine
-    git tag -f "v$ver" 2>&1 | Write-Host               # (re)create local tag
+    git add -u
+    git commit -m "release: v$ver (CDN shelf; thin setups)" 2>&1 | Write-Host
+    git tag -f "v$ver" 2>&1 | Write-Host
     git push origin main 2>&1 | Write-Host
     if ($LASTEXITCODE) { throw "git push main failed (exit $LASTEXITCODE)" }
-    git push -f origin "refs/tags/v${ver}" 2>&1 | Write-Host   # force: overwrite a stale remote tag
+    git push -f origin "refs/tags/v${ver}" 2>&1 | Write-Host
     if ($LASTEXITCODE) { throw "git tag push failed (exit $LASTEXITCODE)" }
 
-    # Best-effort GitHub mirror sync (origin=Gitee mimic is source of truth).
-    # Failure must NOT block the Gitee release — China networks may block github.com.
     git push github main 2>&1 | Write-Host
     if ($LASTEXITCODE) {
         Write-Warn2 "git push github main failed (exit $LASTEXITCODE) — Gitee release continues"
-    } else {
-        Write-Ok 'pushed github main'
-    }
+    } else { Write-Ok 'pushed github main' }
     git push -f github "refs/tags/v${ver}" 2>&1 | Write-Host
     if ($LASTEXITCODE) {
         Write-Warn2 "git push github tag failed (exit $LASTEXITCODE) — Gitee release continues"
-    } else {
-        Write-Ok "pushed github v$ver"
-    }
+    } else { Write-Ok "pushed github v$ver" }
 }
 finally { $ErrorActionPreference = $eap }
 Write-Ok "pushed origin main + v$ver"
 
-# 8. Publish the Gitee Release + installer.
+# 9. Gitee Release — only the two thin Setups
 & "$PSScriptRoot\Publish.ps1" -Version $ver
 
-# 9. Verify the raw version.json URL resolves (302 -> 200) with the right version.
-Write-Step 'verify raw version.json'
-$u = "https://gitee.com/Andyqwe44/mimic/raw/v$ver/release/GameAgentMonitor/version.json"
+# 10. Verify CDN manifest
+Write-Step 'verify CDN version.json'
 try {
-    $r = Invoke-RestMethod -Uri $u -Method Get
-    if ($r.app -eq $ver) { Write-Ok "raw 200, app=$($r.app)" } else { Write-Warn2 "raw app mismatch: $($r.app)" }
+    $r = Invoke-RestMethod -Uri "$cdnBase/client/version.json" -Method Get -TimeoutSec 30
+    if ($r.app -eq $ver) { Write-Ok "CDN 200, app=$($r.app)" } else { Write-Warn2 "CDN app mismatch: $($r.app)" }
+    if ($r.download_base -notlike '*47.107.43.5*') {
+        Write-Warn2 "download_base unexpected: $($r.download_base)"
+    }
 }
-catch { Write-Warn2 "raw URL check failed: $_" }
+catch { Write-Warn2 "CDN URL check failed: $_" }
 
 Write-Host "`n==================== release $ver DONE ====================" -ForegroundColor Green
-Write-Host "  https://gitee.com/Andyqwe44/mimic/releases/download/v$ver/GameAgentMonitor_Setup_v$ver.exe"
+Write-Host "  CDN:    $cdnBase/client/"
+Write-Host "  Client: https://gitee.com/Andyqwe44/mimic/releases/download/v$ver/MimicClient_Setup_v$ver.exe"
+Write-Host "  Server: https://gitee.com/Andyqwe44/mimic/releases/download/v$ver/MimicServer_Setup_v$ver.exe"

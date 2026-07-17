@@ -10,14 +10,17 @@ export function StreamGatesPanel({
   onToggleStream,
   onToggleControl,
   targetTitle,
+  serverConnected = false,
 }: {
   streamOn: boolean
   controlOn: boolean
   onToggleStream: () => void
   onToggleControl: () => void
   targetTitle: string
+  serverConnected?: boolean
 }) {
   const { t } = useTranslation()
+  const streamDisabled = !serverConnected && !streamOn
 
   return (
     <div className="rounded-xl bg-bg-secondary ring-1 ring-inset ring-border overflow-hidden">
@@ -31,12 +34,19 @@ export function StreamGatesPanel({
           {t('gates.target')}: {targetTitle}
         </div>
 
+        {!serverConnected && (
+          <div className="text-[11px] text-amber-500 bg-amber-500/10 rounded-lg px-2 py-1.5">
+            {t('gates.need_server')}
+          </div>
+        )}
+
         <div className="flex flex-col gap-2">
-          <Tooltip text={t('monitor.stream_gate_tip')}>
+          <Tooltip text={streamDisabled ? t('gates.need_server') : t('monitor.stream_gate_tip')}>
             <button
               type="button"
+              disabled={streamDisabled}
               onClick={onToggleStream}
-              className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+              className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                 streamOn
                   ? 'bg-accent/15 text-accent ring-1 ring-accent/40'
                   : 'bg-bg-tertiary text-text-secondary hover:bg-bg-hover'

@@ -41,10 +41,15 @@
     "disconnect_tip": "中斷目前視窗連線，回到桌面",
     "window_title": "視窗標題",
     "window_title_tip": "已選擇的目標視窗（唯讀，請用「選擇」變更）",
-    "ip_tip": "AI 模型伺服器 IP 位址",
-    "port_tip": "埠號",
+    "ip_tip": "控制伺服端 IP（controller_server）",
+    "port_tip": "控制伺服端埠（預設 9997）",
     "ip_placeholder": "IP 位址",
     "port_placeholder": "埠",
+    "connect": "連線",
+    "connect_tip": "連線到控制伺服端，用於推送畫面與接收操作",
+    "disconnect_server": "斷開",
+    "disconnect_server_tip": "斷開與控制伺服端的連線",
+    "server_on": "已連伺服端",
     "entire_desktop": "整個桌面",
     "entire_desktop_n": "整個桌面 (D{n})",
     "category_desktop": "桌面",
@@ -246,7 +251,8 @@
   "gates": {
     "title": "遠端閘門",
     "target": "目標",
-    "hint": "畫面發往控制端網頁（:9997）。\n兩閘預設關閉；須分別開啟才推流 / 執行遠端鍵鼠。"
+    "need_server": "請先在連線面板連上控制伺服端",
+    "hint": "先連線控制伺服端，再分別開啟推流 / 接受控制。\n捕獲與輸入方式在伺服端網頁設定。"
   },
 
   "update": {

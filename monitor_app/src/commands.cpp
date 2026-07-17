@@ -13,7 +13,8 @@
 #include "version.h"
 #include "sha256_util.h"
 #include "update_verify.h"
-#include "ws_server.h"
+#include "ws_client.h"
+#include "peer_session.h"
 #include "h264_encoder.h"
 #include <d3d11.h>
 #include "../../logger/logger.h"
@@ -468,8 +469,16 @@ static std::atomic<bool> g_allow_stream{false};
 static std::atomic<bool> g_accept_control{false};
 static std::atomic<uint64_t> g_stream_session{0};
 
+// Remote config from controller_server (browser settings UI).
+static std::mutex g_remote_cfg_mtx;
+static std::string g_remote_capture = "wgc";   // wgc | dxgi
+static std::string g_remote_codec = "h264";
+static std::string g_remote_input = "postmsg"; // seize | postmsg
+
 // Fwd: remote CONTROL_MSG → send_input (defined with input dispatch).
 static std::string execute_remote_control_json(const std::string& actionJson);
+static void agent_push_status();
+static void on_server_text(const std::string& json);
 
 // ── TCP server (port 9999): H.264 NAL out + CONTROL_MSG JSON in ──
 #include "../../protocol/protocol.h"
@@ -649,15 +658,15 @@ static void scale_bgra_nn(const uint8_t* src, int sw, int sh,
 
 static void broadcast_h264_all(const H264Packet& pkt) {
     tcp_broadcast_h264(pkt);
-    ws_broadcast_h264(pkt);
+    ws_client_send_h264(pkt);
+    peer_send_h264(pkt);
 }
 
 static bool remote_has_viewers() {
-    {
-        std::lock_guard<std::mutex> lk(g_tcp_mutex);
-        if (!g_tcp_clients.empty()) return true;
-    }
-    return ws_server_has_clients();
+    if (peer_media_ready() && peer_role() == PeerRole::Controlled) return true;
+    if (ws_client_connected()) return true;
+    std::lock_guard<std::mutex> lk(g_tcp_mutex);
+    return !g_tcp_clients.empty();
 }
 
 // WGC worker: GPU texture → H.264 → TCP/WS.
@@ -1061,28 +1070,47 @@ static std::string cmd_capture_stream_stop() {
 static std::string cmd_set_stream_gate(const std::string& args) {
     bool enabled = json_get_bool(args, "enabled");
     if (!enabled) {
-        if (g_streaming) return cmd_capture_stream_stop();
-        g_allow_stream.store(false);
-        return R"({"ok":true,"allow_stream":false})";
+        std::string r;
+        if (g_streaming) r = cmd_capture_stream_stop();
+        else {
+            g_allow_stream.store(false);
+            r = R"({"ok":true,"allow_stream":false})";
+        }
+        agent_push_status();
+        return r;
+    }
+    if (!ws_client_connected() && !(peer_role() == PeerRole::Controlled && peer_media_ready())) {
+        // Peer controlled may stream before media socket is up — allow if Controlled.
+        if (peer_role() != PeerRole::Controlled) {
+            return R"({"ok":false,"error":"not connected to controller_server or peer session"})";
+        }
     }
     uint64_t hwnd = json_get_uint64(args, "hwnd");
     std::string method = json_get_str(args, "method");
-    if (method.empty()) method = (hwnd == 0) ? "wgc" : "wgc";
+    if (method.empty()) {
+        std::lock_guard<std::mutex> lk(g_remote_cfg_mtx);
+        method = g_remote_capture;
+    }
+    if (method.empty()) method = "wgc";
+    std::string r;
     if (g_streaming) {
         g_allow_stream.store(true);
-        return R"({"ok":true,"allow_stream":true})";
+        r = R"({"ok":true,"allow_stream":true})";
+    } else {
+        r = cmd_capture_stream_start(hwnd, method, "h264");
     }
-    return cmd_capture_stream_start(hwnd, method, "h264");
+    agent_push_status();
+    return r;
 }
 
 static std::string cmd_set_control_gate(const std::string& args) {
     bool enabled = json_get_bool(args, "enabled");
     g_accept_control.store(enabled);
-    // Optional: remember target hwnd without starting stream.
     if (args.find("\"hwnd\"") != std::string::npos)
         g_control_hwnd.store(json_get_uint64(args, "hwnd"));
     LOG("cmd", "accept_control=%d hwnd=%llu", (int)enabled,
         (unsigned long long)g_control_hwnd.load());
+    agent_push_status();
     return enabled ? R"({"ok":true,"accept_control":true})"
                    : R"({"ok":true,"accept_control":false})";
 }
@@ -1557,12 +1585,15 @@ static std::string execute_remote_control_json(const std::string& actionJson) {
         return "{\"ok\":false,\"error\":\"accept_control gate closed\"}";
     }
     uint64_t hwnd = g_control_hwnd.load();
-    const char* method = (hwnd == 0) ? "sendinput" : "sendmessage";
+    std::string input_mode;
+    {
+        std::lock_guard<std::mutex> lk(g_remote_cfg_mtx);
+        input_mode = g_remote_input;
+    }
+    // seize → SendInput (foreground); postmsg → PostMessage (background).
+    const char* method = (input_mode == "seize") ? "sendinput" : "postmessage";
 
-    // Strip caller hwnd/method if present, then inject authoritative values.
     std::string body = actionJson;
-    // Minimal merge: wrap fields into a fresh args object via string concat of known keys.
-    // actionJson is expected to be a flat JSON object with type/x_norm/...
     if (body.empty() || body[0] != '{')
         return "{\"ok\":false,\"error\":\"control message must be a JSON object\"}";
 
@@ -1570,9 +1601,111 @@ static std::string execute_remote_control_json(const std::string& actionJson) {
     snprintf(prefix, sizeof(prefix),
              "{\"hwnd\":%llu,\"method\":\"%s\",",
              (unsigned long long)hwnd, method);
-    // Replace leading '{' with prefix (already contains '{')
     std::string merged = std::string(prefix) + body.substr(1);
     return cmd_send_input(merged);
+}
+
+static void agent_push_status() {
+    if (!ws_client_connected()) return;
+    std::string capture, codec, input;
+    {
+        std::lock_guard<std::mutex> lk(g_remote_cfg_mtx);
+        capture = g_remote_capture;
+        codec = g_remote_codec;
+        input = g_remote_input;
+    }
+    char buf[384];
+    snprintf(buf, sizeof(buf),
+             "{\"type\":\"status\",\"allow_stream\":%s,\"accept_control\":%s,"
+             "\"capture\":\"%s\",\"codec\":\"%s\",\"input\":\"%s\",\"hwnd\":%llu}",
+             g_allow_stream.load() ? "true" : "false",
+             g_accept_control.load() ? "true" : "false",
+             capture.c_str(), codec.c_str(), input.c_str(),
+             (unsigned long long)g_control_hwnd.load());
+    ws_client_send_text(buf);
+}
+
+static void on_server_text(const std::string& json) {
+    if (json.find("\"type\":\"need_key\"") != std::string::npos ||
+        json.find("\"type\": \"need_key\"") != std::string::npos) {
+        g_h264_need_key.store(true);
+        return;
+    }
+    if (json.find("\"type\":\"config\"") != std::string::npos ||
+        json.find("\"type\": \"config\"") != std::string::npos) {
+        std::string capture = json_get_str(json, "capture");
+        std::string codec = json_get_str(json, "codec");
+        std::string input = json_get_str(json, "input");
+        {
+            std::lock_guard<std::mutex> lk(g_remote_cfg_mtx);
+            if (!capture.empty()) g_remote_capture = capture;
+            if (!codec.empty()) g_remote_codec = codec;
+            if (!input.empty()) g_remote_input = input;
+        }
+        LOG("cmd", "remote config capture=%s codec=%s input=%s",
+            capture.empty() ? "-" : capture.c_str(),
+            codec.empty() ? "-" : codec.c_str(),
+            input.empty() ? "-" : input.c_str());
+        // ACK with applied values
+        char ack[256];
+        {
+            std::lock_guard<std::mutex> lk(g_remote_cfg_mtx);
+            snprintf(ack, sizeof(ack),
+                     "{\"type\":\"config_ack\",\"ok\":true,\"capture\":\"%s\","
+                     "\"codec\":\"%s\",\"input\":\"%s\"}",
+                     g_remote_capture.c_str(), g_remote_codec.c_str(),
+                     g_remote_input.c_str());
+        }
+        ws_client_send_text(ack);
+        agent_push_status();
+        return;
+    }
+    // Control action from browser (via relay)
+    std::string result = execute_remote_control_json(json);
+    if (result.find("\"ok\":false") != std::string::npos)
+        LOG_WARN("cmd", "control rejected: %s", result.c_str());
+}
+
+static std::string cmd_connect_server(const std::string& args) {
+    std::string host = json_get_str(args, "host");
+    int port = json_get_int(args, "port");
+    if (host.empty()) host = "127.0.0.1";
+    if (port <= 0 || port > 65535) port = 9997;
+    ws_client_set_handlers(on_server_text, []() {
+        LOG("cmd", "controller_server link closed");
+        agent_push_status(); // no-op if disconnected
+    });
+    if (!ws_client_connect(host, (uint16_t)port))
+        return "{\"ok\":false,\"error\":\"connect failed\"}";
+    agent_push_status();
+    char buf[160];
+    snprintf(buf, sizeof(buf),
+             "{\"ok\":true,\"connected\":true,\"host\":\"%s\",\"port\":%d}",
+             host.c_str(), port);
+    return buf;
+}
+
+static std::string cmd_disconnect_server() {
+    ws_client_disconnect();
+    return R"({"ok":true,"connected":false})";
+}
+
+static std::string cmd_get_server_status() {
+    char buf[256];
+    std::string capture, input;
+    {
+        std::lock_guard<std::mutex> lk(g_remote_cfg_mtx);
+        capture = g_remote_capture;
+        input = g_remote_input;
+    }
+    snprintf(buf, sizeof(buf),
+             "{\"ok\":true,\"connected\":%s,\"allow_stream\":%s,\"accept_control\":%s,"
+             "\"capture\":\"%s\",\"input\":\"%s\"}",
+             ws_client_connected() ? "true" : "false",
+             g_allow_stream.load() ? "true" : "false",
+             g_accept_control.load() ? "true" : "false",
+             capture.c_str(), input.c_str());
+    return buf;
 }
 
 // Test-harness only: keep GAM above targets while preview-mapping so same-box
@@ -1997,8 +2130,7 @@ static const int KNOWN_SCHEMA = 3;
 // tried first on subsequent runs — so the server can rotate hosts without a
 // client rebuild. These are factory defaults only.
 static const char* BOOTSTRAP_MANIFEST_URLS[] = {
-    "https://gitee.com/Andyqwe44/mimic/raw/main/release/GameAgentMonitor/version.json",
-    "https://raw.githubusercontent.com/Andyqwe44/Mimic/main/release/GameAgentMonitor/version.json",
+    "http://47.107.43.5/mimic/client/version.json",
     nullptr
 };
 
@@ -2032,15 +2164,9 @@ static void build_manifest_urls(std::vector<std::string>& urls) {
     char tagEnv[128] = {};
     DWORD tagEnvLen = GetEnvironmentVariableA("GAM_UPDATE_TAG", tagEnv, sizeof(tagEnv));
     if (tagEnvLen > 0 && tagEnvLen < sizeof(tagEnv)) {
-        std::string u1 = "https://gitee.com/Andyqwe44/mimic/raw/";
-        u1 += tagEnv;
-        u1 += "/release/GameAgentMonitor/version.json";
-        urls.push_back(u1);
-        std::string u2 = "https://raw.githubusercontent.com/Andyqwe44/Mimic/";
-        u2 += tagEnv;
-        u2 += "/release/GameAgentMonitor/version.json";
-        urls.push_back(u2);
-        LOG_WARN("cmd", "check_update: GAM_UPDATE_TAG override -> %s", tagEnv);
+        // Tag override still hits the live CDN shelf (git no longer hosts binaries).
+        urls.push_back("http://47.107.43.5/mimic/client/version.json");
+        LOG_WARN("cmd", "check_update: GAM_UPDATE_TAG=%s (CDN version.json)", tagEnv);
         return;
     }
 
@@ -2212,8 +2338,7 @@ static std::string cmd_check_update(bool forceFull) {
                                 if (!first) diffJson += ","; first = false;
                                 std::string dlUrl = !downloadBase.empty()
                                     ? downloadBase + filePath
-                                    : ("https://gitee.com/Andyqwe44/mimic/raw/"
-                                        + tag + "/release/GameAgentMonitor/" + filePath);
+                                    : (std::string("http://47.107.43.5/mimic/client/") + filePath);
                                 diffJson += "{\"path\":\"" + filePath + "\"";
                                 diffJson += ",\"v\":\"" + remoteVer + "\"";
                                 diffJson += ",\"sha256\":\"" + remoteSha + "\"";
@@ -2752,6 +2877,65 @@ std::string dispatch_command(const std::string& json) {
     else if (cmd == "set_stream_gate") result = cmd_set_stream_gate(args);
     else if (cmd == "set_control_gate") result = cmd_set_control_gate(args);
     else if (cmd == "get_gates") result = cmd_get_gates();
+    else if (cmd == "connect_server") result = cmd_connect_server(args);
+    else if (cmd == "disconnect_server") result = cmd_disconnect_server();
+    else if (cmd == "get_server_status") result = cmd_get_server_status();
+    else if (cmd == "peer_register") {
+        result = peer_register(json_get_str(args, "url"), json_get_str(args, "user"),
+                               json_get_str(args, "password"));
+    }
+    else if (cmd == "peer_login") {
+        result = peer_login(json_get_str(args, "url"), json_get_str(args, "user"),
+                            json_get_str(args, "password"), json_get_str(args, "deviceName"));
+    }
+    else if (cmd == "peer_logout") { peer_logout(); result = R"({"ok":true})"; }
+    else if (cmd == "peer_status") result = peer_status_json();
+    else if (cmd == "peer_invite") result = peer_invite(json_get_str(args, "targetDeviceId"));
+    else if (cmd == "peer_accept") result = peer_accept(json_get_str(args, "fromDeviceId"));
+    else if (cmd == "peer_reject") result = peer_reject(json_get_str(args, "fromDeviceId"));
+    else if (cmd == "peer_hangup") result = peer_hangup();
+    else if (cmd == "peer_request_windows") result = peer_request_windows();
+    else if (cmd == "peer_set_target") {
+        result = peer_set_remote_target(json_get_uint64(args, "hwnd"), json_get_str(args, "title"));
+    }
+    else if (cmd == "peer_send_control") {
+        // args is the action object itself or {action:{...}}
+        std::string action = json_get_obj(args, "action");
+        if (action.empty() || action == "{}") action = args;
+        result = peer_send_control(action);
+    }
+    else if (cmd == "peer_set_control_mode") result = peer_set_control_mode(json_get_str(args, "mode"));
+    else if (cmd == "peer_request_keyframe") result = peer_request_keyframe();
+    else if (cmd == "peer_get_frame") {
+        std::vector<uint8_t> frame;
+        std::string meta = peer_take_last_frame(frame);
+        if (frame.size() < 16) result = meta;
+        else {
+            // Return base64 for WebCodecs in monitor_web (LAN frames).
+            static const char* B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+            std::string b64;
+            b64.reserve(((frame.size() + 2) / 3) * 4);
+            for (size_t i = 0; i < frame.size(); i += 3) {
+                uint32_t n = ((uint32_t)frame[i]) << 16;
+                if (i + 1 < frame.size()) n |= ((uint32_t)frame[i + 1]) << 8;
+                if (i + 2 < frame.size()) n |= frame[i + 2];
+                b64.push_back(B64[(n >> 18) & 63]);
+                b64.push_back(B64[(n >> 12) & 63]);
+                b64.push_back((i + 1 < frame.size()) ? B64[(n >> 6) & 63] : '=');
+                b64.push_back((i + 2 < frame.size()) ? B64[n & 63] : '=');
+            }
+            uint32_t w=0,h=0,flags=0,ts=0;
+            memcpy(&w, frame.data(), 4);
+            memcpy(&h, frame.data() + 4, 4);
+            memcpy(&flags, frame.data() + 8, 4);
+            memcpy(&ts, frame.data() + 12, 4);
+            char buf[128];
+            snprintf(buf, sizeof(buf),
+                     "{\"ok\":true,\"w\":%u,\"h\":%u,\"flags\":%u,\"ts\":%u,\"b64\":\"",
+                     w, h, flags, ts);
+            result = std::string(buf) + b64 + "\"}";
+        }
+    }
     else if (cmd == "read_logs") result = cmd_read_logs(json_get_int(args, "max_files"));
     else if (cmd == "read_log_file") result = cmd_read_log_file(json_get_str(args, "filename"));
     else if (cmd == "open_log_dir") result = cmd_open_log_dir();
@@ -3116,23 +3300,58 @@ void backend_init() {
         GetTickCount64() - g_boot_tick);
     init_wic();
     tcp_server_start();
-    {
-        std::string root = paths_get_install_dir() + "\\controller";
-        DWORD attr = GetFileAttributesA((root + "\\index.html").c_str());
-        if (attr == INVALID_FILE_ATTRIBUTES) {
-            std::string fallback = paths_get_exe_dir() + "\\..\\..\\..\\controller_web";
-            char canon[MAX_PATH];
-            if (GetFullPathNameA(fallback.c_str(), MAX_PATH, canon, nullptr))
-                root = canon;
-        }
-        ws_server_start(root,
-            [](const std::string& json) {
-                std::string result = execute_remote_control_json(json);
-                if (result.find("\"ok\":false") != std::string::npos)
-                    LOG_WARN("ws", "control rejected: %s", result.c_str());
-            },
-            []() { g_h264_need_key.store(true); });
-    }
+    // HTTP/WS controller lives in standalone controller_server.exe.
+    // Agent connects outbound via connect_server hostCall.
+    // Peer sessions: Mimic signaling + LAN media.
+    peer_init(PeerCallbacks{
+        [](const std::string& json) { PostJsonToWebView(json.c_str()); },
+        [](const std::string& actionJson) {
+            std::string r = execute_remote_control_json(actionJson);
+            if (r.find("\"ok\":false") != std::string::npos)
+                LOG_WARN("peer", "control rejected: %s", r.c_str());
+        },
+        []() { g_h264_need_key.store(true); },
+        []() -> std::string {
+            // Return raw array from list_windows result
+            std::string full = cmd_list_windows();
+            // cmd_list_windows returns [{...},...] or wrapped — check
+            if (!full.empty() && full[0] == '[') return full;
+            size_t p = full.find('[');
+            size_t e = full.rfind(']');
+            if (p != std::string::npos && e != std::string::npos && e > p)
+                return full.substr(p, e - p + 1);
+            return "[]";
+        },
+        [](uint64_t hwnd) -> std::string {
+            if (hwnd != 0 && !IsWindow((HWND)(uintptr_t)hwnd))
+                return R"({"ok":false,"error":"hwnd not a window"})";
+            // Must appear in current enumeration (security filter)
+            std::string list = cmd_list_windows();
+            char needle[64];
+            snprintf(needle, sizeof(needle), "\"hwnd\":%llu", (unsigned long long)hwnd);
+            char needle2[64];
+            snprintf(needle2, sizeof(needle2), "\"hwnd\": %llu", (unsigned long long)hwnd);
+            if (hwnd != 0 && list.find(needle) == std::string::npos &&
+                list.find(needle2) == std::string::npos)
+                return R"({"ok":false,"error":"hwnd not in allowed window list"})";
+            g_control_hwnd.store(hwnd);
+            g_accept_control.store(true);
+            // Auto-start stream gate for peer controlled
+            if (!g_streaming.load()) {
+                std::string method = "wgc";
+                {
+                    std::lock_guard<std::mutex> lk(g_remote_cfg_mtx);
+                    method = g_remote_capture.empty() ? "wgc" : g_remote_capture;
+                }
+                cmd_capture_stream_start(hwnd, method, "h264");
+            } else {
+                g_allow_stream.store(true);
+            }
+            char buf[128];
+            snprintf(buf, sizeof(buf), "{\"ok\":true,\"hwnd\":%llu}", (unsigned long long)hwnd);
+            return buf;
+        },
+    });
 
     // MTA daemon for WGC (separate thread avoids STA vs MTA conflict)
     g_mta_running = true;
@@ -3160,7 +3379,8 @@ void backend_shutdown() {
     g_mta_running = false;
     if (g_mta_thread.joinable()) g_mta_thread.join();
     st_cleanup();          // drop self-test client link
-    ws_server_stop();
+    peer_shutdown();
+    ws_client_disconnect();
     tcp_server_stop();
     capture_log_flush();
     capture_log_shutdown();

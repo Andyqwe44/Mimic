@@ -21,6 +21,8 @@ export type BootSettings = {
   devAccent?: string
   devSecondaryAccent?: string
   locale?: string
+  serverHost?: string
+  serverPort?: string
 }
 
 declare global {

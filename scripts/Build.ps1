@@ -11,7 +11,7 @@
 # Modules migrated so far: logger. (capture/input/updater/monitor_app to follow.)
 
 param(
-    [ValidateSet('all', 'logger', 'capture', 'input', 'updater', 'monitor_app', 'test_target', 'h264_bench')]
+    [ValidateSet('all', 'logger', 'capture', 'input', 'updater', 'monitor_app', 'controller_server', 'test_target', 'h264_bench')]
     [string[]]$Module = @('all'),
     [switch]$Dev
 )
@@ -166,7 +166,8 @@ function Build-MonitorApp {
             'oleaut32.lib', 'ws2_32.lib', 'windowscodecs.lib', 'dwmapi.lib', 'shell32.lib', 'shlwapi.lib',
             'winhttp.lib', 'bcrypt.lib', 'advapi32.lib', 'mfplat.lib', 'mf.lib', 'mfuuid.lib', 'wmcodecdspuuid.lib')
         $linkflags = if ($Dev) { @('/DEBUG:FULL') } else { @('/OPT:REF', '/OPT:ICF', '/Brepro') }
-        $srcs = @('src\main.cpp', 'src\commands.cpp', 'src\h264_encoder.cpp', 'src\ws_server.cpp',
+        $srcs = @('src\main.cpp', 'src\commands.cpp', 'src\h264_encoder.cpp', 'src\ws_client.cpp',
+            'src\peer_session.cpp',
             'src\virtual_desktop.cpp', 'src\paths.cpp', 'src\sha256_util.cpp', 'src\update_verify.cpp')
         $libs = @('dep\WebView2LoaderStatic.lib', "$Root\logger\build\logger.lib") +
         (@('common', 'wgc', 'gdi', 'pw', 'screen', 'desktop') | ForEach-Object { "$Root\capture\build\capture_$_.lib" }) +
@@ -199,24 +200,6 @@ function Build-MonitorApp {
         $settings = Join-Path $Root 'config\settings.default.json'
         if (Test-Path $settings) { Copy-Item $settings "$out\config\" -Force }
 
-        # Web controller (React) — build then stage for embedded HTTP+WS :9997.
-        $ctrlSrc = Join-Path $Root 'controller_web'
-        $ctrlDist = Join-Path $ctrlSrc 'dist'
-        if (Test-Path (Join-Path $ctrlSrc 'package.json')) {
-            Write-Step 'controller_web (vite build)'
-            Push-Location $ctrlSrc
-            try {
-                if (-not (Test-Path 'node_modules')) { npm install }
-                npm run build
-                if ($LASTEXITCODE) { throw 'controller_web: vite build failed' }
-            }
-            finally { Pop-Location }
-            if (Test-Path $ctrlDist) {
-                New-Item -ItemType Directory -Force -Path "$out\controller" | Out-Null
-                Copy-Item "$ctrlDist\*" "$out\controller\" -Recurse -Force
-            }
-        }
-
         if (-not $Dev) {
             # Prod package: updater(+.new) + frontend(dist) into the layout.
             $upd = Join-Path $Root 'updater\build\updater.exe'
@@ -230,6 +213,45 @@ function Build-MonitorApp {
     }
     finally { Pop-Location }
     Write-Ok "monitor_app.exe ($cfg)"
+}
+
+function Build-ControllerServer {
+    Write-Step 'controller_server.exe (HTTP+WS relay)'
+    $dir = Join-Path $Root 'controller_server'
+    $bld = Join-Path $dir 'build'
+    New-Item -ItemType Directory -Force -Path $bld | Out-Null
+
+    # Build controller_web → stage as www/
+    $ctrlSrc = Join-Path $Root 'controller_web'
+    $ctrlDist = Join-Path $ctrlSrc 'dist'
+    if (Test-Path (Join-Path $ctrlSrc 'package.json')) {
+        Write-Step 'controller_web (vite build)'
+        Push-Location $ctrlSrc
+        try {
+            if (-not (Test-Path 'node_modules')) { npm install }
+            npm run build
+            if ($LASTEXITCODE) { throw 'controller_web: vite build failed' }
+        }
+        finally { Pop-Location }
+    }
+
+    Push-Location $dir
+    try {
+        $inc = @('/I', "$Root\logger")
+        $cflags = @('/nologo', '/EHsc', '/std:c++17', '/source-charset:utf-8', '/DNOMINMAX', '/DNDEBUG', '/O2', '/MT') + $inc
+        $libs = @("$Root\logger\build\logger.lib")
+        $lflags = @('ws2_32.lib', 'bcrypt.lib', 'advapi32.lib', 'user32.lib')
+        $clArgs = $cflags + @("/Fo$bld\", "/Fe:$bld\controller_server.exe", 'main.cpp') + $libs + $lflags
+        cl.exe @clArgs
+        if ($LASTEXITCODE) { throw 'controller_server: cl failed' }
+        Copy-Item "$Root\logger\build\logger.dll" "$bld\" -Force
+        if (Test-Path $ctrlDist) {
+            New-Item -ItemType Directory -Force -Path "$bld\www" | Out-Null
+            Copy-Item "$ctrlDist\*" "$bld\www\" -Recurse -Force
+        }
+    }
+    finally { Pop-Location }
+    Write-Ok 'controller_server.exe'
 }
 
 function Build-TestTarget {
@@ -302,4 +324,5 @@ if ($all -or $Module -contains 'input')       { Build-Input }
 if ($all -or $Module -contains 'updater')     { Build-Updater }
 if ($all -or $Module -contains 'test_target') { Build-TestTarget }
 if ($all -or $Module -contains 'h264_bench')  { Build-H264Bench }
+if ($all -or $Module -contains 'controller_server') { Build-ControllerServer }
 if ($all -or $Module -contains 'monitor_app') { Build-MonitorApp }

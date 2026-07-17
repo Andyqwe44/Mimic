@@ -41,10 +41,15 @@
     "disconnect_tip": "Disconnect from current window, back to desktop",
     "window_title": "Window Title",
     "window_title_tip": "Currently selected target window (read-only, use Select to change)",
-    "ip_tip": "AI model server IP address",
-    "port_tip": "Port number",
+    "ip_tip": "Controller server IP (controller_server)",
+    "port_tip": "Controller server port (default 9997)",
     "ip_placeholder": "IP Address",
     "port_placeholder": "Port",
+    "connect": "Connect",
+    "connect_tip": "Connect to controller_server to send video and receive input",
+    "disconnect_server": "Disconnect",
+    "disconnect_server_tip": "Disconnect from controller_server",
+    "server_on": "Server linked",
     "entire_desktop": "Entire Desktop",
     "entire_desktop_n": "Entire Desktop (D{n})",
     "category_desktop": "Desktop",
@@ -246,7 +251,8 @@
   "gates": {
     "title": "Remote gates",
     "target": "Target",
-    "hint": "Video goes to the controller page (:9997).\nBoth gates default OFF — open separately to stream / apply remote input."
+    "need_server": "Connect to controller_server in the Connection panel first",
+    "hint": "Connect to the controller server, then open stream / accept-control gates.\nCapture and input modes are configured on the server web UI."
   },
 
   "update": {

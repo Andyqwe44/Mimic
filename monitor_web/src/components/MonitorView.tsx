@@ -97,7 +97,7 @@ export function MonitorView({
   snapshotLatency: _snapshotLatency,
   onTakeSnapshot,
   onTogglePreview,
-  onToggleAcceptControl,
+  onToggleAcceptControl: _onToggleAcceptControl,
   children,
   inputMethod: _inputMethod,
   mouseMode: _mouseMode,
@@ -902,7 +902,8 @@ export function MonitorView({
                   })}
                 </div>
                 <div className="text-[11px] text-text-tertiary font-mono pt-1">
-                  http://&lt;lan-ip&gt;:9997
+                  http://&lt;server-ip&gt;:9997
+                  (controller_server)
                 </div>
               </div>
             </div>

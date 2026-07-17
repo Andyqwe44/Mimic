@@ -9,6 +9,8 @@ import { Tooltip } from './components/Toolkit'
 import { ConnectionPanel } from './components/ConnectionPanel'
 import { ScreenshotPanel } from './components/ScreenshotPanel'
 import { StreamGatesPanel } from './components/StreamGatesPanel'
+import { PeerPanel } from './components/PeerPanel'
+import { PeerRemoteView } from './components/PeerRemoteView'
 import { LogPanel } from './components/LogPanel'
 import { SettingsView } from './components/SettingsView'
 import { DevToolsView } from './components/DevToolsView'
@@ -456,6 +458,8 @@ export default function App() {
           i18n.changeLanguage(s.locale)
           setSavedLocale(s.locale)
         }
+        if (typeof s.serverHost === 'string' && s.serverHost) setServerHost(s.serverHost)
+        if (typeof s.serverPort === 'string' && s.serverPort) setServerPort(s.serverPort)
         addLog('[settings] loaded')
       }
     }).catch(() => {
@@ -805,6 +809,18 @@ export default function App() {
   const [previewing, setPreviewing] = useState(false)
   const previewingRef = useRef(false)          // ref version for SharedBuffer handler closure
   const [acceptControl, setAcceptControl] = useState(false)
+  const [serverHost, setServerHost] = useState(
+    () => (typeof boot.serverHost === 'string' && boot.serverHost ? boot.serverHost : '127.0.0.1'),
+  )
+  const [serverPort, setServerPort] = useState(
+    () => (typeof boot.serverPort === 'string' && boot.serverPort ? boot.serverPort : '9997'),
+  )
+  const [serverConnected, setServerConnected] = useState(false)
+  const [peerExpanded, setPeerExpanded] = useState(true)
+  const [peerControlMode, setPeerControlMode] = useState<'human' | 'ai'>('human')
+  const [peerTransport, setPeerTransport] = useState('none')
+  const [peerRole, setPeerRole] = useState('idle')
+  const [remotePeerWindows, setRemotePeerWindows] = useState<Array<{ title: string; hwnd: number }>>([])
   const snapshotRef = useRef(false)            // true while waiting for snapshot frame
   const snapshotStartRef = useRef(0)           // Date.now() when snapshot was triggered
   const [capMethod, setCapMethod] = useState('')        // actual method used (from C++ response)
@@ -846,13 +862,16 @@ export default function App() {
           devAccent,
           devSecondaryAccent,
           locale,
+          serverHost,
+          serverPort,
         },
       }).catch(() => {})
     }, 1000)
     return () => { if (saveTimeout.current) clearTimeout(saveTimeout.current) }
   }, [settingsReady, theme, mouseMode, keyMode, mappingHotkey, devMode, selfTargetMode,
       keepFiles, autoSnap, autoStream, snapMethod, streamMethod, renderMethod,
-      normalAccent, normalSecondaryAccent, devAccent, devSecondaryAccent, locale])
+      normalAccent, normalSecondaryAccent, devAccent, devSecondaryAccent, locale,
+      serverHost, serverPort])
 
   // ── Load screen info for aspect ratio + self-target detection ──
   useEffect(() => {
@@ -998,6 +1017,10 @@ export default function App() {
       addLog('[Capture] stream already starting, ignoring')
       return
     }
+    if (!serverConnected) {
+      addLog('[Stream] blocked: not connected to controller_server')
+      return
+    }
 
     const hwnd = selWindow.hwnd ?? 0
     if (cantCaptureMinimized(streamMethod, winState)) {
@@ -1012,7 +1035,6 @@ export default function App() {
     setSnapshotLatency(null)
 
     try {
-      // Thin client: stream gate = allow sending H.264 to controllers (no local preview).
       await hostCall('set_stream_gate', {
         enabled: true,
         hwnd,
@@ -1026,7 +1048,54 @@ export default function App() {
       return
     }
     if (!screenshotExpanded) setSsExpanded(true)
-  }, [selWindow.hwnd, streamMethod, winState, renderMethod, screenshotExpanded])
+  }, [selWindow.hwnd, streamMethod, winState, renderMethod, screenshotExpanded, serverConnected])
+
+  const toggleServerConnect = useCallback(async () => {
+    if (serverConnected) {
+      try {
+        if (previewing) await stopStream()
+        await hostCall('disconnect_server')
+        setServerConnected(false)
+        addLog('[Server] disconnected')
+      } catch (e) {
+        addLog(`[Server] disconnect failed: ${e}`)
+      }
+      return
+    }
+    try {
+      const port = parseInt(serverPort, 10) || 9997
+      const res = await hostCall('connect_server', { host: serverHost.trim() || '127.0.0.1', port })
+      if (res?.ok === false) {
+        addLog(`[Server] connect failed: ${res?.error || 'unknown'}`)
+        setServerConnected(false)
+        return
+      }
+      setServerConnected(true)
+      addLog(`[Server] connected ${serverHost}:${port}`)
+    } catch (e) {
+      setServerConnected(false)
+      addLog(`[Server] connect failed: ${e}`)
+    }
+  }, [serverConnected, serverHost, serverPort, previewing, stopStream])
+
+  // Poll server link status (link may drop without UI action).
+  useEffect(() => {
+    const tick = async () => {
+      try {
+        const st = await hostCall('get_server_status')
+        if (typeof st?.connected === 'boolean' && st.connected !== serverConnected) {
+          setServerConnected(st.connected)
+          if (!st.connected && previewingRef.current) {
+            addLog('[Server] link lost — closing stream gate')
+            await stopStream()
+          }
+        }
+      } catch { /* */ }
+    }
+    const iv = setInterval(tick, 2000)
+    tick()
+    return () => clearInterval(iv)
+  }, [serverConnected, stopStream])
 
   // ── Toggle preview on/off ──
   const togglePreview = useCallback(async () => {
@@ -1340,6 +1409,12 @@ export default function App() {
               hasUpdate={displayHasUpdate}
               isAdmin={isAdmin}
               onSwitchPermission={switchPermission}
+              serverHost={serverHost}
+              serverPort={serverPort}
+              onServerHostChange={setServerHost}
+              onServerPortChange={setServerPort}
+              serverConnected={serverConnected}
+              onToggleServer={toggleServerConnect}
             />
           )}
           {/* Dev tab */}
@@ -1459,7 +1534,57 @@ export default function App() {
                 expanded={connectionExpanded}
                 onToggle={() => setConnExpanded(!connectionExpandedRef.current)}
                 pinned={connectionPinned} onTogglePin={toggleConnPin}
+                serverHost={serverHost}
+                serverPort={serverPort}
+                onServerHostChange={setServerHost}
+                onServerPortChange={setServerPort}
+                serverConnected={serverConnected}
+                onToggleServer={toggleServerConnect}
               />
+            </div>
+            <div className="shrink-0">
+              <PeerPanel
+                expanded={peerExpanded}
+                onToggle={() => setPeerExpanded((v) => !v)}
+                controlMode={peerControlMode}
+                onControlMode={setPeerControlMode}
+                onRole={setPeerRole}
+                onTransport={(m) => {
+                  setPeerTransport(m)
+                }}
+                onRemoteWindows={(wins) => {
+                  setRemotePeerWindows(wins)
+                  addLog(`[Peer] remote windows: ${wins.length}`)
+                }}
+              />
+              <PeerRemoteView
+                active={peerRole === 'controller' && peerTransport !== 'none'}
+                humanControl={peerControlMode === 'human'}
+              />
+              {peerControlMode === 'ai' && peerTransport !== 'none' && (
+                <div className="mt-2 text-[11px] text-amber-500 bg-amber-500/10 rounded-lg px-2 py-1.5">
+                  AI control mode — actions from local model; target still enforced on peer.
+                </div>
+              )}
+              {remotePeerWindows.length > 0 && (
+                <div className="mt-2 rounded-xl bg-bg-secondary ring-1 ring-inset ring-border p-2 space-y-1 max-h-40 overflow-y-auto">
+                  <div className="text-[11px] font-medium text-text-secondary px-1">Remote windows</div>
+                  {remotePeerWindows.map((w) => (
+                    <button
+                      key={w.hwnd}
+                      type="button"
+                      className="w-full text-left text-xs px-2 py-1 rounded-md hover:bg-bg-hover truncate"
+                      onClick={() => {
+                        hostCall('peer_set_target', { hwnd: w.hwnd, title: w.title })
+                          .then(() => addLog(`[Peer] set_target ${w.title}`))
+                          .catch((e) => addLog(`[Peer] set_target failed: ${e}`))
+                      }}
+                    >
+                      {w.title || `(hwnd ${w.hwnd})`}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
             {/* Thin client: gates instead of local screenshot preview */}
             <div className="shrink-0 overflow-hidden">
@@ -1470,6 +1595,7 @@ export default function App() {
                   onToggleStream={togglePreview}
                   onToggleControl={toggleAcceptControl}
                   targetTitle={displayTargetTitle(selWindow.title, t)}
+                  serverConnected={serverConnected}
                 />
               ) : (
                 <ScreenshotPanel

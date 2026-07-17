@@ -13,22 +13,27 @@ Desktop monitor for visual game AI — **pixels in, actions out**.
 **Thin agent client (2026-07 turn):** PC host = capture + execute. Vision / human control is external.
 
 ```
-┌─ monitor_app (Windows thin client) ─────────────────────────┐
-│  Capture (WGC GPU) → HW H.264 → TCP :9999 + embedded WS :9997│
+┌─ monitor_app (Windows thin agent) ──────────────────────────┐
+│  Capture (WGC GPU) → HW H.264 → outbound WS to server       │
 │  Gates: 发送画面 / 接受控制   ·  atomic send_input              │
-│  Local UI: ops + gates (no local video preview in thin mode) │
+│  Local UI: select target + connect server + gates            │
 └──────────┬───────────────────────────────────────────────────┘
-           │ FRAM / WebSocket
+           │ outbound WebSocket
+           ▼
+┌─ controller_server.exe (deployable) ────────────────────────┐
+│  HTTP www/ + WS relay   ·  browser ↔ agent                  │
+└──────────┬───────────────────────────────────────────────────┘
+           │
     ┌──────┴──────────────────────────────┐
     ▼                                     ▼
- controller_web (React, :9997)          Python vision model
- phone / another PC browser             (TCP :9999 CONTROL_MSG)
+ controller_web (browser)              (future: desktop controller)
+ settings: capture / H.264 / input
 ```
 
-| Target | Input policy |
-|--------|----------------|
-| Entire desktop | Foreground `sendinput` (may occupy mouse/keyboard) |
-| Specific window | Background `sendmessage`; coords clamped to window `[0,1]` |
+| Setting (server web) | Agent applies |
+|----------------------|---------------|
+| Capture WGC | Stream method |
+| Input seize / postmsg | `sendinput` / `postmessage` |
 
 **Zero Rust. Single MSVC command builds everything.**
 
@@ -36,9 +41,32 @@ Agent context: Cursor loads `.cursor/rules/*.mdc`. Long-form: `CLAUDE.md` / `AGE
 
 | Language | Role |
 |----------|------|
-| C++17 | Thin host: WGC→GPU H.264, embedded HTTP+WS `:9997`, TCP `:9999`, `send_input` |
-| TypeScript/React | Local ops UI (`monitor_web`); remote UI (`controller_web`, served by agent) |
-| Python | Vision model (TCP `:9999`) |
+| C++17 | Thin agent + standalone `controller_server` relay |
+| TypeScript/React | Agent UI (`monitor_web`); controller UI (`controller_web`) |
+| Python | Vision model (optional TCP `:9999`) |
+
+## Peer / MimicServer (UU-style)
+
+Same **MimicClient** on each PC; cloud runs **MimicServer** (signaling only).
+
+**Update shelf (CDN):** `http://47.107.43.5/mimic/client/` — binaries are **not** in git.
+Gitee Release only ships two thin Setups that download `payload.zip` at install time.
+
+```powershell
+# Signaling (dev)
+cd signaling_server; npm install; npm start   # :8443  demo/demo
+
+# Full release: build → CDN sync → thin Setups → Gitee (2 exes)
+powershell -File scripts\Release.ps1 -DryRun
+```
+
+| Package | Artifact |
+|---------|----------|
+| MimicClient | `MimicClient_Setup_v*.exe` (Gitee) → CDN `client/payload.zip` |
+| MimicServer | `MimicServer_Setup_v*.exe` (Gitee) → CDN `server/payload.zip` |
+| Incremental | `http://47.107.43.5/mimic/client/version.json` |
+
+See [signaling_server/README.md](signaling_server/README.md) and [docs/auto-update.md](docs/auto-update.md).
 
 ## Quick Start
 
@@ -49,13 +77,18 @@ Agent context: Cursor loads `.cursor/rules/*.mdc`. Long-form: `CLAUDE.md` / `AGE
 ### Dev Mode
 
 ```powershell
-# 1. Build C++ modules (first time, and after C++ changes) — one VS Dev Shell
-powershell -File scripts\Build.ps1               # logger/capture/input/updater/monitor_app
+# 1. Build C++ modules (first time / after C++ changes)
+powershell -File scripts\Build.ps1 -Module logger,capture,input,controller_server,monitor_app -Dev
 
-# 2. Dev build (Vite HMR, debug symbols)
-cd monitor_web; npm install; npm run dev         # terminal 1: Vite :1420
-powershell -File scripts\Build.ps1 -Module monitor_app -Dev   # terminal 2: -> build_dev\bin\monitor_app.exe
-# Navigates to http://localhost:1420 (hot reload)
+# 2. Start relay (separate machine or same PC)
+.\controller_server\build\controller_server.exe          # http://0.0.0.0:9997
+
+# 3. Agent UI (or double-click dev.bat)
+cd monitor_web; npm run dev                              # Vite :1420
+# monitor_app Dev exe → localhost:1420
+# Connection panel: fill server IP:9997 → Connect → open stream/control gates
+
+# 4. Browser on any PC: http://<server-ip>:9997
 ```
 
 ### Production
@@ -91,8 +124,9 @@ tictactoe/
 ├── monitor_app/          C++ WebView2 host (main window + commands + single-instance)
 │   └── dep/              WebView2 SDK
 ├── scripts/              PowerShell build/release pipeline (Build/Release/Verify/Publish)
-├── monitor_web/          Local React UI (Vite + TypeScript + Tailwind)
-├── controller_web/       Remote React controller (WebCodecs H.264 + actions; agent serves :9997)
+├── monitor_web/          Agent React UI (Vite + TypeScript + Tailwind)
+├── controller_web/       Controller React UI (served by controller_server)
+├── controller_server/    Standalone HTTP+WS relay (deployable)
 ├── protocol/             Wire format (C++/Python)
 ├── model/                Python AI
 ├── test_target/          Standalone input-test window (TCP :9998 self-test feedback)
@@ -118,22 +152,14 @@ Desktop single-frame → `dxgi` (DesktopBlt). Window single-frame → `wgc`. Str
 | Transport | Port | Description |
 |-----------|------|-------------|
 | SharedBuffer | COM | Legacy/local BGRA preview (non-thin / debug) |
-| TCP FRAM | 9999 | Remote: H.264 Annex-B out + JSON control in |
-| Embedded HTTP+WS | 9997 | Agent serves `controller_web` + binary H.264 + JSON control (no Python bridge) |
+| TCP FRAM | 9999 | Optional local debug: H.264 out + JSON control in |
+| controller_server WS | 9997 | Deployable relay: serves `controller_web`, agents connect outbound |
 
-**Thin-client gates (Monitor tab):** **发送画面** starts WGC→HW H.264 push; **接受控制** allows remote `CONTROL_MSG` / WS actions. Both default closed.
+**Thin-client gates (Monitor tab):** connect to server first; **发送画面** pushes H.264; **接受控制** allows remote actions. Both gates default closed.
 
-## Wire Protocol (TCP :9999)
+Capture / codec / input mode: configure on the **server web UI** (pushed to agent as config).
 
-```
-Frame: [magic:4 "FRAM"][body_size:4 LE][type_tag:4 LE][body]
-
-type_tag 1 (BGRA fallback): [w:4][h:4][ch:4][reserved:4][pixels]
-type_tag 2 (H.264 preferred): [w:4][h:4][flags:4][reserved:4][Annex-B NAL…]  flags&1=keyframe
-type_tag 3 (CONTROL_MSG): UTF-8 JSON action; agent forces hwnd+method from stream target
-```
-
-Remote Web UI: see [`controller_web/README.md`](controller_web/README.md).
+Remote Web UI: see [`controller_web/README.md`](controller_web/README.md). Relay: [`controller_server/README.md`](controller_server/README.md).
 
 ## Features
 

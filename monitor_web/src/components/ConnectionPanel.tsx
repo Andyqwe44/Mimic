@@ -1,7 +1,6 @@
-// ═══ Connection Panel — target selection + TCP config ═══
-// MXU-style collapsible card with window picker, disconnect, IP/port inputs.
+// ═══ Connection Panel — target selection + controller_server connect ═══
 import { useState, useEffect } from 'react'
-import { ChevronDown, MonitorUp, Unlink, Pin } from 'lucide-react'
+import { ChevronDown, MonitorUp, Unlink, Pin, Cable, Unplug } from 'lucide-react'
 import { Tooltip, ActionBtn } from './Toolkit'
 import { TargetPickerModal } from './TargetPickerModal'
 import { addLog } from '../lib/bridge'
@@ -14,6 +13,9 @@ import {
 import { DESKTOP_TITLE, displayTargetTitle, isDesktopTitle } from '../lib/windowTitle'
 import { useTranslation } from 'react-i18next'
 import type { WindowInfo } from '../lib/types'
+
+/** Shared left-column width: title+unlink ≡ ip+port (aligns with ActionBtn on the right). */
+const LEFT_COL = 'w-[11.5rem]'
 
 export function ConnectionPanel({
   onSelect,
@@ -30,6 +32,12 @@ export function ConnectionPanel({
   onToggle,
   pinned,
   onTogglePin,
+  serverHost,
+  serverPort,
+  onServerHostChange,
+  onServerPortChange,
+  serverConnected,
+  onToggleServer,
 }: {
   onSelect: (w: WindowInfo) => void
   onDisconnect?: () => void
@@ -45,17 +53,19 @@ export function ConnectionPanel({
   onToggle: () => void
   pinned?: boolean
   onTogglePin?: () => void
+  serverHost: string
+  serverPort: string
+  onServerHostChange: (v: string) => void
+  onServerPortChange: (v: string) => void
+  serverConnected: boolean
+  onToggleServer: () => void
 }) {
   const { t } = useTranslation()
 
-  // ── Local state ──
   const [pickerOpen, setPickerOpen] = useState(false)
   const [selTitle, setSelTitle] = useState(DESKTOP_TITLE)
-  const [ip, setIp] = useState('127.0.0.1')
-  const [port, setPort] = useState('9999')
   const isDesktop = isDesktopTitle(selTitle) || selWin?.category === 'desktop' || selWin?.hwnd === 0
 
-  // ── Window selection handlers ──
   const handleSelectWindow = (w: WindowInfo) => {
     setSelTitle(w.title)
     onSelect(w)
@@ -67,14 +77,12 @@ export function ConnectionPanel({
     if (setExpectedCaptureState) setExpectedCaptureState(expectedState)
   }
 
-  // ── Sync selTitle when selWin changes externally (e.g. disconnect) ──
   useEffect(() => {
     if (selWin && selWin.title !== selTitle) {
       setSelTitle(selWin.title)
     }
   }, [selWin?.title])
 
-  // ── Derived: can current stream method capture this window? ──
   const cantCapture = !isDesktop && cantCaptureMinimized(streamMethod, winState)
   const recommendedMethod = winState === 'minimized' ? 'dxgi' : 'wgc'
 
@@ -105,6 +113,11 @@ export function ConnectionPanel({
           <span className="text-[11px] font-medium text-accent bg-accent/10 px-1.5 py-0.5 rounded shrink-0">
             {METHOD_SHORT[recommendedMethod] || recommendedMethod}
           </span>
+          {serverConnected && (
+            <span className="text-[11px] font-medium text-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 rounded shrink-0">
+              {t('connection.server_on')}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2 ml-2">
           {cantCapture && <span className="text-xs text-error shrink-0">⚠</span>}
@@ -138,14 +151,14 @@ export function ConnectionPanel({
                 {t('connection.minimized_warning', { method: streamMethod.toUpperCase() })}
               </div>
             )}
-            <div className="flex justify-between">
-              <div className="flex items-center gap-1.5">
+            <div className="flex justify-between items-center gap-2">
+              <div className={`flex items-center gap-1.5 ${LEFT_COL} shrink-0`}>
                 <Tooltip text={t('connection.window_title_tip')}>
                   <input
                     value={displayTargetTitle(selTitle, t)}
                     readOnly
                     placeholder={t('connection.window_title')}
-                    className="w-36 h-7 rounded-lg border border-border bg-bg-primary px-2 text-xs outline-none cursor-default text-text-muted truncate"
+                    className="flex-1 min-w-0 h-7 rounded-lg border border-border bg-bg-primary px-2 text-xs outline-none cursor-default text-text-muted truncate"
                   />
                 </Tooltip>
                 {onDisconnect && (
@@ -173,37 +186,50 @@ export function ConnectionPanel({
                 }}
               />
             </div>
-            <div className="flex justify-between">
-              <Tooltip text={t('connection.ip_tip')}>
-                <input
-                  value={ip}
-                  onChange={(e) => {
-                    const v = e.target.value
-                    if (v.includes('::')) {
-                      const [a, b] = v.split('::', 2)
-                      setIp(a.trim())
-                      if (b?.trim()) setPort(b.trim())
-                    } else setIp(v)
-                  }}
-                  placeholder={t('connection.ip_placeholder')}
-                  className="w-[184px] h-7 rounded-lg border border-border bg-bg-primary px-2 text-xs text-text-primary outline-none focus:border-accent transition-colors placeholder:text-text-muted"
-                />
-              </Tooltip>
-              <Tooltip text={t('connection.port_tip')}>
-                <input
-                  value={port}
-                  onChange={(e) => {
-                    const v = e.target.value
-                    if (v.includes('::')) {
-                      const [a, b] = v.split('::', 2)
-                      setPort(a.trim())
-                      if (b?.trim()) setIp(b.trim())
-                    } else setPort(v)
-                  }}
-                  placeholder={t('connection.port_placeholder')}
-                  className="w-20 h-7 rounded-lg border border-border bg-bg-primary px-2 text-xs text-text-primary outline-none focus:border-accent transition-colors placeholder:text-text-muted"
-                />
-              </Tooltip>
+            <div className="flex justify-between items-center gap-2">
+              <div className={`flex items-center gap-1.5 ${LEFT_COL} shrink-0`}>
+                <Tooltip text={t('connection.ip_tip')}>
+                  <input
+                    value={serverHost}
+                    onChange={(e) => {
+                      const v = e.target.value
+                      if (v.includes('::')) {
+                        const [a, b] = v.split('::', 2)
+                        onServerHostChange(a.trim())
+                        if (b?.trim()) onServerPortChange(b.trim())
+                      } else onServerHostChange(v)
+                    }}
+                    placeholder={t('connection.ip_placeholder')}
+                    disabled={serverConnected}
+                    className="flex-1 min-w-0 h-7 rounded-lg border border-border bg-bg-primary px-2 text-xs text-text-primary outline-none focus:border-accent transition-colors placeholder:text-text-muted disabled:opacity-60"
+                  />
+                </Tooltip>
+                <Tooltip text={t('connection.port_tip')}>
+                  <input
+                    value={serverPort}
+                    onChange={(e) => {
+                      const v = e.target.value
+                      if (v.includes('::')) {
+                        const [a, b] = v.split('::', 2)
+                        onServerPortChange(a.trim())
+                        if (b?.trim()) onServerHostChange(b.trim())
+                      } else onServerPortChange(v)
+                    }}
+                    placeholder={t('connection.port_placeholder')}
+                    disabled={serverConnected}
+                    className="w-14 shrink-0 h-7 rounded-lg border border-border bg-bg-primary px-2 text-xs text-text-primary outline-none focus:border-accent transition-colors placeholder:text-text-muted disabled:opacity-60"
+                  />
+                </Tooltip>
+              </div>
+              <ActionBtn
+                icon={serverConnected
+                  ? <Unplug className="w-3.5 h-3.5" />
+                  : <Cable className="w-3.5 h-3.5" />}
+                label={serverConnected ? t('connection.disconnect_server') : t('connection.connect')}
+                title={serverConnected ? t('connection.disconnect_server_tip') : t('connection.connect_tip')}
+                variant={serverConnected ? 'outline-accent' : 'primary'}
+                onClick={onToggleServer}
+              />
             </div>
           </div>
         </div>

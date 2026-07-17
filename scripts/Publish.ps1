@@ -1,11 +1,7 @@
-# Publish.ps1 — create the Gitee Release + upload the installer.
+# Publish.ps1 — Gitee Release with thin MimicClient + MimicServer Setups only.
 #
-# Replaces publish_release.sh (Invoke-RestMethod instead of curl + bash).
-# Gitee won't replace a release's assets, so an existing same-tag release is
-# deleted and recreated.
-#
-#   powershell -File scripts\Publish.ps1 -Version 0.3.6
-#   powershell -File scripts\Publish.ps1 -Version 0.3.6 -DryRun   # list only, no mutation
+#   powershell -File scripts\Publish.ps1 -Version 0.3.33
+#   powershell -File scripts\Publish.ps1 -Version 0.3.33 -DryRun
 
 [CmdletBinding()]
 param(
@@ -19,14 +15,17 @@ $token = '26b26b041e3a6ac124ed8dc7d7c71e84'
 $repo = 'Andyqwe44/mimic'
 $api = "https://gitee.com/api/v5/repos/$repo"
 $tag = "v$Version"
-$installer = Join-Path (Get-RepoRoot) "release\GameAgentMonitor_Setup_v$Version.exe"
+$root = Get-RepoRoot
+$mimicClient = Join-Path $root "release\MimicClient_Setup_v$Version.exe"
+$mimicServer = Join-Path $root "release\MimicServer_Setup_v$Version.exe"
 
-if (-not (Test-Path $installer)) { throw "installer not found: $installer" }
+if (-not (Test-Path $mimicClient)) { throw "missing thin client setup: $mimicClient" }
+if (-not (Test-Path $mimicServer)) { throw "missing thin server setup: $mimicServer" }
+
 Write-Step "Publish $tag to Gitee$(if ($DryRun) { ' (dry-run)' })"
-Write-Note "installer: $installer ($([math]::Round((Get-Item $installer).Length / 1MB, 1)) MB)"
+Write-Note "MimicClient: $mimicClient ($([math]::Round((Get-Item $mimicClient).Length / 1KB, 1)) KB)"
+Write-Note "MimicServer: $mimicServer ($([math]::Round((Get-Item $mimicServer).Length / 1KB, 1)) KB)"
 
-# Manual multipart/form-data upload — Windows PowerShell 5.1 has no -Form, so
-# build the body by hand (works on 5.1 and 7). Keeps this pure PowerShell.
 function Send-GiteeAsset {
     param([string]$Uri, [string]$FilePath)
     $boundary = [Guid]::NewGuid().ToString()
@@ -45,13 +44,12 @@ function Send-GiteeAsset {
         -ContentType "multipart/form-data; boundary=$boundary"
 }
 
-# Find an existing release for this tag.
 $releases = Invoke-RestMethod -Uri "$api/releases" -Method Get
 $existing = $releases | Where-Object { $_.tag_name -eq $tag } | Select-Object -First 1
 
 if ($DryRun) {
     if ($existing) { Write-Note "would DELETE existing release id=$($existing.id)" }
-    Write-Note "would CREATE release $tag (target main) + upload installer"
+    Write-Note "would CREATE release $tag + upload MimicClient_Setup + MimicServer_Setup"
     Write-Host '  DRY-RUN OK (no changes made)' -ForegroundColor Green
     return
 }
@@ -61,11 +59,28 @@ if ($existing) {
     Invoke-RestMethod -Uri "$api/releases/$($existing.id)?access_token=$token" -Method Delete | Out-Null
 }
 
-$body = @{ tag_name = $tag; name = $tag; body = "$tag release"; prerelease = $false; target_commitish = 'main' } | ConvertTo-Json
+$body = @{
+    tag_name         = $tag
+    name             = $tag
+    body             = @"
+$tag — thin Setups (payload from CDN)
+
+- MimicClient_Setup: installs peer client; downloads http://47.107.43.5/mimic/client/payload.zip
+- MimicServer_Setup: installs signaling server; downloads http://47.107.43.5/mimic/server/payload.zip
+- Incremental updates: http://47.107.43.5/mimic/client/version.json
+"@
+    prerelease       = $false
+    target_commitish = 'main'
+} | ConvertTo-Json
 $release = Invoke-RestMethod -Uri "$api/releases?access_token=$token" -Method Post -ContentType 'application/json' -Body $body
 if (-not $release.id) { throw "failed to create release: $($release | ConvertTo-Json -Compress)" }
 Write-Note "release id=$($release.id)"
 
-$upload = Send-GiteeAsset -Uri "$api/releases/$($release.id)/attach_files?access_token=$token" -FilePath $installer
+foreach ($f in @($mimicClient, $mimicServer)) {
+    $upload = Send-GiteeAsset -Uri "$api/releases/$($release.id)/attach_files?access_token=$token" -FilePath $f
+    Write-Host "  Uploaded $([IO.Path]::GetFileName($f))" -ForegroundColor Green
+    if ($upload.browser_download_url) {
+        Write-Host "  Download: $($upload.browser_download_url)" -ForegroundColor Green
+    }
+}
 Write-Host "  Published $tag" -ForegroundColor Green
-Write-Host "  Download: $($upload.browser_download_url)" -ForegroundColor Green

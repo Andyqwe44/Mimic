@@ -123,6 +123,9 @@ export function SettingsView({
   hasUpdate,
   isAdmin,
   onSwitchPermission,
+  serverHost, serverPort,
+  onServerHostChange, onServerPortChange,
+  serverConnected, onToggleServer,
 }: {
   snapMethod: string; setSnapMethod: (m: string) => void
   streamMethod: string; setStreamMethod: (m: string) => void
@@ -150,6 +153,12 @@ export function SettingsView({
   hasUpdate?: boolean
   isAdmin?: boolean
   onSwitchPermission?: (toAdmin: boolean) => void
+  serverHost: string
+  serverPort: string
+  onServerHostChange: (v: string) => void
+  onServerPortChange: (v: string) => void
+  serverConnected: boolean
+  onToggleServer: () => void
 }) {
   const { t } = useTranslation()
   const themePairs = [
@@ -292,8 +301,15 @@ export function SettingsView({
         expectedCaptureState={expectedCaptureState}
         setExpectedCaptureState={setExpectedCaptureState}
         expanded={connExpanded} onToggle={() => setConnExpanded((v) => !v)}
+        serverHost={serverHost}
+        serverPort={serverPort}
+        onServerHostChange={onServerHostChange}
+        onServerPortChange={onServerPortChange}
+        serverConnected={serverConnected}
+        onToggleServer={onToggleServer}
       />
 
+      {!THIN_CLIENT && (
       <SettingsCard
         icon={<Camera className="w-4 h-4 text-text-secondary" />}
         title={t('settings.capture')}
@@ -678,6 +694,7 @@ export function SettingsView({
           </div>
         </div>
       </SettingsCard>
+      )}
 
       {!THIN_CLIENT && (
       <SettingsCard icon={<Cpu className="w-4 h-4 text-text-secondary" />} title={t('settings.model')}>

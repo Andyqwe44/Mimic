@@ -1,9 +1,10 @@
 # 自动更新系统 (Auto-Update)
 
-> 一句话:用户点「检查更新」→ 从 **多源 raw version.json** 拉最新 manifest（Gitee/GitHub/自建）→
-> 验签 → 逐文件从 **download_base** 下载到 staging → sha256 校验 → **提权的独立 updater** 覆盖安装目录 → 重启新版。
+> 一句话:用户点「检查更新」→ 从 **CDN version.json**（`http://47.107.43.5/mimic/client/`）拉最新 manifest →
+> 验签 → 逐文件从 **download_base**（同一 CDN）下载到 staging → sha256 校验 → **提权的独立 updater** 覆盖安装目录 → 重启新版。
 >
 > 首次端到端跑通:**0.3.12 → 0.3.13**(2026-07-12)。schema v3 多源：**0.3.32**。
+> **0.3.33+**：增量货架迁出 git → 阿里云 CDN；Gitee Release 只挂薄 Setup。
 
 ---
 
@@ -51,7 +52,7 @@
 
 | 决策 | 为什么 |
 |------|--------|
-| **增量货从 git raw URL 下,不是 Release 附件** | Release 附件只放一个 setup.exe(给新用户全新装)。逐文件下载走 `raw/<tag>/release/GameAgentMonitor/<path>`,读的是 git 仓库里 commit 的文件。**所以 `release/GameAgentMonitor/` 必须 commit 进 git —— 它本身就是更新货。** |
+| **增量货从自建 CDN 下,不是 git raw / Release 附件** | Release 只挂薄 Setup（安装时拉 `payload.zip`）。逐文件增量走 `http://47.107.43.5/mimic/client/<path>`。**`release/` 不进 git**；发版用 `Publish-Cdn.ps1` 同步到服务器。 |
 | **独立 updater 进程干覆盖,主程序不提权** | 覆盖 `Program Files` 需管理员;但主程序日常不该提权(UAC 骚扰 + 安全)。所以主程序 asInvoker,只在更新时 `runas` 拉起提权的 updater 去覆盖。updater 是唯一 `requireAdministrator` 的。 |
 | **manifest (`version.json`) 在 git 里 = 服务端可控** | schema v2 加了 `download_base`；schema v3 加了 `sources`（发现 URL 列表）+ 扩展验签覆盖 `download_base`/`sources`。换 host/CDN = 改 manifest，不重编客户端。 |
 | **查更新不依赖 Gitee releases API** | 只拉静态 `version.json`（任意 nginx/OSS/CDN/GitHub raw 均可）。Gitee API 挂了仍可从 GitHub 兜底发现更新。 |
@@ -73,10 +74,9 @@
   "mandatory": false,
   "message": "",
   "full_update": false,
-  "download_base": "https://gitee.com/Andyqwe44/mimic/raw/v0.3.32/release/GameAgentMonitor/",
-  "sources": [                 // 发现「最新」manifest 的 URL 列表（主分支 tip）
-    "https://gitee.com/Andyqwe44/mimic/raw/main/release/GameAgentMonitor/version.json",
-    "https://raw.githubusercontent.com/Andyqwe44/Mimic/main/release/GameAgentMonitor/version.json"
+  "download_base": "http://47.107.43.5/mimic/client/",
+  "sources": [
+    "http://47.107.43.5/mimic/client/version.json"
   ],
   "updater": { "path": "bin/updater.exe" },
   "sig": "<ECDSA P-256 base64>",  // 签 schema+app+download_base+sources+files

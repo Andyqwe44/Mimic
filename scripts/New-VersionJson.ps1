@@ -48,12 +48,11 @@ foreach ($e in $entries) {
 #   schema ≤2: <path>\n<sha256>\n ...  (files only)
 #   schema ≥3: schema=/app=/download_base=/source=* + files
 $sig = ''
-$tag = "v$Version"
-$downloadBase = "https://gitee.com/Andyqwe44/mimic/raw/$tag/release/GameAgentMonitor/"
-# Discovery URLs for "latest" manifest (main tip). Clients ≥0.3.32 persist & prefer these.
+# CDN is the sole file shelf (binaries are NOT in git). Gitee Release only hosts thin Setups.
+$downloadBase = 'http://47.107.43.5/mimic/client/'
+# Discovery URLs for "latest" manifest. Clients ≥0.3.32 persist & prefer these.
 $sources = [System.Collections.ArrayList]@(
-    'https://gitee.com/Andyqwe44/mimic/raw/main/release/GameAgentMonitor/version.json',
-    'https://raw.githubusercontent.com/Andyqwe44/Mimic/main/release/GameAgentMonitor/version.json'
+    'http://47.107.43.5/mimic/client/version.json'
 )
 $sources.Sort([System.StringComparer]::Ordinal)
 

@@ -74,6 +74,6 @@ displayX = demoX ?? realX
 
 `hostCall` 已 unwrap `{id, result}`；SharedBuffer 用 `e.additionalData`（对象，非 `getAdditionalData()`）。
 
-**薄客户端 (`lib/features.ts` `THIN_CLIENT`)**：隐藏 Mapping/IME/DevTools/Model/鼠标键盘模式与本地预览画布；右侧 `StreamGatesPanel`（发送画面 / 接受控制）→ `set_stream_gate` / `set_control_gate`。输入策略由 `resolveInputMethods(isDesktop)` 决定。远端画面与操控在 `controller_web`（agent `:9997`）。
+**薄客户端 (`lib/features.ts` `THIN_CLIENT`)**：隐藏 Mapping/IME/DevTools/Model/鼠标键盘模式与本地预览画布；右侧 `StreamGatesPanel`（发送画面 / 接受控制）→ `set_stream_gate` / `set_control_gate`。捕获/输入设置在 `controller_web`（由独立 `controller_server` 提供）；agent 出站 `connect_server`。
 
 **预览映射（非 thin 调试）**：`mappingEnabled && previewing` 时 `set_mapping_controller {on:1}`；生产/thin 不依赖。
