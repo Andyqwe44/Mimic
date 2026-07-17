@@ -123,9 +123,9 @@ export function SettingsView({
   hasUpdate,
   isAdmin,
   onSwitchPermission,
-  serverHost, serverPort,
-  onServerHostChange, onServerPortChange,
-  serverConnected, onToggleServer,
+  serverHost: _serverHost, serverPort: _serverPort,
+  onServerHostChange: _onServerHostChange, onServerPortChange: _onServerPortChange,
+  serverConnected: _serverConnected, onToggleServer: _onToggleServer,
 }: {
   snapMethod: string; setSnapMethod: (m: string) => void
   streamMethod: string; setStreamMethod: (m: string) => void
@@ -301,12 +301,6 @@ export function SettingsView({
         expectedCaptureState={expectedCaptureState}
         setExpectedCaptureState={setExpectedCaptureState}
         expanded={connExpanded} onToggle={() => setConnExpanded((v) => !v)}
-        serverHost={serverHost}
-        serverPort={serverPort}
-        onServerHostChange={onServerHostChange}
-        onServerPortChange={onServerPortChange}
-        serverConnected={serverConnected}
-        onToggleServer={onToggleServer}
       />
 
       {!THIN_CLIENT && (

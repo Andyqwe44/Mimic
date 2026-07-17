@@ -63,10 +63,16 @@ export default function App() {
 
   // ── Right panel expanded/collapsed state + refs (used in layout callbacks) ──
   const [connectionExpanded, setConnectionExpanded] = useState(true)
+  const [peerExpanded, setPeerExpanded] = useState(true)
+  const [gatesExpanded, setGatesExpanded] = useState(true)
   const [screenshotExpanded, setScreenshotExpanded] = useState(false)
   const [logExpanded, setLogExpanded] = useState(true)
   const connectionExpandedRef = useRef(connectionExpanded)
   connectionExpandedRef.current = connectionExpanded
+  const peerExpandedRef = useRef(peerExpanded)
+  peerExpandedRef.current = peerExpanded
+  const gatesExpandedRef = useRef(gatesExpanded)
+  gatesExpandedRef.current = gatesExpanded
   const screenshotExpandedRef = useRef(screenshotExpanded)
   screenshotExpandedRef.current = screenshotExpanded
   const logExpandedRef = useRef(logExpanded)
@@ -75,9 +81,13 @@ export default function App() {
   // ── Pin lock — prevents auto-layout from changing pinned panels ──
   // null = not pinned; true/false = locked to that expanded state
   const connPinLocked = useRef<boolean | null>(null)
+  const peerPinLocked = useRef<boolean | null>(null)
+  const gatesPinLocked = useRef<boolean | null>(null)
   const ssPinLocked = useRef<boolean | null>(null)
   const logPinLocked = useRef<boolean | null>(null)
   const [connectionPinned, setConnectionPinned] = useState(false)
+  const [peerPinned, setPeerPinned] = useState(false)
+  const [gatesPinned, setGatesPinned] = useState(false)
   const [screenshotPinned, setScreenshotPinned] = useState(false)
   const [logPinned, setLogPinned] = useState(false)
   const ssHasContentRef = useRef(false)   // tracks whether Screenshot canvas has rendered content
@@ -87,6 +97,16 @@ export default function App() {
   const setConnExpanded = useCallback((v: boolean): boolean => {
     if (connPinLocked.current !== null) return false
     setConnectionExpanded(v)
+    return true
+  }, [])
+  const setPeerPanelExpanded = useCallback((v: boolean): boolean => {
+    if (peerPinLocked.current !== null) return false
+    setPeerExpanded(v)
+    return true
+  }, [])
+  const setGatesPanelExpanded = useCallback((v: boolean): boolean => {
+    if (gatesPinLocked.current !== null) return false
+    setGatesExpanded(v)
     return true
   }, [])
   const setSsExpanded = useCallback((v: boolean): boolean => {
@@ -108,6 +128,24 @@ export default function App() {
     } else {
       connPinLocked.current = null
       setConnectionPinned(false)
+    }
+  }, [])
+  const togglePeerPin = useCallback(() => {
+    if (peerPinLocked.current === null) {
+      peerPinLocked.current = peerExpandedRef.current
+      setPeerPinned(true)
+    } else {
+      peerPinLocked.current = null
+      setPeerPinned(false)
+    }
+  }, [])
+  const toggleGatesPin = useCallback(() => {
+    if (gatesPinLocked.current === null) {
+      gatesPinLocked.current = gatesExpandedRef.current
+      setGatesPinned(true)
+    } else {
+      gatesPinLocked.current = null
+      setGatesPinned(false)
     }
   }, [])
   const toggleSsPin = useCallback(() => {
@@ -816,7 +854,6 @@ export default function App() {
     () => (typeof boot.serverPort === 'string' && boot.serverPort ? boot.serverPort : '9997'),
   )
   const [serverConnected, setServerConnected] = useState(false)
-  const [peerExpanded, setPeerExpanded] = useState(true)
   const [peerControlMode, setPeerControlMode] = useState<'human' | 'ai'>('human')
   const [peerTransport, setPeerTransport] = useState('none')
   const [peerRole, setPeerRole] = useState('idle')
@@ -1534,18 +1571,14 @@ export default function App() {
                 expanded={connectionExpanded}
                 onToggle={() => setConnExpanded(!connectionExpandedRef.current)}
                 pinned={connectionPinned} onTogglePin={toggleConnPin}
-                serverHost={serverHost}
-                serverPort={serverPort}
-                onServerHostChange={setServerHost}
-                onServerPortChange={setServerPort}
-                serverConnected={serverConnected}
-                onToggleServer={toggleServerConnect}
               />
             </div>
-            <div className="shrink-0">
+            <div className="shrink-0 min-w-0">
               <PeerPanel
                 expanded={peerExpanded}
-                onToggle={() => setPeerExpanded((v) => !v)}
+                onToggle={() => setPeerPanelExpanded(!peerExpandedRef.current)}
+                pinned={peerPinned}
+                onTogglePin={togglePeerPin}
                 controlMode={peerControlMode}
                 onControlMode={setPeerControlMode}
                 onRole={setPeerRole}
@@ -1563,12 +1596,12 @@ export default function App() {
               />
               {peerControlMode === 'ai' && peerTransport !== 'none' && (
                 <div className="mt-2 text-[11px] text-amber-500 bg-amber-500/10 rounded-lg px-2 py-1.5">
-                  AI control mode — actions from local model; target still enforced on peer.
+                  {t('peer.ai_mode_hint')}
                 </div>
               )}
               {remotePeerWindows.length > 0 && (
-                <div className="mt-2 rounded-xl bg-bg-secondary ring-1 ring-inset ring-border p-2 space-y-1 max-h-40 overflow-y-auto">
-                  <div className="text-[11px] font-medium text-text-secondary px-1">Remote windows</div>
+                <div className="mt-2 rounded-xl bg-bg-secondary ring-1 ring-inset ring-border p-2 space-y-1 max-h-40 overflow-y-auto min-w-0">
+                  <div className="text-[11px] font-medium text-text-secondary px-1">{t('peer.remote_windows')}</div>
                   {remotePeerWindows.map((w) => (
                     <button
                       key={w.hwnd}
@@ -1587,7 +1620,7 @@ export default function App() {
               )}
             </div>
             {/* Thin client: gates instead of local screenshot preview */}
-            <div className="shrink-0 overflow-hidden">
+            <div className="shrink-0 overflow-hidden min-w-0">
               {THIN_CLIENT ? (
                 <StreamGatesPanel
                   streamOn={previewing}
@@ -1595,7 +1628,11 @@ export default function App() {
                   onToggleStream={togglePreview}
                   onToggleControl={toggleAcceptControl}
                   targetTitle={displayTargetTitle(selWindow.title, t)}
-                  serverConnected={serverConnected}
+                  linkReady={serverConnected || (peerRole === 'controlled' && peerTransport !== 'none')}
+                  expanded={gatesExpanded}
+                  onToggle={() => setGatesPanelExpanded(!gatesExpandedRef.current)}
+                  pinned={gatesPinned}
+                  onTogglePin={toggleGatesPin}
                 />
               ) : (
                 <ScreenshotPanel
