@@ -7,21 +7,21 @@
 #endif
 #define MyAppPublisher "Mimic"
 #define MyAppURL "https://gitee.com/Andyqwe44/mimic"
-#define MyAppExeName "monitor_app.exe"
+#define MyAppExeName "mimic_client.exe"
 #ifndef MimicCdnBase
 #define MimicCdnBase "http://47.107.43.5/mimic"
 #endif
 
 [Setup]
 AppId={{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
-AppMutex=Global\GameAgentMonitor_8A3F2D
+AppMutex=Global\MimicClient_8A3F2D
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
-DefaultDirName={autopf}\GameAgentMonitor
+DefaultDirName={autopf}\MimicClient
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 OutputDir=..\release
@@ -31,7 +31,7 @@ SolidCompression=yes
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
-UninstallDisplayIcon={app}\bin\monitor_app.exe
+UninstallDisplayIcon={app}\bin\mimic_client.exe
 UninstallDisplayName={#MyAppName}
 VersionInfoVersion={#MyAppVersion}
 VersionInfoCompany={#MyAppPublisher}
@@ -50,15 +50,15 @@ Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\bin\{#MyAppExeName}"; Tasks: desktopicon; Check: PayloadReady
 
 [Registry]
-Root: HKLM; Subkey: "SOFTWARE\GameAgentMonitor"; ValueType: string; ValueName: "InstallPath"; ValueData: "{app}"; Flags: uninsdeletekey
-Root: HKLM; Subkey: "SOFTWARE\GameAgentMonitor"; ValueType: string; ValueName: "Version"; ValueData: "{#MyAppVersion}"; Flags: uninsdeletekey
+Root: HKLM; Subkey: "SOFTWARE\MimicClient"; ValueType: string; ValueName: "InstallPath"; ValueData: "{app}"; Flags: uninsdeletekey
+Root: HKLM; Subkey: "SOFTWARE\MimicClient"; ValueType: string; ValueName: "Version"; ValueData: "{#MyAppVersion}"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers"; ValueType: none; ValueName: "{app}\bin\{#MyAppExeName}"; Flags: deletevalue
 
 [Dirs]
-Name: "{localappdata}\GameAgentMonitor"; Flags: uninsalwaysuninstall
+Name: "{localappdata}\MimicClient"; Flags: uninsalwaysuninstall
 
 [UninstallDelete]
-Type: filesandordirs; Name: "{localappdata}\GameAgentMonitor"
+Type: filesandordirs; Name: "{localappdata}\MimicClient"
 Type: filesandordirs; Name: "{app}"
 
 [Run]
@@ -115,7 +115,7 @@ begin
     if not ExpandPayload(ZipPath, ExpandConstant('{app}')) then
       RaiseException('Expand-Archive failed — is PowerShell available?');
     if not FileExists(ExpandConstant('{app}\bin\{#MyAppExeName}')) then
-      RaiseException('Payload incomplete: bin\monitor_app.exe not found');
+      RaiseException('Payload incomplete: bin\mimic_client.exe not found');
     DownloadOk := True;
   except
     RaiseException('CDN install failed: ' + GetExceptionMessage);

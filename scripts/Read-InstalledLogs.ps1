@@ -1,13 +1,13 @@
 <#
 .SYNOPSIS
-  Snapshot the INSTALLED GameAgentMonitor's runtime logs + version.json into
+  Snapshot the INSTALLED MimicClient's runtime logs + version.json into
   tmp/installed-logs/ so Claude Code (running in the dev repo) can debug the
   real install without guessing where it lives.
 
 .DESCRIPTION
   The installed app lives in a separate folder from this repo. Its prod logs go
   to either {install}\bin\log (0.3.5 and earlier) or
-  %LOCALAPPDATA%\GameAgentMonitor\log (0.3.6+). This script:
+  %LOCALAPPDATA%\MimicClient\log (0.3.6+). This script:
     1. Locates the install dir (override -> registry -> Uninstall -> disk scan).
     2. Copies the newest N log files from BOTH candidate log dirs.
     3. Copies the install + appdata version.json (key evidence).
@@ -17,7 +17,7 @@
 
 .EXAMPLE
   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Read-InstalledLogs.ps1
-  powershell ... -File scripts\Read-InstalledLogs.ps1 -InstallDir "D:\Apps\GameAgentMonitor" -Count 8
+  powershell ... -File scripts\Read-InstalledLogs.ps1 -InstallDir "D:\Apps\MimicClient" -Count 8
 #>
 [CmdletBinding()]
 param(
@@ -43,8 +43,8 @@ function Resolve-InstallDir {
         Warn2 "override not found: $Override"
     }
 
-    # a) registry InstallPath (installer sets HKLM\SOFTWARE\GameAgentMonitor)
-    foreach ($hive in @('HKLM:\SOFTWARE\GameAgentMonitor','HKLM:\SOFTWARE\WOW6432Node\GameAgentMonitor')) {
+    # a) registry InstallPath (installer sets HKLM\SOFTWARE\MimicClient)
+    foreach ($hive in @('HKLM:\SOFTWARE\MimicClient','HKLM:\SOFTWARE\WOW6432Node\MimicClient')) {
         try {
             $p = (Get-ItemProperty -Path $hive -Name InstallPath -ErrorAction Stop).InstallPath
             if ($p -and (Test-Path $p)) { Note "registry: $p"; return $p }
@@ -69,13 +69,13 @@ function Resolve-InstallDir {
         } catch {}
     }
 
-    # c) disk scan for monitor_app.exe sitting in a \bin\ folder
-    Note "scanning disk for monitor_app.exe (registry/uninstall empty)..."
+    # c) disk scan for mimic_client.exe sitting in a \bin\ folder
+    Note "scanning disk for mimic_client.exe (registry/uninstall empty)..."
     $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, 'D:\', 'D:\Program Files', 'E:\') |
              Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
     foreach ($r in $roots) {
         try {
-            $hit = Get-ChildItem -Path $r -Recurse -Filter monitor_app.exe -ErrorAction SilentlyContinue -File |
+            $hit = Get-ChildItem -Path $r -Recurse -Filter mimic_client.exe -ErrorAction SilentlyContinue -File |
                    Where-Object { $_.FullName -notmatch '\\codes\\' -and (Split-Path $_.Directory -Leaf) -eq 'bin' } |
                    Select-Object -First 1
             if ($hit) { $inst = Split-Path $hit.Directory -Parent; Note "disk scan: $inst"; return $inst }
@@ -88,12 +88,12 @@ Step "Locating install dir"
 $install = Resolve-InstallDir -Override $InstallDir
 if (-not $install) {
     Warn2 "install dir not found. Pass -InstallDir <path> explicitly."
-    Warn2 "(app installs to {install}\bin\monitor_app.exe; give me the folder that CONTAINS bin\)"
+    Warn2 "(app installs to {install}\bin\mimic_client.exe; give me the folder that CONTAINS bin\)"
     exit 3
 }
 
 # ── 2. Candidate sources ─────────────────────────────────────────────────────
-$appdataRoot = Join-Path $env:LOCALAPPDATA 'GameAgentMonitor'
+$appdataRoot = Join-Path $env:LOCALAPPDATA 'MimicClient'
 $sources = @(
     @{ tag = 'install-bin-log'; dir = (Join-Path $install 'bin\log') },
     @{ tag = 'appdata-log';     dir = (Join-Path $appdataRoot 'log') }
@@ -108,16 +108,16 @@ if ($Clean -and (Test-Path $out)) { Remove-Item $out -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 
 $index = New-Object System.Collections.Generic.List[string]
-$index.Add("# Installed GameAgentMonitor log snapshot")
+$index.Add("# Installed MimicClient log snapshot")
 $index.Add("install dir : $install")
 
 # real exe ProductVersion (independent of version.json — distinguishes H2)
-$exe = Join-Path $install 'bin\monitor_app.exe'
+$exe = Join-Path $install 'bin\mimic_client.exe'
 if (Test-Path $exe) {
     $vi = (Get-Item $exe).VersionInfo
     $index.Add("exe version : $($vi.ProductVersion)  (file $($vi.FileVersion))")
 } else {
-    $index.Add("exe version : <monitor_app.exe not found at $exe>")
+    $index.Add("exe version : <mimic_client.exe not found at $exe>")
 }
 $index.Add("captured    : (Date.Now unavailable in this note)")
 $index.Add("")

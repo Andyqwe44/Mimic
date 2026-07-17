@@ -5,13 +5,13 @@ param(
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path $PSScriptRoot -Parent
 . "$PSScriptRoot\lib\Common.ps1"
-if (-not $Version) { $Version = Get-AppVersion }
+if (-not $Version) { $Version = Get-ServerVersion }
 
-$src = Join-Path $Root 'signaling_server'
+$src = Join-Path $Root 'mimic_server'
 $outRoot = Join-Path $Root "release\MimicServer"
 $zip = Join-Path $Root "release\MimicServer_v$Version.zip"
 
-if (-not (Test-Path (Join-Path $src 'server.js'))) { throw 'signaling_server/server.js missing' }
+if (-not (Test-Path (Join-Path $src 'server.js'))) { throw 'mimic_server/server.js missing' }
 
 Push-Location $src
 try {
@@ -38,8 +38,8 @@ cd /opt/mimic-server
 node server.js --host 0.0.0.0 --port 8443
 ``````
 
-Put nginx/caddy TLS in front. Clients set signaling URL to https://your.domain
-(and use wss via the reverse proxy path /ws).
+Put nginx/caddy TLS in front if needed. Clients default to Bootstrap
+http://47.107.43.5:8443 — every MimicServer auto-joins the mesh on start.
 
 Default account after first run: demo / demo (change in production).
 

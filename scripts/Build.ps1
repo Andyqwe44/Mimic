@@ -1,19 +1,18 @@
 # Build.ps1 — compile all native modules in one VS Dev Shell.
 #
 # Replaces logger/build_logger_lib.cmd, capture/build_capture_lib.cmd,
-# input/build_input_lib.cmd, updater/build.cmd, monitor_app/build.cmd +
+# input/build_input_lib.cmd, updater/build.cmd, mimic_client/build.cmd +
 # build_dev.cmd — and the `cmd /c build_*.cmd` chain in build_release.cmd.
 # One PowerShell session enters the build shell ONCE, then builds every module.
 #
 #   powershell -File scripts\Build.ps1                # build everything (prod)
 #   powershell -File scripts\Build.ps1 -Module logger # build one module
 #
-# Modules migrated so far: logger. (capture/input/updater/monitor_app to follow.)
+# Modules migrated so far: logger. (capture/input/updater/mimic_client to follow.)
 
 param(
-    [ValidateSet('all', 'logger', 'capture', 'input', 'updater', 'monitor_app', 'controller_server', 'test_target', 'h264_bench')]
-    [string[]]$Module = @('all'),
-    [switch]$Dev
+    [ValidateSet('all', 'logger', 'capture', 'input', 'updater', 'mimic_client', 'controller_server', 'test_target', 'h264_bench')]
+    [string[]]$Module = @('all')
 )
 
 . "$PSScriptRoot\lib\Common.ps1"
@@ -96,7 +95,7 @@ function Build-Input {
     $dir = Join-Path $Root 'input'
     New-Item -ItemType Directory -Force -Path (Join-Path $dir 'build') | Out-Null
     $cflags = @('/nologo', '/EHsc', '/std:c++17', '/source-charset:utf-8', '/I', 'include', '/I', "$Root\common\include",
-        '/I', "$Root\monitor_app\src", '/I', "$Root\capture\include", '/DGAM_BUILD_DLL', '/MT', '/c')
+        '/I', "$Root\mimic_client\src", '/I', "$Root\capture\include", '/DGAM_BUILD_DLL', '/MT', '/c')
     $syslibs = @('user32.lib', "$Root\logger\build\logger.lib")
     $commonLib = "$Root\input\build\input_common.lib"
     $mods = @(
@@ -142,30 +141,21 @@ function Build-Updater {
     Write-Ok 'updater.exe'
 }
 
-function Build-MonitorApp {
-    $cfg = if ($Dev) { 'DEV' } else { 'PROD' }
-    Write-Step "monitor_app.exe ($cfg, v$Ver)"
-    $dir = Join-Path $Root 'monitor_app'
-    $out = if ($Dev) { 'build_dev' } else { 'build' }
+function Build-MimicClient {
+    Write-Step "mimic_client.exe (PROD, v$Ver)"
+    $dir = Join-Path $Root 'mimic_client'
+    $out = 'build'
     Push-Location $dir
     try {
-        # Fresh package layout. Prod: build\{bin,frontend,config}. Dev: build_dev\{bin,config}
-        # (Dev still needs settings.default.json so paths_init can seed AppData_Dev.)
         if (Test-Path $out) { Remove-Item -Recurse -Force $out }
-        New-Item -ItemType Directory -Force -Path "$out\bin", "$out\config" | Out-Null
-        if (-not $Dev) { New-Item -ItemType Directory -Force -Path "$out\frontend" | Out-Null }
+        New-Item -ItemType Directory -Force -Path "$out\bin", "$out\config", "$out\frontend" | Out-Null
 
         $inc = @('/I', 'src', '/I', 'dep', '/I', "$Root\capture\include", '/I', "$Root\common\include")
-        $cflags = if ($Dev) {
-            @('/nologo', '/EHsc', '/std:c++17', '/source-charset:utf-8') + $inc + @('/DDEV_MODE', '/Od', '/Zi', '/MT')
-        }
-        else {
-            @('/nologo', '/EHsc', '/std:c++17', '/source-charset:utf-8') + $inc + @('/DNDEBUG', '/O2', '/GS-', '/Gy', '/Gw', '/MT')
-        }
+        $cflags = @('/nologo', '/EHsc', '/std:c++17', '/source-charset:utf-8') + $inc + @('/DNDEBUG', '/O2', '/GS-', '/Gy', '/Gw', '/MT')
         $lflags = @('d3d11.lib', 'dxgi.lib', 'windowsapp.lib', 'user32.lib', 'gdi32.lib', 'ole32.lib',
             'oleaut32.lib', 'ws2_32.lib', 'windowscodecs.lib', 'dwmapi.lib', 'shell32.lib', 'shlwapi.lib',
             'winhttp.lib', 'bcrypt.lib', 'advapi32.lib', 'mfplat.lib', 'mf.lib', 'mfuuid.lib', 'wmcodecdspuuid.lib')
-        $linkflags = if ($Dev) { @('/DEBUG:FULL') } else { @('/OPT:REF', '/OPT:ICF', '/Brepro') }
+        $linkflags = @('/OPT:REF', '/OPT:ICF', '/Brepro')
         $srcs = @('src\main.cpp', 'src\commands.cpp', 'src\h264_encoder.cpp', 'src\ws_client.cpp',
             'src\peer_session.cpp',
             'src\virtual_desktop.cpp', 'src\paths.cpp', 'src\sha256_util.cpp', 'src\update_verify.cpp')
@@ -174,20 +164,18 @@ function Build-MonitorApp {
         (@('common', 'sendinput', 'winapi', 'postmessage', 'driver') | ForEach-Object { "$Root\input\build\input_$_.lib" })
 
         rc.exe /nologo /fo "$out\app.res" app.rc
-        if ($LASTEXITCODE) { throw 'monitor_app: rc failed' }
+        if ($LASTEXITCODE) { throw 'mimic_client: rc failed' }
 
-        $clArgs = $cflags + @("/Fo$out\", "/Fe:$out\bin\monitor_app.exe") + $srcs + @("$out\app.res") +
+        $clArgs = $cflags + @("/Fo$out\", "/Fe:$out\bin\mimic_client.exe") + $srcs + @("$out\app.res") +
         $libs + $lflags + @('/link') + $linkflags
         cl.exe @clArgs
-        if ($LASTEXITCODE) { throw 'monitor_app: cl failed' }
+        if ($LASTEXITCODE) { throw 'mimic_client: cl failed' }
 
-        # Copy the 12 sibling DLLs next to the exe (needed at runtime, dev + prod).
         $dlls = @("$Root\logger\build\logger.dll") +
         (@('common', 'wgc', 'gdi', 'pw', 'screen', 'desktop') | ForEach-Object { "$Root\capture\build\capture_$_.dll" }) +
         (@('common', 'sendinput', 'winapi', 'postmessage', 'driver') | ForEach-Object { "$Root\input\build\input_$_.dll" })
         foreach ($d in $dlls) { Copy-Item $d "$out\bin\" -Force }
 
-        # Stage test_target next to the exe so launch_test_target can find it.
         $ttExe = Join-Path $Root 'test_target\build\test_target.exe'
         $ttUi = Join-Path $Root 'test_target\ui'
         if (Test-Path $ttExe) {
@@ -196,23 +184,19 @@ function Build-MonitorApp {
             if (Test-Path $ttUi) { Copy-Item $ttUi "$out\bin\test_target\" -Recurse -Force }
         }
 
-        # Always stage settings.default.json (Dev seeds GameAgentMonitor_Dev; Prod ships in package).
         $settings = Join-Path $Root 'config\settings.default.json'
         if (Test-Path $settings) { Copy-Item $settings "$out\config\" -Force }
 
-        if (-not $Dev) {
-            # Prod package: updater(+.new) + frontend(dist) into the layout.
-            $upd = Join-Path $Root 'updater\build\updater.exe'
-            if (Test-Path $upd) {
-                Copy-Item $upd "$out\bin\" -Force
-                Copy-Item "$out\bin\updater.exe" "$out\bin\updater.new" -Force
-            }
-            $dist = Join-Path $Root 'monitor_web\dist'
-            if (Test-Path $dist) { Copy-Item "$dist\*" "$out\frontend\" -Recurse -Force }
+        $upd = Join-Path $Root 'updater\build\updater.exe'
+        if (Test-Path $upd) {
+            Copy-Item $upd "$out\bin\" -Force
+            Copy-Item "$out\bin\updater.exe" "$out\bin\updater.new" -Force
         }
+        $dist = Join-Path $Root 'mimic_web\dist'
+        if (Test-Path $dist) { Copy-Item "$dist\*" "$out\frontend\" -Recurse -Force }
     }
     finally { Pop-Location }
-    Write-Ok "monitor_app.exe ($cfg)"
+    Write-Ok "mimic_client.exe"
 }
 
 function Build-ControllerServer {
@@ -261,12 +245,12 @@ function Build-TestTarget {
     New-Item -ItemType Directory -Force -Path $bld | Out-Null
     Push-Location $dir
     try {
-        $wvLib = Join-Path $Root 'monitor_app\dep\WebView2LoaderStatic.lib'
+        $wvLib = Join-Path $Root 'mimic_client\dep\WebView2LoaderStatic.lib'
         if (-not (Test-Path $wvLib)) {
             throw "WebView2LoaderStatic.lib missing at $wvLib (needed to link test_target)"
         }
         $cflags = @('/nologo', '/EHsc', '/std:c++17', '/source-charset:utf-8',
-            '/I', "$Root\monitor_app\dep", '/MT', '/O2', '/DNDEBUG')
+            '/I', "$Root\mimic_client\dep", '/MT', '/O2', '/DNDEBUG')
         $libs = @($wvLib, 'user32.lib', 'gdi32.lib', 'ole32.lib', 'oleaut32.lib',
             'ws2_32.lib', 'shell32.lib', 'shlwapi.lib', 'version.lib', 'advapi32.lib')
         $clArgs = $cflags + @("/Fo$bld\", "/Fe:$bld\test_target.exe", 'test_target.cpp') +
@@ -289,7 +273,7 @@ function Build-H264Bench {
     $dir = Join-Path $Root 'test'
     $bld = Join-Path $dir 'build'
     New-Item -ItemType Directory -Force -Path $bld | Out-Null
-    $inc = @('/I', "$Root\monitor_app\src", '/I', "$Root\capture\include", '/I', "$Root\common\include", '/I', "$Root\logger")
+    $inc = @('/I', "$Root\mimic_client\src", '/I', "$Root\capture\include", '/I', "$Root\common\include", '/I', "$Root\logger")
     $cflags = @('/nologo', '/EHsc', '/std:c++17', '/source-charset:utf-8', '/DNOMINMAX', '/DNDEBUG', '/O2', '/MT') + $inc
     $libs = @(
         "$Root\logger\build\logger.lib",
@@ -303,7 +287,7 @@ function Build-H264Bench {
         $clArgs = $cflags + @(
             "/Fo$bld\", "/Fe:$bld\h264_hw_bench.exe",
             'h264_hw_bench.cpp',
-            "$Root\monitor_app\src\h264_encoder.cpp"
+            "$Root\mimic_client\src\h264_encoder.cpp"
         ) + $libs + $lflags
         cl.exe @clArgs
         if ($LASTEXITCODE) { throw 'h264_hw_bench: cl failed' }
@@ -315,7 +299,7 @@ function Build-H264Bench {
     Write-Ok 'h264_hw_bench.exe'
 }
 
-# Dispatch — flat conditionals in dependency order (capture/input/monitor_app link
+# Dispatch — flat conditionals in dependency order (capture/input/mimic_client link
 # against logger.lib etc). Explicit ifs, not foreach+switch.
 $all = $Module -contains 'all'
 if ($all -or $Module -contains 'logger')      { Build-Logger }
@@ -325,4 +309,4 @@ if ($all -or $Module -contains 'updater')     { Build-Updater }
 if ($all -or $Module -contains 'test_target') { Build-TestTarget }
 if ($all -or $Module -contains 'h264_bench')  { Build-H264Bench }
 if ($all -or $Module -contains 'controller_server') { Build-ControllerServer }
-if ($all -or $Module -contains 'monitor_app') { Build-MonitorApp }
+if ($all -or $Module -contains 'mimic_client') { Build-MimicClient }

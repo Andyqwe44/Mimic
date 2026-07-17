@@ -1,0 +1,567 @@
+{
+  "common": {
+    "cancel": "取消",
+    "close": "关闭",
+    "ok": "确定",
+    "loading": "加载中…",
+    "not_implemented": "未实现",
+    "default": "默认",
+    "ready": "就绪"
+  },
+
+  "topbar": {
+    "monitor": "监视",
+    "monitor_tip": "实时预览与控制 — 远程操作目标窗口",
+    "log": "日志",
+    "log_tip": "查看当前会话与历史日志文件",
+    "settings": "设置",
+    "settings_tip": "配置截图、模型、主题与输入映射",
+    "devtools": "开发工具",
+    "devtools_tip": "开发人员工具 — 测试目标 · 自检 · 帧保存 · 界面预览（与 Dev/Prod 构建版本无关）",
+    "start": "启动",
+    "start_tip": "启动 Agent 任务",
+    "stop": "停止",
+    "stop_tip": "停止所有运行中的任务",
+    "perm_normal_abbr": "普",
+    "perm_admin_abbr": "管"
+  },
+
+  "bottombar": {
+    "tcp": "TCP :9999",
+    "agent_online": "控制端在线",
+    "waiting_connection": "等待连接",
+    "update": "更新",
+    "update_title": "有可用更新 — 点击安装"
+  },
+
+  "connection": {
+    "title": "连接",
+    "select": "选择",
+    "select_tip": "选择要捕获的窗口或桌面",
+    "disconnect_tip": "断开当前窗口连接，回到桌面",
+    "window_title": "窗口标题",
+    "window_title_tip": "已选择的目标窗口（只读，请用「选择」更改）",
+    "entire_desktop": "整个桌面",
+    "entire_desktop_n": "整个桌面 (D{n})",
+    "category_desktop": "桌面",
+    "category_window": "窗口",
+    "minimized_warning": "窗口已最小化，{method} 无法截取。请切换为 WGC 或将窗口恢复前台。",
+    "pin_tip": "固定面板 — 不受自动布局影响",
+    "unpin_tip": "取消固定 — 允许自动布局调整"
+  },
+
+  "peer": {
+    "title": "对等",
+    "server_url": "信令服务器",
+    "server_url_ph": "http://主机:8443",
+    "user": "用户名",
+    "user_ph": "用户名",
+    "password": "密码",
+    "password_ph": "密码",
+    "device_name": "本机名称",
+    "device_name_ph": "例如：书房电脑",
+    "login": "登录",
+    "login_tip": "登录到信令服务器",
+    "register": "注册",
+    "register_tip": "在此服务器创建账号",
+    "probe": "测延迟",
+    "probe_tip": "探测服务器是否可达并测量延迟",
+    "logout": "退出",
+    "online": "已在线",
+    "logged_out": "已退出",
+    "login_failed": "登录失败",
+    "register_ok": "注册成功 — 请登录",
+    "register_failed": "注册失败",
+    "probe_ok": "服务器可达 · {ms} ms",
+    "probe_fail": "服务器健康检查失败",
+    "server_missing": "服务器缺失 / 不可达",
+    "cluster_hint": "经 Bootstrap 发现 {n} 台服务器。多区域选最近与跨节点互见将后续支持。",
+    "badge_offline": "未登录",
+    "badge_probing": "探测中…",
+    "badge_missing": "服务器缺失",
+    "badge_reachable": "可达 · {ms}ms",
+    "badge_online": "已登录",
+    "badge_online_rtt": "已登录 · {ms}ms",
+    "role_controller": "控制中",
+    "role_controlled": "被控中",
+    "role_outgoing": "呼叫中…",
+    "role_ringing": "来电",
+    "devices": "本账号设备",
+    "no_devices": "暂无其他在线设备",
+    "control": "控制",
+    "invite_from": "来自 {name} 的邀请",
+    "accept": "接受",
+    "accept_tip": "允许对方控制本机",
+    "reject": "拒绝",
+    "reject_tip": "拒绝邀请",
+    "hangup": "挂断",
+    "hangup_tip": "结束对等会话",
+    "invite_sent": "邀请已发送…",
+    "invite_failed": "邀请失败",
+    "invite_rejected": "邀请被拒绝",
+    "session_started": "会话已开始",
+    "session_ended": "会话已结束",
+    "human_tip": "人工控制",
+    "ai_tip": "AI 控制（本地模型）",
+    "remote_windows": "远程窗口",
+    "ai_mode_hint": "AI 控制模式 — 动作来自本地模型；目标窗口仍由对端强制校验。"
+  },
+
+  "screenshot": {
+    "title": "截图",
+    "snapshot_tip": "单帧截图",
+    "stop_preview_tip": "停止实时预览",
+    "start_preview_tip": "开始实时预览",
+    "pin_tip": "固定面板 — 不受自动布局影响",
+    "unpin_tip": "取消固定 — 允许自动布局调整",
+    "empty_hint": "点击 📷 单帧截图 或 ▶ 实时预览"
+  },
+
+  "log": {
+    "title": "日志",
+    "current_session": "当前会话",
+    "no_logs": "暂无日志",
+    "no_logs_yet": "尚未有日志",
+    "no_history": "未找到历史日志文件",
+    "click_to_load": "点击加载",
+    "lines_count": "{n} 行",
+    "load_failed": "（加载失败）",
+    "scroll_bottom": "滚动到底部",
+    "already_bottom": "已在底部",
+    "copy_all": "复制全部日志",
+    "copy_log": "复制日志",
+    "copy_file_content": "复制文件内容",
+    "refresh_file": "刷新文件内容",
+    "pin_tip": "固定面板 — 不受自动布局影响",
+    "unpin_tip": "取消固定 — 允许自动布局调整"
+  },
+
+  "targetPicker": {
+    "select_target": "选择目标",
+    "capture_mode": "捕获模式",
+    "search": "搜索…",
+    "filter_all": "筛选: 全部",
+    "filter_desktop": "筛选: 桌面",
+    "filter_window": "筛选: 窗口",
+    "all": "全部",
+    "desktop": "桌面",
+    "windows": "窗口",
+    "refresh": "刷新窗口列表",
+    "self_window_tip": "自身窗口，禁止捕获",
+    "select_tip": "选择: {title}",
+    "select_remote_tip": "选择: {title}（将切换到 D{n}）",
+    "back_tip": "返回窗口选择",
+    "mode_description": "请选择目标窗口的当前状态，系统将自动推荐最优捕获方案：",
+    "footer_summary": "{items} 项 — {desks} 个桌面，{wins} 个窗口"
+  },
+
+  "settings": {
+    "capture": "捕获",
+    "snapshot": "截图",
+    "snapshot_auto": "自动",
+    "snapshot_auto_tip": "自动根据窗口状态选择截图方式：前台/后台→WGC，桌面/最小化→DXGI",
+    "stream": "预览流",
+    "stream_auto": "自动",
+    "stream_auto_tip": "自动选择流传输方式（当前仅 WGC 支持实时流）",
+    "dxgi_stream_tip": "DXGI 流未实现，仅 WGC 支持实时预览",
+    "render_method": "渲染方式",
+    "input_policy": "输入策略",
+    "input_policy_desc": "桌面目标 → 前台 SendInput（可占用键鼠）。窗口目标 → 后台 SendMessage，坐标限制在窗口 [0,1] 内。远端控制端经 TCP 使用同一规则。",
+    "mouse_mode": "鼠标模式",
+    "mouse_hint": "虚拟指示器常驻 — 不影响本地鼠标使用",
+    "keyboard_mode": "键盘模式",
+    "keyboard_hint": "点击预览画面获取焦点后，键盘输入转发到目标窗口",
+    "keyboard_note1": "• 普通按键 — {keydown} / {keyup}",
+    "keyboard_note2": "• 组合键 — 自动识别（Ctrl+C 等，Ctrl 先按下再按 C）",
+    "keyboard_note3": "• 点击预览区外部 → 释放焦点，自动松开所有已按下按键",
+    "self_target": "自指规避",
+    "self_target_hint": "桌面捕获时，映射坐标可能落在 GAM 自身窗口",
+    "self_target_warn": "红色警告",
+    "self_target_warn_eng": "视觉提示",
+    "self_target_warn_desc": "光标移至 GAM 窗口区域时变红并弹出警告 — 简单安全",
+    "self_target_exclude": "排除窗口",
+    "self_target_exclude_eng": "从捕获中排除",
+    "self_target_exclude_desc": "桌面捕获画面中隐藏 GAM 窗口 — 需要 Windows 10 2004+",
+    "self_target_warn_badge": "默认",
+    "self_target_exclude_badge": "Win10+",
+
+    "model": "模型",
+    "model_desc": "基础模型 + 游戏专用微调适配器。",
+    "model_base": "模型",
+    "model_base_tip": "基础视觉模型",
+    "model_adapter": "适配器",
+    "model_adapter_tip": "游戏微调权重",
+
+    "general": "常规",
+    "permission": "运行权限",
+    "permission_normal": "普通",
+    "permission_admin": "管理员",
+    "permission_normal_tip": "普通用户权限（默认）— 操作普通程序足够，无 UAC 打扰",
+    "permission_admin_tip": "管理员权限 — 可操作以管理员运行的目标；点击弹 UAC 并重启程序",
+    "permission_current": "当前: {level}",
+    "permission_current_normal": "普通",
+    "permission_current_admin": "管理员",
+
+    "theme": "主题",
+    "theme_light": "亮色",
+    "theme_dark": "暗色",
+    "theme_system": "跟随系统",
+    "theme_light_tip": "亮色主题 — 白底黑字",
+    "theme_dark_tip": "暗色主题 — VSCode 风格深蓝灰",
+    "theme_system_tip": "跟随系统 — 自动切换亮暗",
+
+    "accent": "强调色",
+    "theme_names": ["海洋", "暮光", "潟湖", "日落", "兰花", "薄荷", "星云", "Dev"],
+
+    "language": "语言",
+    "language_en": "English",
+    "language_zh_cn": "简体中文",
+    "language_zh_tw": "繁體中文",
+
+    "log_dir": "日志目录",
+    "log_dir_tip": "日志文件存放路径",
+    "change_log_dir_tip": "修改日志目录",
+    "open_log_dir_tip": "在资源管理器中打开日志目录",
+
+    "keep_files": "保留文件",
+    "keep_files_tip": "日志面板中显示的历史日志文件数",
+    "keep_files_n": "{n} 个文件",
+
+    "dev_mode": "开发者模式",
+    "dev_mode_tip": "开发者模式 — 强制红色/黑客绿主题，解锁帧保存功能",
+
+    "mapping_key": "映射快捷键",
+    "press_keys": "请按键…",
+    "mapping_key_tip": "当前快捷键，点击「更改」可修改",
+    "change_mapping_tip": "点击后按下新快捷键，松开所有按键确认",
+    "cancel_mapping": "取消",
+    "change_mapping": "更改",
+    "modifier_only": "⚠ 纯修饰键",
+    "modifier_only_tip": "快捷键仅含修饰键（Ctrl/Alt/Shift/Win），可能与系统快捷键冲突。建议加入至少一个非修饰键，如字母、数字或 F1–F12。",
+    "hotkey_indicator_tip": "快捷键触发指示器 — 按下快捷键时闪烁绿光",
+
+    "about": "关于",
+    "game_agent_monitor": "Game Agent Monitor",
+    "version": "版本 {version}",
+    "check_update": "检查更新",
+    "check_update_latest": "有可用更新",
+    "check_update_latest_tip": "新版本可用，点击安装",
+    "check_update_tip": "检查新版本",
+    "gitee_tip": "在浏览器中打开项目 Gitee 页面",
+    "star_tip": "给项目点 Star 支持开发",
+    "star_github": "在 GitHub 上 Star",
+    "tech_stack": "C++ WebView2 · React · Tailwind · DXGI · WGC"
+  },
+
+  "monitor": {
+    "mapping": "映射",
+    "mapping_tip": "输入映射 ({hotkey})",
+    "snapshot": "截图",
+    "snapshot_tip": "单帧截图",
+    "stop": "停止",
+    "stop_tip": "停止实时预览",
+    "preview": "预览",
+    "preview_tip": "开始实时预览",
+    "no_preview": "未开始预览",
+    "no_preview_hint": "点击右上角「预览」开始实时预览",
+    "stream_gate": "发送画面",
+    "stream_gate_on": "停止发送",
+    "stream_gate_tip": "闸门：允许将 H.264 画面发送到控制端",
+    "control_gate": "接受控制",
+    "control_gate_on": "控制中",
+    "control_gate_tip": "闸门：允许应用控制端发来的键鼠指令",
+    "thin_status_title": "薄客户端 · 无本机预览",
+    "thin_status_body": "发送画面：{stream} · 接受控制：{control}\n用浏览器打开下方地址查看画面并操作",
+    "gate_open": "开",
+    "gate_closed": "关",
+    "remote_active": "远程控制中 · 鼠标{mm} · 键盘{km}",
+    "remote_hover": "悬停移动光标 · 点击控制 · 顶栏输入法键入 · 鼠标{mm}",
+    "desktop_preview": "桌面远程控制 · 鼠标{mm} · 键盘{km} · {state}",
+    "desktop_focused": "点击/键盘已激活",
+    "desktop_unfocused": "在顶栏输入法框键入",
+    "ime_proxy": "Monitor 输入法",
+    "ime_dock_title": "输入法",
+    "ime_dock_hint": "焦点在此 · 上屏后 Unicode 映射到上次点击处",
+    "ime_dock_composing": "组字中… 上屏落入此框后自动映射",
+    "ime_dock_placeholder": "输入…",
+    "self_target_warn": "⚠ 映射目标为 GAM 自身窗口 — 可在设置中切换为「排除窗口」模式",
+    "preview_no_mapping": "预览中 · 按 {hotkey} 或点击「映射」开启控制",
+    "mouse_seize": "Seize",
+    "mouse_semi": "Semi",
+    "mouse_bg": "Bg",
+    "key_seize": "Seize",
+    "key_sendmsg": "SendMsg",
+    "key_postmsg": "PostMsg",
+    "policy_foreground": "桌面 · 前台",
+    "policy_background": "窗口 · 后台"
+  },
+
+  "gates": {
+    "title": "远程闸门",
+    "target": "目标",
+    "need_link": "请先在「对等」面板进入被控会话（或连接控制端）后再开推流闸门",
+    "hint": "作为被控端：打开推流发送画面，打开接受控制允许输入。\n信令登录请在「对等」面板完成。",
+    "badge_stream_on": "画面开",
+    "badge_stream_off": "画面关",
+    "badge_control_on": "控制开",
+    "badge_control_off": "控制关"
+  },
+
+  "update": {
+    "checking": "检查更新",
+    "latest": "已是最新",
+    "error": "检查失败",
+    "update_available": "发现新版本",
+
+    "checking_text": "正在检查更新…",
+    "latest_text": "当前已是最新版本",
+    "error_text": "检查更新失败",
+    "error_fallback": "无法连接更新服务器，请稍后重试",
+    "current_version": "当前版本 v{version}",
+    "needs_full_installer": "需要下载完整安装包（更新机制不兼容），请前往 Gitee 下载最新安装程序。",
+    "unknown_error": "未知错误",
+
+    "full_package_hint": "本次为完整更新（下载全部文件）",
+    "role_old": "老版本",
+    "role_jump": "跳板版本",
+    "role_latest": "新版本",
+    "role_latest_placeholder": "再检查",
+    "jump_pad_first_hop": "仓库已迁移到 mimic：本次先升到跳板版 v{jump}。安装完成后请再点一次「检查更新」，才能继续升到最新。需要多轮手动更新，只更新一次不等于已到最新。",
+    "jump_pad_second_hop": "这是迁移第二步（跳板 v{jump} → v{latest}）。完成后即到当前最新版。",
+    "this_update": "本次更新",
+    "files": "{n} 个文件",
+    "completed_n": "（已完成 {n} 个）",
+    "extract": "解压",
+    "traffic": "流量",
+
+    "resume_banner": "检测到未完成的下载",
+    "resume_detail": "已完成 {done}/{total} 个文件（{doneSize} / {totalSize}）— 选择「继续下载」将跳过已完成部分，仅下载剩余文件。",
+
+    "file_roles": {
+      "main_exe": "主程序",
+      "updater": "更新器",
+      "manifest": "清单",
+      "logger": "日志",
+      "capture": "捕获",
+      "input": "输入",
+      "frontend": "界面",
+      "config": "配置",
+      "file": "文件"
+    },
+
+    "progress_download": "正在下载 {file}（{current}/{total}）",
+    "progress_done": "下载完成，正在重启安装…",
+    "progress_error": "下载失败：{file}",
+    "progress_preparing": "正在准备下载…",
+
+    "later": "稍后",
+    "later_tip": "稍后再更新",
+    "re_download": "重新下载",
+    "re_download_tip": "放弃已下载文件，从头下载全部",
+    "force_update": "全量更新",
+    "force_update_tip": "强制下载全部文件（逐文件覆盖，用于本地文件损坏或增量疑漏）",
+    "incremental": "增量更新",
+    "incremental_tip": "只下载变化的文件并安装",
+    "continue_download": "继续下载",
+    "continue_download_tip": "跳过已完成文件，仅下载剩余",
+    "installing": "安装中…",
+    "got_it": "知道了",
+    "got_it_tip": "关闭"
+  },
+
+  "state": {
+    "desktop": "桌面",
+    "foreground": "前台",
+    "background": "后台",
+    "minimized": "最小化",
+    "hidden": "隐藏",
+    "closed": "已关闭",
+    "unknown": "未知"
+  },
+
+  "capture": {
+    "wgc": {
+      "name": "WGC",
+      "eng": "GPU FramePool",
+      "rec": "前台/后台/桌面",
+      "desc": "GPU 加速，支持后台/遮挡窗口，前台后台及桌面首选"
+    },
+    "dxgi": {
+      "name": "DXGI",
+      "eng": "DesktopBlt",
+      "rec": "桌面/最小化",
+      "desc": "全桌面 GDI 位图，最小化窗口时唯一可行方案"
+    },
+    "render_shared": {
+      "name": "SharedBuffer",
+      "eng": "Zero-copy COM",
+      "rec": "当前",
+      "desc": "C++ COM SharedBuffer → JS ArrayBuffer → Canvas putImageData，零拷贝无编解码"
+    },
+    "render_h264": {
+      "name": "H.264",
+      "eng": "GPU MFT + MSE",
+      "rec": "未实现",
+      "desc": "GPU MFT 硬件编码 → fMP4 分片 → MSE → <video> 标签，低延迟高压缩"
+    },
+    "render_h265": {
+      "name": "H.265",
+      "eng": "GPU MFT + MSE",
+      "rec": "未实现",
+      "desc": "HEVC 硬件编码，压缩率更高但兼容性有限，需 Windows 11 + HEVC 扩展"
+    },
+    "modes": {
+      "foreground": {
+        "label": "前台",
+        "desc": "窗口可见且在最前 → 推荐 WGC GPU 加速"
+      },
+      "background": {
+        "label": "后台",
+        "desc": "窗口被遮挡但未最小化 → 推荐 WGC（唯一支持后台）"
+      },
+      "minimized": {
+        "label": "最小化",
+        "desc": "窗口已最小化 → 只能用 DesktopGDI 截桌面"
+      }
+    }
+  },
+
+  "mouse": {
+    "background": {
+      "name": "后台",
+      "eng": "SendMessage",
+      "rec": "推荐",
+      "desc": "全后台，完全不抢真实鼠标。桌面和窗口均通过位置命中与同步 SendMessage 操作目标控件；不激活目标窗口，虚拟圆圈只显示在真实映射位置"
+    },
+    "semi": {
+      "name": "半后台",
+      "eng": "SendMsg-Cursor",
+      "rec": "进阶",
+      "desc": "半后台，点击时短暂抢鼠标。虚拟指示器常驻，鼠标移动不抢占，点击瞬间通过 SendInput 定位+点击"
+    },
+    "seize": {
+      "name": "抢占",
+      "eng": "SendInput",
+      "rec": "前台",
+      "desc": "兼容模式，会明确抢占并移动真实鼠标。SendInput 合成系统输入，与真实硬件走相同路径，仅用于不接受后台消息的程序"
+    }
+  },
+
+  "keyboard": {
+    "postmsg": {
+      "name": "PostMsg",
+      "eng": "SendMessage",
+      "rec": "推荐",
+      "desc": "全后台同步投递。直接向最后点击的目标控件分发 WM_KEYDOWN/WM_KEYUP，不激活目标窗口"
+    },
+    "sendmsg": {
+      "name": "SendMsg",
+      "eng": "WinAPI",
+      "rec": "稳定",
+      "desc": "AttachThreadInput + SendMessage 同步投递。正确更新目标线程输入状态，兼容性好"
+    },
+    "seize": {
+      "name": "Seize",
+      "eng": "SendInput",
+      "rec": "前台",
+      "desc": "SendInput API 合成系统键盘输入。需要目标窗口在前台，受 UIPI 限制"
+    }
+  },
+
+  "devtools": {
+    "test_target": "测试目标",
+    "test_target_desc": "启动 WebView2 多功能测试窗口（网格/按钮/滚动/拖拽/输入），经 TCP 回报映射结果与日志",
+    "test_target_launch": "启动",
+    "test_target_close": "关闭",
+    "test_target_launch_tip": "打开 GAM Test Target（WebView2），可被捕获并测试鼠标/键盘映射",
+    "test_target_close_tip": "关闭 GAM Test Target 测试窗口",
+
+    "selftest": "映射自检",
+    "selftest_desc": "自动启动固定尺寸 Test Target → 预览映射自检 → 结束后关闭窗口。手动测请用上方「启动」",
+    "selftest_density_tip": "每格采样密度（N×N 子网格）。越大越细，用时越久。",
+    "selftest_density_unit": "/格",
+    "selftest_run": "自检",
+    "selftest_running": "运行中",
+    "selftest_run_tip": "一键自检：复用真实用户操作路径，网格校准 + 交互场景，比对 TCP 反馈",
+    "selftest_running_tip": "自检进行中…",
+
+    "frame_dump": "帧保存",
+    "frame_dump_capture": "保存单帧截图",
+    "frame_dump_capture_desc": "将每次 📷 截图保存为 PNG 到磁盘",
+    "frame_dump_capture_tip": "开启后每次截图自动保存为 PNG 文件到转储目录",
+    "frame_dump_stream": "保存实时预览帧",
+    "frame_dump_stream_desc": "将每次 ▶ 预览帧保存为 PNG 到磁盘",
+    "frame_dump_stream_tip": "开启后每次预览帧自动保存为 PNG 到转储目录（注意磁盘空间）",
+    "frame_dump_dir": "转储目录",
+    "frame_dump_not_set": "（未设置）",
+    "frame_dump_dir_tip": "帧保存路径",
+    "frame_dump_pick_dir_tip": "选择保存目录",
+    "frame_dump_open_dir_tip": "在资源管理器中打开保存目录",
+
+    "misc": "杂项",
+    "misc_skeleton": "预览骨架屏",
+    "misc_skeleton_desc": "显示启动骨架屏，3 秒后自动消失",
+    "misc_skeleton_tip": "预览应用启动时的骨架屏效果，3 秒后自动关闭",
+    "misc_skeleton_btn": "预览 (3s)",
+
+    "ui_demos": "界面预览",
+    "ui_demos_desc": "纯前端假数据，不调后端。用于预览难以手动触发的 UI 状态。",
+    "ui_demos_agent": "Agent / 连接状态",
+
+    "demo_checking": "正在检查",
+    "demo_latest": "已是最新",
+    "demo_update": "发现更新",
+    "demo_error": "检查失败",
+    "demo_mandatory": "强制更新",
+    "demo_full": "全量更新",
+    "demo_download": "下载进度",
+    "demo_download_fail": "下载失败",
+    "demo_resume": "续传（有残留）",
+
+    "demo_selftest_running": "自检运行中",
+    "demo_selftest_done": "自检完成（热力图）",
+    "demo_selftest_error": "自检错误",
+
+    "demo_agent_connected": "Agent 已连接",
+    "demo_agent_disconnected": "Agent 断开"
+  },
+
+  "selftest": {
+    "title": "映射自检",
+    "running": "正在{step}并比对反馈… {done}/{total}",
+    "step_grid": "扫描网格",
+    "step_scenarios": "跑交互场景",
+    "abort": "中止",
+    "close": "关闭",
+    "error_prefix": "自检失败：{error}",
+    "aborted_note": "⚠ 已中止 — 结果为部分样本",
+    "stat_samples": "样本",
+    "stat_received": "收到反馈",
+    "stat_cell_match": "格子命中匹配",
+    "stat_hit_match": "HIT/MISS 匹配",
+    "stat_offset": "偏移向量 px",
+    "stat_error": "误差 均值/最大",
+    "heatmap_title": "格子命中率热力图（预期格 vs 实收格）",
+    "scenarios_title": "交互场景（右键 / 滚轮 / 拖拽 / 按钮 / 文本）",
+    "diag_missed": "• 有未收到反馈的点 → 输入转发链路可能中断（检查鼠标模式/目标窗口）",
+    "diag_large_error": "• 平均像素误差偏大 → 可能存在坐标偏移/缩放/DPI 不匹配",
+    "diag_systematic": "• 存在系统性偏移 ({dx},{dy})px → 常量偏移，建议校准原点",
+    "diag_scenario_fail": "• 部分交互场景未收到预期反馈 → 检查对应控件映射（滚轮/拖拽/输入）",
+    "diag_perfect": "• 映射精确，网格与交互场景均通过 ✓"
+  },
+
+  "loading": {
+    "app_name": "Game Agent Monitor",
+    "loading": "加载中…"
+  },
+
+  "theme": {
+    "switch_light": "切换亮色主题",
+    "switch_dark": "切换暗色主题"
+  },
+
+  "app": {
+    "resize_expand": "向右拖拽展开面板",
+    "resize_drag": "拖拽调整面板宽度，向右拖到底可折叠"
+  }
+}

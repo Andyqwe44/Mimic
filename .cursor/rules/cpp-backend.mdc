@@ -1,6 +1,6 @@
 ---
 description: C++ 后端 — LOG 专用、铁律5 方法路由、WebMessage 命令
-globs: monitor_app/**/*.{cpp,h},capture/**/*.{cpp,h},input/**/*.{cpp,h},logger/**/*.{cpp,h},updater/**/*.{cpp,h},protocol/**/*.h
+globs: mimic_client/**/*.{cpp,h},capture/**/*.{cpp,h},input/**/*.{cpp,h},logger/**/*.{cpp,h},updater/**/*.{cpp,h},protocol/**/*.h
 alwaysApply: false
 ---
 
@@ -13,12 +13,12 @@ alwaysApply: false
 LOG_ERROR("tag", "format", args...);
 LOG_WARN("tag", "format", args...);
 LOG("tag", "format", args...);        // INFO
-LOG_DEBUG("tag", "format", args...);  // Dev only
+LOG_DEBUG("tag", "format", args...);  // DEBUG
 ```
 
 禁用：`printf` / `fprintf` / `std::cout` / `std::cerr` / `puts` / `WriteConsole` / `OutputDebugString`（仅 `logger/logger.cpp` 例外）。
 
-常用 tag：`wgc` `dxgi` `cmd` `main` `mjpeg` `ui` `agent`。
+常用 tag：`wgc` `dxgi` `cmd` `main` `peer` `ui` `agent`。
 
 ## 铁律 5 — 方法路由
 
@@ -34,18 +34,18 @@ LOG_DEBUG("tag", "format", args...);  // Dev only
 
 `hostCall(cmd, args)` ↔ `HandleWebMessage` → `{"id", "result"}`；失败显式 error。
 
-关键：`list_windows` / `capture_window` / `capture_stream_*` / `send_input` / `get_version` / `read_live_log` / `get_settings` / `set_settings` / `set_mapping_controller`。
+关键：`list_windows` / `capture_window` / `capture_stream_*` / `send_input` / `get_version` / `read_live_log` / `get_settings` / `set_settings` / peer_*。
 
-Settings：用户数据在 `paths_get_appdata_dir()`（Prod=`GameAgentMonitor`，Dev=`GameAgentMonitor_Dev`）；优先 `set_settings` 整包原子写；启动用 `settings_get_boot_json` + `AddScriptToExecuteOnDocumentCreated`。
+Settings：用户数据在 `paths_get_appdata_dir()`（`%LOCALAPPDATA%\MimicClient`）；优先 `set_settings` 整包原子写；启动用 `settings_get_boot_json` + `AddScriptToExecuteOnDocumentCreated`。
 
-## 薄客户端 + 远端控制（当前框架）
+## 薄客户端 + Peer
 
-本机 `monitor_app` = **捕获 + 执行**。推理/人工遥控在外部（`controller_web` 或 Python 模型）。
+本机 `mimic_client` = **捕获 + 执行**。信令默认 Bootstrap `http://47.107.43.5:8443`。
 
 | 目标 | 输入 | 安全 |
 |------|------|------|
 | 桌面 `hwnd=0` | 前台 `sendinput`（可占用键鼠） | 坐标仍限制在虚拟屏 `[0,1]` |
-| 具体窗口 | 后台 `sendmessage` | **坐标必须在窗口 `[0,1]`**；TCP/WS 控制 **强制**当前 stream 的 `g_control_hwnd`，禁止模型改目标窗 |
+| 具体窗口 | 后台 `sendmessage` | **坐标必须在窗口 `[0,1]`**；远端控制 **强制**当前 stream 的 hwnd |
 
 - **闸门：** `allow_stream` / `accept_control`（`set_stream_gate` / `set_control_gate`）；关则不推流 / 不执行远端输入
 - **远端视频：** WGC GPU → MF **硬编** H.264 → agent **出站**连 `controller_server`（WS 中继）；浏览器只访问服务端

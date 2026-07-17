@@ -1,10 +1,10 @@
 # New-SigningKey.ps1 — generate the update-signing ECDSA P-256 key pair (run ONCE).
 #
 #   Private key  -> scripts\.signing\ec_priv.b64      (base64 of D||X||Y, GITIGNORED — keep safe)
-#   Public key   -> monitor_app\src\update_pubkey.h   (BCRYPT_ECCPUBLIC_BLOB, committed)
+#   Public key   -> mimic_client\src\update_pubkey.h   (BCRYPT_ECCPUBLIC_BLOB, committed)
 #
 # The private key signs each release's version.json (New-VersionJson.ps1). The public
-# key is embedded in monitor_app and verifies the manifest before applying an update.
+# key is embedded in mimic_client and verifies the manifest before applying an update.
 # Re-running with -Force ROTATES the key — old signatures stop verifying, so every
 # client must be rebuilt+reinstalled with the new public key. Don't rotate casually.
 #
@@ -21,7 +21,7 @@ $ErrorActionPreference = 'Stop'
 $root      = Get-RepoRoot
 $signDir   = Join-Path $PSScriptRoot '.signing'
 $privPath  = Join-Path $signDir 'ec_priv.b64'
-$pubHeader = Join-Path $root 'monitor_app\src\update_pubkey.h'
+$pubHeader = Join-Path $root 'mimic_client\src\update_pubkey.h'
 
 if ((Test-Path $privPath) -and -not $Force) {
     throw "Private key already exists: $privPath`nUse -Force to ROTATE (invalidates all old signatures; every client must be rebuilt)."

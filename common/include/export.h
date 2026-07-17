@@ -1,5 +1,5 @@
 /**
- * export.h — Shared DLL export/import macro for GameAgentMonitor modules.
+ * export.h — Shared DLL export/import macro for MimicClient modules.
  *
  * Usage:
  *   In the DLL being built:   define GAM_BUILD_DLL before including this header.

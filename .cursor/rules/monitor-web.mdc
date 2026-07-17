@@ -1,10 +1,10 @@
 ---
-description: monitor_web 前端 — Tooltip、design tokens、i18n、className 规则
-globs: monitor_web/**/*.ts,monitor_web/**/*.tsx,monitor_web/**/*.css
+description: mimic_web 前端 — Tooltip、design tokens、i18n、className 规则
+globs: mimic_web/**/*.ts,mimic_web/**/*.tsx,mimic_web/**/*.css
 alwaysApply: false
 ---
 
-# monitor_web
+# mimic_web
 
 ## Tooltip
 

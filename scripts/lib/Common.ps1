@@ -22,10 +22,19 @@ function Write-Warn2{ param([string]$Message) Write-Host "    WARN: $Message" -F
 
 # Single source of truth (铁律 8): parse APP_VERSION from version.h.
 function Get-AppVersion {
-    $vh = Join-Path (Get-RepoRoot) 'monitor_app\src\version.h'
+    $vh = Join-Path (Get-RepoRoot) 'mimic_client\src\version.h'
     $line = Select-String -Path $vh -Pattern '#define\s+APP_VERSION\s+"([^"]+)"' -List
     if (-not $line) { throw "APP_VERSION not found in $vh" }
     $line.Matches[0].Groups[1].Value
+}
+
+# MimicServer version — independent channel (mimic_server/package.json).
+function Get-ServerVersion {
+    $pj = Join-Path (Get-RepoRoot) 'mimic_server\package.json'
+    if (-not (Test-Path $pj)) { throw "mimic_server/package.json not found: $pj" }
+    $j = Get-Content -Raw $pj | ConvertFrom-Json
+    if (-not $j.version) { throw "version missing in $pj" }
+    [string]$j.version
 }
 
 # Enter the MSVC x64 build environment in THIS PowerShell session — replaces

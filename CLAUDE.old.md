@@ -1,3 +1,14 @@
+# Archive notes
+
+## 2026-07-18 — Bootstrap mesh + Mimic rename + dual release (v0.3.36 / server 0.2.0)
+
+- Renamed `monitor_app`/`monitor_web`/`signaling_server` → `mimic_client`/`mimic_web`/`mimic_server`; exe `mimic_client.exe`; AppData `MimicClient`.
+- MimicServer Bootstrap discovery (`/api/cluster/*`); clients default to `http://47.107.43.5:8443`.
+- `Release.ps1 -ClientOnly/-ServerOnly`; server version from `mimic_server/package.json`.
+- Removed Dev/HMR (`-Dev`, `Dev.ps1`, `DEV_MODE`); deleted `game/` `agent/` `model/` and orphan mjpeg/ws_server.
+- Cross-node presence federation deferred — see README roadmap.
+
+---
 # CLAUDE.md — TicTacToe → General Visual Game AI
 
 ## Recent Changes (2026-07-16) — GPU H.264 hard path + embedded WS + dual gates

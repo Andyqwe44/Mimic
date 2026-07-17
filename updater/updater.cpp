@@ -7,7 +7,7 @@
  * 2. Read InstallPath from HKLM\SOFTWARE\GameAgentMonitor
  * 3. Copy all files from staging_dir/ to install_path/
  * 4. Update install_path/version.json
- * 5. Launch install_path/bin/monitor_app.exe
+ * 5. Launch install_path/bin/mimic_client.exe
  * 6. Clean up staging_dir
  *
  * Minimal CRT: /MT /GS- /O2 /NODEFAULTLIB with kernel32 + shell32 + advapi32 only.
@@ -185,7 +185,7 @@ static bool is_protected_rel(const char* rel) {
     size_t n = strlen(rel);
     if (n >= 4 && _stricmp(rel + n - 4, ".old") == 0) return true;
     static const char* prot[] = {
-        "bin/updater.exe", "bin/updater.new", "bin/updater.log", "bin/monitor_app.exe"
+        "bin/updater.exe", "bin/updater.new", "bin/updater.log", "bin/mimic_client.exe"
     };
     for (int i = 0; i < 4; i++) if (_stricmp(rel, prot[i]) == 0) return true;
     return false;
@@ -329,7 +329,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
     str_dirname(installDir);  // <install>
     {
         char probe[MAX_PATH];
-        snprintf(probe, MAX_PATH, "%s\\bin\\monitor_app.exe", installDir);
+        snprintf(probe, MAX_PATH, "%s\\bin\\mimic_client.exe", installDir);
         if (GetFileAttributesA(probe) == INVALID_FILE_ATTRIBUTES) {
             installDir[0] = '\0';
             HKEY hKey;
@@ -363,7 +363,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
 
     // 4. Launch new EXE
     char exePath[MAX_PATH];
-    snprintf(exePath, MAX_PATH, "%s\\bin\\monitor_app.exe", installDir);
+    snprintf(exePath, MAX_PATH, "%s\\bin\\mimic_client.exe", installDir);
     ulog("launching %s", exePath);
     HINSTANCE h = ShellExecuteA(nullptr, "open", exePath, nullptr, installDir, SW_SHOW);
     ulog("launch result = %llu (>32 = OK)", (unsigned long long)(ULONG_PTR)h);

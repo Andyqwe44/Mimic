@@ -1,41 +1,41 @@
 ---
 description: 构建、版本号、发布与增量更新约定
-globs: scripts/**/*.ps1,installer/**/*.iss,release/**/*.json,monitor_app/src/version.h,docs/auto-update.md
+globs: scripts/**/*.ps1,installer/**/*.iss,release/**/*.json,mimic_client/src/version.h,mimic_server/package.json,docs/auto-update.md
 alwaysApply: false
 ---
 
 # Build & Release
 
-## 版本（铁律 8）
+## 版本
 
-**只改** `monitor_app/src/version.h` 的 `APP_VERSION`。  
-`app.rc` / installer / 前端 `__APP_VERSION__` / `version.json` 均由此继承。
+| 产品 | 真相源 |
+|------|--------|
+| MimicClient | `mimic_client/src/version.h` → `APP_VERSION` |
+| MimicServer | `mimic_server/package.json` → `version`（独立通道） |
 
-原生 lib/DLL（logger/capture/input）用 `Build.ps1` 的 `$LibVer` + `/Brepro`，**不要**绑回 `version.h`（否则假增量、每版全量下载）。
+原生 lib/DLL（logger/capture/input）用 `Build.ps1` 的 `$LibVer` + `/Brepro`，**不要**绑回 `APP_VERSION`。
 
-## 构建（全 PowerShell）
+## 构建（全 PowerShell，仅 Prod）
 
 ```powershell
 powershell -File scripts\Build.ps1                         # 全部
-powershell -File scripts\Build.ps1 -Module monitor_app -Dev # → build_dev\bin\
-cd monitor_web; npm run dev                                # Vite :1420
-cd monitor_web; npm run build                              # 再 Build monitor_app prod
+powershell -File scripts\Build.ps1 -Module mimic_client
+cd mimic_web; npm run build                                # 再编宿主嵌入 frontend/
 ```
 
-| | Dev | Prod |
-|---|---|---|
-| Macro | `DEV_MODE` | `NDEBUG` |
-| Out | `monitor_app/build_dev/bin/` | `monitor_app/build/{bin,frontend,config}` |
+输出：`mimic_client/build/{bin,frontend,config}`（exe = `mimic_client.exe`）。
 
-单实例：exit code `2` = 已在运行（已前置窗口）。Dev/Prod mutex 分离，可共存。
+单实例：exit code `2` = 已在运行。Mutex `Global\MimicClient_8A3F2D`。AppData `%LOCALAPPDATA%\MimicClient\`。
 
 ## 一键发布
 
 ```powershell
-# 先 bump version.h
-powershell -File scripts\Release.ps1          # build→verify→git→Gitee
-powershell -File scripts\Release.ps1 -DryRun  # 不 push/发
+# bump version.h 和/或 mimic_server/package.json 后:
+powershell -File scripts\Release.ps1              # 双包
+powershell -File scripts\Release.ps1 -ClientOnly
+powershell -File scripts\Release.ps1 -ServerOnly
+powershell -File scripts\Release.ps1 -DryRun
 ```
 
-增量货在 git：`release/GameAgentMonitor/` + `version.json`（raw URL 下载，非 Release 附件）。  
+货架在 CDN：`http://47.107.43.5/mimic/{client,server}/`（不在 git）。  
 详踩坑：`docs/auto-update.md`。

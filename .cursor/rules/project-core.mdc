@@ -1,36 +1,39 @@
 ---
-description: Game Agent Monitor — 铁律、愿景、目录与沟通约定（每会话加载）
+description: Mimic — 铁律、愿景、目录与沟通约定（每会话加载）
 alwaysApply: true
 ---
 
 # Project Core
 
-视觉游戏 AI 宿主：**pixels in, actions out**。C++ 做实时（capture / WebView2 / TCP / log），TS/React 做 UI，Python 做模型（TCP :9999）。
+视觉游戏 AI / 远程控制宿主：**pixels in, actions out**。C++ 做实时（capture / WebView2 / peer），TS/React 做 UI，MimicServer 做信令。
 
 ## 铁律（必守）
 
 1. **中文思考回答**；代码、commit、PR 描述用英文。
-2. **C++ 日志只用 `LOG*()`** — 禁止 `printf`/`std::cout`/`OutputDebugString` 等（例外：`logger/logger.cpp`、`game/src/` 终端 UI）。
+2. **C++ 日志只用 `LOG*()`** — 禁止 `printf`/`std::cout`/`OutputDebugString` 等（例外：`logger/logger.cpp`）。
 3. **存档** = 更新 README + 更新 CLAUDE.md/本规则相关摘要 + commit（用户明确要求时）。
 4. **禁止原生 HTML `title`** — 只用 `<Tooltip text="...">`。
 5. **禁止欺骗** — C++ 不静默改参数/回退；失败返回 `{"ok":false,"error":"..."}`；前端画的 = 实际发的。
 6. **前端交互优化** — 先状态转换表 → 等用户确认 → 再改码。
 7. **CLAUDE.md 精简** — 详细历史进 `CLAUDE.old.md`；Cursor 细则在 `.cursor/rules/`。
-8. **版本单一真相源** — 只改 `monitor_app/src/version.h`（lib DLL 版本用 Build.ps1 `$LibVer`，勿绑回 APP_VERSION）。
+8. **版本真相源** — Client 只改 `mimic_client/src/version.h`；Server 改 `mimic_server/package.json`（lib DLL 用 Build.ps1 `$LibVer`，勿绑回 APP_VERSION）。
 9. **跨进程参数不加引号包路径**；被调进程必须剥两端引号。
 10. **禁止编造工具返回值** — 未调用就说未调用；关键结论先 `git` 核实。
 
 ## 目录速览
 
 ```
-logger/  capture/  input/  monitor_app/  monitor_web/  scripts/  protocol/  model/  updater/
+logger/  capture/  input/  mimic_client/  mimic_web/  mimic_server/  scripts/  protocol/  updater/
 ```
 
 | 层 | 职责 |
 |----|------|
-| `monitor_app` | Win32 + WebView2 host + command dispatch |
-| `monitor_web` | React UI（`hostCall` bridge） |
+| `mimic_client` | Win32 + WebView2 host + peer + capture |
+| `mimic_web` | React UI（`hostCall` bridge） |
+| `mimic_server` | 对称信令 + Bootstrap 组网 |
 | `scripts/` | 全 PowerShell 构建/发布（无 cmd/bash） |
 
-详细构建/发版 → `build-release` 规则；C++ 日志与路由 → `cpp-backend`；前端（含 **DevMode overlay/SSOT**、i18n）→ `monitor-web`。
+测试以 **生产安装包 / 应用内更新** 为准（无 Vite HMR Dev 双轨）。
+
+详细构建/发版 → `build-release`；C++ → `cpp-backend`；前端 → `monitor-web`（规则文件名保留，globs 已指向 `mimic_web`）。
 权威长文仍以根目录 `CLAUDE.md` 为准；变更详史 → `CLAUDE.old.md`。

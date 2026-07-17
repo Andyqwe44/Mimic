@@ -4,7 +4,7 @@
 # lowercase hex hashes, forward-slash paths, files sorted, no-BOM UTF-8.
 # version.json itself is excluded from the walk.
 #
-#   powershell -File scripts\New-VersionJson.ps1 -ReleaseDir release\GameAgentMonitor -Version 0.3.32 [-Full]
+#   powershell -File scripts\New-VersionJson.ps1 -ReleaseDir release\MimicClient -Version 0.3.32 [-Full]
 #   -Schema 2  # transitional: 0.3.31 (KNOWN_SCHEMA=2) can still incremental-update
 #   -Schema 3  # signs download_base + sources; requires clients ≥0.3.32
 

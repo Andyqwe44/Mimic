@@ -21,18 +21,18 @@ param(
 . "$PSScriptRoot\lib\Common.ps1"
 
 $root = Get-RepoRoot
-$rel = Join-Path $root 'release\GameAgentMonitor'
-$exe = Join-Path $rel 'bin\monitor_app.exe'
-if (-not (Test-Path $exe)) { throw "monitor_app.exe not found: $exe — build + assemble the release first" }
+$rel = Join-Path $root 'release\MimicClient'
+$exe = Join-Path $rel 'bin\mimic_client.exe'
+if (-not (Test-Path $exe)) { throw "mimic_client.exe not found: $exe — build + assemble the release first" }
 
 $iso = Join-Path $env:TEMP 'GAM_verify'
-$logDir = Join-Path $env:LOCALAPPDATA 'GameAgentMonitor\log'
+$logDir = Join-Path $env:LOCALAPPDATA 'MimicClient\log'
 
 Write-Step "Isolated verify (v$Version)"
 Write-Note "isolate: $iso"
 
 function Stop-App {
-    Get-Process monitor_app, msedgewebview2 -ErrorAction SilentlyContinue |
+    Get-Process mimic_client, msedgewebview2 -ErrorAction SilentlyContinue |
         Stop-Process -Force -ErrorAction SilentlyContinue
 }
 
@@ -56,8 +56,8 @@ if (Test-Path $logDir) {
     if ($b) { $baseline = $b.Name }
 }
 
-Write-Note 'launching monitor_app.exe from isolated dir...'
-Start-Process -FilePath (Join-Path $iso 'bin\monitor_app.exe') -WorkingDirectory (Join-Path $iso 'bin')
+Write-Note 'launching mimic_client.exe from isolated dir...'
+Start-Process -FilePath (Join-Path $iso 'bin\mimic_client.exe') -WorkingDirectory (Join-Path $iso 'bin')
 
 $passed = $false
 if ($Interactive) {

@@ -1,0 +1,567 @@
+{
+  "common": {
+    "cancel": "Cancel",
+    "close": "Close",
+    "ok": "OK",
+    "loading": "Loading...",
+    "not_implemented": "Not implemented",
+    "default": "Default",
+    "ready": "Ready"
+  },
+
+  "topbar": {
+    "monitor": "Monitor",
+    "monitor_tip": "Live preview & remote control — operate target window remotely",
+    "log": "Log",
+    "log_tip": "View current session & history log files",
+    "settings": "Settings",
+    "settings_tip": "Configure capture, model, theme & input mapping",
+    "devtools": "DevTools",
+    "devtools_tip": "Developer tools — Test Target, Self-Test, Frame Dump, UI Demos",
+    "start": "Start",
+    "start_tip": "Start agent task",
+    "stop": "Stop",
+    "stop_tip": "Stop all running tasks",
+    "perm_normal_abbr": "普",
+    "perm_admin_abbr": "管"
+  },
+
+  "bottombar": {
+    "tcp": "TCP :9999",
+    "agent_online": "Controller Online",
+    "waiting_connection": "Waiting",
+    "update": "Update",
+    "update_title": "Update available — click to install"
+  },
+
+  "connection": {
+    "title": "Connection",
+    "select": "Select",
+    "select_tip": "Choose a window or desktop to capture",
+    "disconnect_tip": "Disconnect from current window, back to desktop",
+    "window_title": "Window Title",
+    "window_title_tip": "Currently selected target window (read-only, use Select to change)",
+    "entire_desktop": "Entire Desktop",
+    "entire_desktop_n": "Entire Desktop (D{n})",
+    "category_desktop": "Desktop",
+    "category_window": "Window",
+    "minimized_warning": "Window is minimized. {method} cannot capture. Switch to WGC or restore the window.",
+    "pin_tip": "Pin panel — exclude from auto-layout",
+    "unpin_tip": "Unpin panel — allow auto-layout adjustment"
+  },
+
+  "peer": {
+    "title": "Peer",
+    "server_url": "Signaling server",
+    "server_url_ph": "http://host:8443",
+    "user": "Username",
+    "user_ph": "user",
+    "password": "Password",
+    "password_ph": "password",
+    "device_name": "This device name",
+    "device_name_ph": "e.g. PC-Study",
+    "login": "Login",
+    "login_tip": "Log in to the signaling server",
+    "register": "Register",
+    "register_tip": "Create an account on this server",
+    "probe": "Ping",
+    "probe_tip": "Measure reachability and latency",
+    "logout": "Logout",
+    "online": "Online",
+    "logged_out": "Logged out",
+    "login_failed": "Login failed",
+    "register_ok": "Registered — please log in",
+    "register_failed": "Register failed",
+    "probe_ok": "Server reachable · {ms} ms",
+    "probe_fail": "Server health check failed",
+    "server_missing": "Server missing / unreachable",
+    "cluster_hint": "Discovered {n} server(s) via Bootstrap. Multi-region pick + cross-node presence coming later.",
+    "badge_offline": "Logged out",
+    "badge_probing": "Probing…",
+    "badge_missing": "Server missing",
+    "badge_reachable": "Reachable · {ms}ms",
+    "badge_online": "Logged in",
+    "badge_online_rtt": "Logged in · {ms}ms",
+    "role_controller": "Controlling",
+    "role_controlled": "Being controlled",
+    "role_outgoing": "Calling…",
+    "role_ringing": "Incoming",
+    "devices": "Devices on this account",
+    "no_devices": "No other devices online",
+    "control": "Control",
+    "invite_from": "Invite from {name}",
+    "accept": "Accept",
+    "accept_tip": "Allow remote control",
+    "reject": "Reject",
+    "reject_tip": "Reject invite",
+    "hangup": "Hang up",
+    "hangup_tip": "End peer session",
+    "invite_sent": "Invite sent…",
+    "invite_failed": "Invite failed",
+    "invite_rejected": "Invite rejected",
+    "session_started": "Session started",
+    "session_ended": "Session ended",
+    "human_tip": "Human control",
+    "ai_tip": "AI control (local model)",
+    "remote_windows": "Remote windows",
+    "ai_mode_hint": "AI control mode — actions from local model; target still enforced on peer."
+  },
+
+  "screenshot": {
+    "title": "Screenshot",
+    "snapshot_tip": "Take a single-frame snapshot",
+    "stop_preview_tip": "Stop live preview",
+    "start_preview_tip": "Start live preview",
+    "pin_tip": "Pin panel — exclude from auto-layout",
+    "unpin_tip": "Unpin panel — allow auto-layout adjustment",
+    "empty_hint": "Click 📷 Snapshot or ▶ Preview to begin"
+  },
+
+  "log": {
+    "title": "Log",
+    "current_session": "Current Session",
+    "no_logs": "No logs",
+    "no_logs_yet": "No logs yet",
+    "no_history": "No history files found",
+    "click_to_load": "click to load",
+    "lines_count": "{n} lines",
+    "load_failed": "(failed to load)",
+    "scroll_bottom": "Scroll to bottom",
+    "already_bottom": "Already at bottom",
+    "copy_all": "Copy all logs",
+    "copy_log": "Copy log",
+    "copy_file_content": "Copy file content",
+    "refresh_file": "Refresh file content",
+    "pin_tip": "Pin panel — exclude from auto-layout",
+    "unpin_tip": "Unpin panel — allow auto-layout adjustment"
+  },
+
+  "targetPicker": {
+    "select_target": "Select Target",
+    "capture_mode": "Capture Mode",
+    "search": "Search...",
+    "filter_all": "Filter: All",
+    "filter_desktop": "Filter: Desktop",
+    "filter_window": "Filter: Window",
+    "all": "All",
+    "desktop": "Desktop",
+    "windows": "Windows",
+    "refresh": "Refresh window list",
+    "self_window_tip": "Self window — capture disabled",
+    "select_tip": "Select: {title}",
+    "select_remote_tip": "Select: {title} (will switch to Desktop {n})",
+    "back_tip": "Back to window selection",
+    "mode_description": "Select the current state of the target window. The system will recommend the optimal capture method:",
+    "footer_summary": "{items} items — {desks} desktops, {wins} windows"
+  },
+
+  "settings": {
+    "capture": "Capture",
+    "snapshot": "Snapshot",
+    "snapshot_auto": "Auto",
+    "snapshot_auto_tip": "Auto-select capture method based on window state: foreground/background → WGC, desktop/minimized → DXGI",
+    "stream": "Stream",
+    "stream_auto": "Auto",
+    "stream_auto_tip": "Auto-select stream method (currently only WGC supports real-time streaming)",
+    "dxgi_stream_tip": "DXGI streaming not implemented, only WGC supports live preview",
+    "render_method": "Render Method",
+    "input_policy": "Input Policy",
+    "input_policy_desc": "Desktop target → foreground SendInput (may occupy mouse/keyboard). Window target → background SendMessage, coordinates clamped to the window [0,1]. Remote controller uses the same rules over TCP.",
+    "mouse_mode": "Mouse Mode",
+    "mouse_hint": "Virtual cursor always visible — local mouse unaffected",
+    "keyboard_mode": "Keyboard Mode",
+    "keyboard_hint": "Click the preview to focus, then keystrokes are forwarded to the target window",
+    "keyboard_note1": "• Regular keys — {keydown} / {keyup}",
+    "keyboard_note2": "• Combos — auto-detected (e.g. Ctrl+C, Ctrl pressed first then C)",
+    "keyboard_note3": "• Click outside the preview → releases focus and all held keys",
+    "self_target": "Self-Target Avoidance",
+    "self_target_hint": "During desktop capture, mapped coordinates may land on GAM's own window",
+    "self_target_warn": "Visual Warning",
+    "self_target_warn_eng": "Visual Warning",
+    "self_target_warn_desc": "Cursor turns red & warns when hovering over GAM window — simple & safe",
+    "self_target_exclude": "Exclude from Capture",
+    "self_target_exclude_eng": "Exclude from Capture",
+    "self_target_exclude_desc": "Hide GAM window from desktop capture — requires Windows 10 2004+",
+    "self_target_warn_badge": "Default",
+    "self_target_exclude_badge": "Win10+",
+
+    "model": "Model",
+    "model_desc": "Base model + fine-tuning adapter for game-specific AI.",
+    "model_base": "Model",
+    "model_base_tip": "Base vision model",
+    "model_adapter": "Adapter",
+    "model_adapter_tip": "Game fine-tuning weights",
+
+    "general": "General",
+    "permission": "Permission",
+    "permission_normal": "Normal",
+    "permission_admin": "Admin",
+    "permission_normal_tip": "Normal user privileges (default) — sufficient for regular apps, no UAC prompt",
+    "permission_admin_tip": "Administrator privileges — can control apps running as admin; click to trigger UAC & restart",
+    "permission_current": "Current: {level}",
+    "permission_current_normal": "Normal",
+    "permission_current_admin": "Admin",
+
+    "theme": "Theme",
+    "theme_light": "Light",
+    "theme_dark": "Dark",
+    "theme_system": "System",
+    "theme_light_tip": "Light theme — white background with dark text",
+    "theme_dark_tip": "Dark theme — VSCode-style dark blue-gray",
+    "theme_system_tip": "Follow system — auto-switch light/dark",
+
+    "accent": "Accent",
+    "theme_names": ["Ocean", "Twilight", "Lagoon", "Sunset", "Orchid", "Mint", "Nebula", "Dev"],
+
+    "language": "Language",
+    "language_en": "English",
+    "language_zh_cn": "简体中文",
+    "language_zh_tw": "繁體中文",
+
+    "log_dir": "Log dir",
+    "log_dir_tip": "Log file storage path",
+    "change_log_dir_tip": "Change log directory",
+    "open_log_dir_tip": "Open log directory in Explorer",
+
+    "keep_files": "Keep files",
+    "keep_files_tip": "Number of historical log files shown in Log panel",
+    "keep_files_n": "{n} files",
+
+    "dev_mode": "Dev mode",
+    "dev_mode_tip": "Developer mode — force red/hacker-green theme, unlock frame dump features",
+
+    "mapping_key": "Mapping key",
+    "press_keys": "Press keys...",
+    "mapping_key_tip": "Current hotkey — click Change to modify",
+    "change_mapping_tip": "Click then press a new key combo; release all keys to confirm",
+    "cancel_mapping": "Cancel",
+    "change_mapping": "Change",
+    "modifier_only": "⚠ Modifier only",
+    "modifier_only_tip": "Hotkey contains only modifier keys (Ctrl/Alt/Shift/Win). May conflict with system shortcuts. Add at least one non-modifier key (letter, digit, or F1-F12).",
+    "hotkey_indicator_tip": "Hotkey trigger indicator — flashes green when combo is pressed",
+
+    "about": "About",
+    "game_agent_monitor": "Game Agent Monitor",
+    "version": "Version {version}",
+    "check_update": "Check Update",
+    "check_update_latest": "Update Available",
+    "check_update_latest_tip": "New version available, click to install",
+    "check_update_tip": "Check for new version",
+    "gitee_tip": "Open project Gitee page in browser",
+    "star_tip": "Star the project to support development",
+    "star_github": "Star on GitHub",
+    "tech_stack": "C++ WebView2 · React · Tailwind · DXGI · WGC"
+  },
+
+  "monitor": {
+    "mapping": "Mapping",
+    "mapping_tip": "Input mapping ({hotkey})",
+    "snapshot": "Snapshot",
+    "snapshot_tip": "Take a single-frame snapshot",
+    "stop": "Stop",
+    "stop_tip": "Stop live preview",
+    "preview": "Preview",
+    "preview_tip": "Start live preview",
+    "no_preview": "No preview active",
+    "no_preview_hint": "Click Preview button to start real-time preview",
+    "stream_gate": "Send video",
+    "stream_gate_on": "Stop send",
+    "stream_gate_tip": "Gate: allow H.264 stream to controllers",
+    "control_gate": "Accept control",
+    "control_gate_on": "Controlling",
+    "control_gate_tip": "Gate: apply remote mouse/keyboard from controller",
+    "thin_status_title": "Thin client · no local preview",
+    "thin_status_body": "Send video: {stream} · Accept control: {control}\nOpen the URL below in a browser to view and control",
+    "gate_open": "ON",
+    "gate_closed": "OFF",
+    "remote_active": "Remote control · Mouse {mm} · Keyboard {km}",
+    "remote_hover": "Hover to move · Click to control · Type in toolbar IME · Mouse {mm}",
+    "desktop_preview": "Desktop remote control · Mouse {mm} · Keyboard {km} · {state}",
+    "desktop_focused": "Click/keyboard active",
+    "desktop_unfocused": "Type in the toolbar IME field",
+    "ime_proxy": "Monitor IME",
+    "ime_dock_title": "IME",
+    "ime_dock_hint": "Focus here · commit → Unicode to last click caret",
+    "ime_dock_composing": "Composing… lands here then maps automatically",
+    "ime_dock_placeholder": "Type…",
+    "self_target_warn": "⚠ Mapped target is GAM's own window — switch to \"Exclude from Capture\" in Settings",
+    "preview_no_mapping": "Previewing · Press {hotkey} or click \"Mapping\" to enable control",
+    "mouse_seize": "Seize",
+    "mouse_semi": "Semi",
+    "mouse_bg": "Bg",
+    "key_seize": "Seize",
+    "key_sendmsg": "SendMsg",
+    "key_postmsg": "PostMsg",
+    "policy_foreground": "Desktop · foreground",
+    "policy_background": "Window · background"
+  },
+
+  "gates": {
+    "title": "Remote gates",
+    "target": "Target",
+    "need_link": "Start a Peer controlled session (or link a controller) before opening the stream gate",
+    "hint": "As the controlled side: open stream to send video, accept control to allow input.\nSignaling login is in the Peer panel.",
+    "badge_stream_on": "Stream on",
+    "badge_stream_off": "Stream off",
+    "badge_control_on": "Control on",
+    "badge_control_off": "Control off"
+  },
+
+  "update": {
+    "checking": "Checking for Updates",
+    "latest": "Already Up to Date",
+    "error": "Check Failed",
+    "update_available": "New Version Available",
+
+    "checking_text": "Checking for updates…",
+    "latest_text": "Already up to date",
+    "error_text": "Update check failed",
+    "error_fallback": "Unable to connect to update server. Please try again later.",
+    "current_version": "Current version v{version}",
+    "needs_full_installer": "A full installer is required (update mechanism incompatible). Please download the latest setup from Gitee.",
+    "unknown_error": "Unknown error",
+
+    "full_package_hint": "This is a full update (download all files)",
+    "role_old": "Old version",
+    "role_jump": "Jump-pad",
+    "role_latest": "Latest",
+    "role_latest_placeholder": "Check again",
+    "jump_pad_first_hop": "Repo migrated to mimic: this step installs jump-pad v{jump}. After install, click Check Update again to reach the real latest. Multi-round manual updates are required — one update is not enough.",
+    "jump_pad_second_hop": "Migration step 2 (jump-pad v{jump} → v{latest}). After this you are on the current latest.",
+    "this_update": "This update",
+    "files": "{n} files",
+    "completed_n": "( {n} done )",
+    "extract": "Extract",
+    "traffic": "DL",
+
+    "resume_banner": "Incomplete download detected",
+    "resume_detail": "{done}/{total} files completed ({doneSize} / {totalSize}) — \"Continue\" will skip completed files and download the rest.",
+
+    "file_roles": {
+      "main_exe": "Main App",
+      "updater": "Updater",
+      "manifest": "Manifest",
+      "logger": "Logger",
+      "capture": "Capture",
+      "input": "Input",
+      "frontend": "Frontend",
+      "config": "Config",
+      "file": "File"
+    },
+
+    "progress_download": "Downloading {file} ({current}/{total})",
+    "progress_done": "Download complete, restarting to install…",
+    "progress_error": "Download failed: {file}",
+    "progress_preparing": "Preparing download…",
+
+    "later": "Later",
+    "later_tip": "Update later",
+    "re_download": "Re-download",
+    "re_download_tip": "Discard downloaded files, download all from scratch",
+    "force_update": "Full Update",
+    "force_update_tip": "Force download all files (use when local files are corrupted or incremental update misses files)",
+    "incremental": "Incremental Update",
+    "incremental_tip": "Download only changed files",
+    "continue_download": "Continue",
+    "continue_download_tip": "Skip completed files, download remaining only",
+    "installing": "Installing…",
+    "got_it": "Got it",
+    "got_it_tip": "Close"
+  },
+
+  "state": {
+    "desktop": "Desktop",
+    "foreground": "Foreground",
+    "background": "Background",
+    "minimized": "Minimized",
+    "hidden": "Hidden",
+    "closed": "Closed",
+    "unknown": "Unknown"
+  },
+
+  "capture": {
+    "wgc": {
+      "name": "WGC",
+      "eng": "GPU FramePool",
+      "rec": "Fg/Bg/Desktop",
+      "desc": "GPU-accelerated, supports background/occluded windows. Preferred for foreground, background & desktop."
+    },
+    "dxgi": {
+      "name": "DXGI",
+      "eng": "DesktopBlt",
+      "rec": "Desktop/Minimized",
+      "desc": "Full-desktop GDI bitmap. The only viable option for minimized windows."
+    },
+    "render_shared": {
+      "name": "SharedBuffer",
+      "eng": "Zero-copy COM",
+      "rec": "Current",
+      "desc": "C++ COM SharedBuffer → JS ArrayBuffer → Canvas putImageData. Zero-copy, no codec."
+    },
+    "render_h264": {
+      "name": "H.264",
+      "eng": "GPU MFT + MSE",
+      "rec": "Not impl.",
+      "desc": "GPU MFT hardware encode → fMP4 segments → MSE → <video> tag. Low latency, high compression."
+    },
+    "render_h265": {
+      "name": "H.265",
+      "eng": "GPU MFT + MSE",
+      "rec": "Not impl.",
+      "desc": "HEVC hardware encode. Higher compression but limited compatibility (needs Windows 11 + HEVC extension)."
+    },
+    "modes": {
+      "foreground": {
+        "label": "Foreground",
+        "desc": "Window visible and on top → WGC GPU-accelerated recommended"
+      },
+      "background": {
+        "label": "Background",
+        "desc": "Window occluded but not minimized → WGC (only method supporting background capture)"
+      },
+      "minimized": {
+        "label": "Minimized",
+        "desc": "Window minimized → DesktopGDI (capture entire desktop)"
+      }
+    }
+  },
+
+  "mouse": {
+    "background": {
+      "name": "Background",
+      "eng": "SendMessage",
+      "rec": "Recommended",
+      "desc": "Fully background and never grabs the real mouse. Desktop and window targets use point hit-testing plus synchronous SendMessage without activating the target; the virtual circle appears only at the real mapped position."
+    },
+    "semi": {
+      "name": "Semi",
+      "eng": "SendMsg-Cursor",
+      "rec": "Advanced",
+      "desc": "Semi-background, briefly grabs mouse on click. Virtual cursor always visible; move doesn't grab, click repositions via SendInput & clicks."
+    },
+    "seize": {
+      "name": "Seize",
+      "eng": "SendInput",
+      "rec": "Foreground",
+      "desc": "Compatibility mode that explicitly grabs and moves the real mouse. SendInput follows the hardware input path; use only for apps that reject background messages."
+    }
+  },
+
+  "keyboard": {
+    "postmsg": {
+      "name": "PostMsg",
+      "eng": "SendMessage",
+      "rec": "Recommended",
+      "desc": "Synchronous background dispatch. Sends WM_KEYDOWN/WM_KEYUP directly to the last clicked target control without activating its window."
+    },
+    "sendmsg": {
+      "name": "SendMsg",
+      "eng": "WinAPI",
+      "rec": "Stable",
+      "desc": "AttachThreadInput + SendMessage synchronous dispatch. Correctly updates target thread input state. Good compatibility."
+    },
+    "seize": {
+      "name": "Seize",
+      "eng": "SendInput",
+      "rec": "Foreground",
+      "desc": "SendInput API synthesizes system keyboard input. Requires target window in foreground. Subject to UIPI restrictions."
+    }
+  },
+
+  "devtools": {
+    "test_target": "Test Target",
+    "test_target_desc": "Launch a WebView2 multi-control test window (grid/buttons/scroll/drag/input); reports via TCP",
+    "test_target_launch": "Launch",
+    "test_target_close": "Close",
+    "test_target_launch_tip": "Open GAM Test Target (WebView2) — capture it and test mouse/keyboard mapping",
+    "test_target_close_tip": "Close the GAM Test Target window",
+
+    "selftest": "Self-Test",
+    "selftest_desc": "Auto-launches fixed-size Test Target, runs mapping self-test, then closes it. For manual tests use Launch above.",
+    "selftest_density_tip": "Per-cell sampling density (N×N sub-grid). Higher = finer, takes longer.",
+    "selftest_density_unit": "/cell",
+    "selftest_run": "Self-Test",
+    "selftest_running": "Running",
+    "selftest_run_tip": "One-click self-test: real user input path, grid calibration + interaction scenarios",
+    "selftest_running_tip": "Self-test in progress…",
+
+    "frame_dump": "Frame Dump",
+    "frame_dump_capture": "Save single-frame captures",
+    "frame_dump_capture_desc": "Save each 📷 snapshot as PNG to disk",
+    "frame_dump_capture_tip": "When enabled, each snapshot is auto-saved as PNG to Dump dir",
+    "frame_dump_stream": "Save live preview frames",
+    "frame_dump_stream_desc": "Save each ▶ preview frame as PNG to disk",
+    "frame_dump_stream_tip": "When enabled, each preview frame is auto-saved as PNG to Dump dir (watch disk space)",
+    "frame_dump_dir": "Dump dir",
+    "frame_dump_not_set": "(not set)",
+    "frame_dump_dir_tip": "Frame save path",
+    "frame_dump_pick_dir_tip": "Choose save directory",
+    "frame_dump_open_dir_tip": "Open save directory in Explorer",
+
+    "misc": "Misc",
+    "misc_skeleton": "Preview Skeleton Screen",
+    "misc_skeleton_desc": "Show startup skeleton screen, auto-dismiss after 3 seconds",
+    "misc_skeleton_tip": "Preview the app startup skeleton screen effect, auto-closes after 3s",
+    "misc_skeleton_btn": "Preview (3s)",
+
+    "ui_demos": "UI Demos",
+    "ui_demos_desc": "Pure frontend mock data, no backend calls. Preview UI states that are hard to trigger manually.",
+    "ui_demos_agent": "Agent / Connection",
+
+    "demo_checking": "Checking",
+    "demo_latest": "Up to date",
+    "demo_update": "Update found",
+    "demo_error": "Check failed",
+    "demo_mandatory": "Mandatory",
+    "demo_full": "Full update",
+    "demo_download": "Download progress",
+    "demo_download_fail": "Download fail",
+    "demo_resume": "Resume (partial)",
+
+    "demo_selftest_running": "Self-Test running",
+    "demo_selftest_done": "Self-Test done (heatmap)",
+    "demo_selftest_error": "Self-Test error",
+
+    "demo_agent_connected": "Agent connected",
+    "demo_agent_disconnected": "Agent disconnected"
+  },
+
+  "selftest": {
+    "title": "Self-Test · Mapping Calibration",
+    "running": "{step} & comparing feedback… {done}/{total}",
+    "step_grid": "Sweeping grid",
+    "step_scenarios": "Running scenarios",
+    "abort": "Abort",
+    "close": "Close",
+    "error_prefix": "Self-test failed: {error}",
+    "aborted_note": "⚠ Aborted — results are partial",
+    "stat_samples": "Samples",
+    "stat_received": "Feedback Received",
+    "stat_cell_match": "Cell Match",
+    "stat_hit_match": "HIT/MISS Match",
+    "stat_offset": "Offset px",
+    "stat_error": "Error mean/max",
+    "heatmap_title": "Cell hit-rate heatmap (expected vs actual)",
+    "scenarios_title": "Interaction scenarios (right / wheel / drag / button / text)",
+    "diag_missed": "• Some clicks received no feedback → input forwarding may be interrupted (check mouse mode / target window)",
+    "diag_large_error": "• Average pixel error is large → possible coordinate offset / scaling / DPI mismatch",
+    "diag_systematic": "• Systematic offset ({dx}, {dy})px detected → constant offset, consider calibrating origin",
+    "diag_scenario_fail": "• Some interaction scenarios got no expected feedback → check wheel/drag/text mapping",
+    "diag_perfect": "• Mapping accurate — grid and interaction scenarios all passed ✓"
+  },
+
+  "loading": {
+    "app_name": "Game Agent Monitor",
+    "loading": "Loading…"
+  },
+
+  "theme": {
+    "switch_light": "Switch to light theme",
+    "switch_dark": "Switch to dark theme"
+  },
+
+  "app": {
+    "resize_expand": "Drag right to expand the panel",
+    "resize_drag": "Drag to resize; drag all the way right to collapse"
+  }
+}
