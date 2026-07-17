@@ -2888,6 +2888,9 @@ std::string dispatch_command(const std::string& json) {
         result = peer_login(json_get_str(args, "url"), json_get_str(args, "user"),
                             json_get_str(args, "password"), json_get_str(args, "deviceName"));
     }
+    else if (cmd == "peer_probe") {
+        result = peer_probe(json_get_str(args, "url"));
+    }
     else if (cmd == "peer_logout") { peer_logout(); result = R"({"ok":true})"; }
     else if (cmd == "peer_status") result = peer_status_json();
     else if (cmd == "peer_invite") result = peer_invite(json_get_str(args, "targetDeviceId"));

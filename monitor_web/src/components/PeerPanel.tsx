@@ -73,29 +73,29 @@ export function PeerPanel({
     if (!base) {
       setProbe('missing')
       setRttMs(null)
+      if (!silent) setStatus(t('peer.server_missing'))
       return
     }
     setProbe('probing')
-    const t0 = performance.now()
     try {
-      const ctrl = new AbortController()
-      const timer = window.setTimeout(() => ctrl.abort(), 4000)
-      const res = await fetch(`${base}/health`, { signal: ctrl.signal, cache: 'no-store' })
-      window.clearTimeout(timer)
-      const ms = Math.round(performance.now() - t0)
-      if (!res.ok) {
+      // Same stack as login: C++ WinHTTP GET /health (not WebView fetch — 铁律 5).
+      const res = await hostCall('peer_probe', { url: base }) as {
+        ok?: boolean; rtt_ms?: number; error?: string
+      }
+      if (!res?.ok) {
         setProbe('missing')
         setRttMs(null)
-        if (!silent) setStatus(t('peer.probe_fail'))
+        if (!silent) setStatus(res?.error === 'unreachable' ? t('peer.server_missing') : (res?.error || t('peer.probe_fail')))
         return
       }
+      const ms = typeof res.rtt_ms === 'number' ? res.rtt_ms : null
       setProbe('ok')
       setRttMs(ms)
-      if (!silent) setStatus(t('peer.probe_ok', { ms }))
-    } catch {
+      if (!silent) setStatus(ms != null ? t('peer.probe_ok', { ms }) : t('peer.probe_ok', { ms: '?' }))
+    } catch (e) {
       setProbe('missing')
       setRttMs(null)
-      if (!silent) setStatus(t('peer.server_missing'))
+      if (!silent) setStatus(String(e))
     }
   }, [url, t])
 

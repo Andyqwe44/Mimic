@@ -50,10 +50,14 @@ $arg = "`"$serverJs`" --host $HostBind --port $Port"
 Write-Host "==> Start MimicServer: node $arg"
 Write-Host "    cwd=$InstallDir"
 
-if ($Background) {
-    Start-Process -FilePath $node -ArgumentList $arg -WorkingDirectory $InstallDir -WindowStyle Hidden
+if ($Background -or $env:SESSIONNAME -eq 'RDP-Tcp' -or -not $env:SESSIONNAME) {
+    # Headless / SSH-friendly: no new console window
+    $p = Start-Process -FilePath $node -ArgumentList @(
+        'server.js', '--host', $HostBind, '--port', "$Port"
+    ) -WorkingDirectory $InstallDir -WindowStyle Hidden -PassThru
+    Write-Host "    started PID $($p.Id) (background)"
 } else {
-    # Visible console so logs are easy to watch on the VPS
+    # Visible console so logs are easy to watch on interactive desktop
     Start-Process -FilePath 'powershell.exe' -ArgumentList @(
         '-NoExit', '-NoProfile', '-Command',
         "Set-Location '$InstallDir'; Write-Host 'MimicServer on ${HostBind}:$Port'; node server.js --host $HostBind --port $Port"

@@ -206,6 +206,47 @@ std::string http_post_json(const std::string& base, const std::string& api_path,
     return resp;
 }
 
+// GET path on base URL. Returns body; empty on transport failure. Optional out_ms for RTT.
+std::string http_get(const std::string& base, const std::string& api_path, DWORD* out_ms) {
+    std::wstring host;
+    INTERNET_PORT port = 80;
+    bool https = false;
+    std::string path;
+    if (!parse_http_url(base, host, port, https, path)) return "";
+    HINTERNET hSess = WinHttpOpen(L"MimicClient/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+                                  WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    if (!hSess) return "";
+    // Short timeouts so probe fails loudly instead of hanging the UI thread long.
+    WinHttpSetTimeouts(hSess, 2000, 2000, 4000, 4000);
+    HINTERNET hConn = WinHttpConnect(hSess, host.c_str(), port, 0);
+    if (!hConn) { WinHttpCloseHandle(hSess); return ""; }
+    std::wstring wpath(api_path.begin(), api_path.end());
+    HINTERNET hReq = WinHttpOpenRequest(hConn, L"GET", wpath.c_str(), nullptr,
+        WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, https ? WINHTTP_FLAG_SECURE : 0);
+    if (!hReq) {
+        WinHttpCloseHandle(hConn); WinHttpCloseHandle(hSess); return "";
+    }
+    ULONGLONG t0 = GetTickCount64();
+    BOOL ok = WinHttpSendRequest(hReq, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+                                 WINHTTP_NO_REQUEST_DATA, 0, 0, 0);
+    if (!ok || !WinHttpReceiveResponse(hReq, nullptr)) {
+        WinHttpCloseHandle(hReq); WinHttpCloseHandle(hConn); WinHttpCloseHandle(hSess);
+        return "";
+    }
+    std::string resp;
+    for (;;) {
+        DWORD avail = 0;
+        if (!WinHttpQueryDataAvailable(hReq, &avail) || avail == 0) break;
+        std::vector<char> buf(avail);
+        DWORD read = 0;
+        if (!WinHttpReadData(hReq, buf.data(), avail, &read) || read == 0) break;
+        resp.append(buf.data(), read);
+    }
+    if (out_ms) *out_ms = (DWORD)(GetTickCount64() - t0);
+    WinHttpCloseHandle(hReq); WinHttpCloseHandle(hConn); WinHttpCloseHandle(hSess);
+    return resp;
+}
+
 std::string json_get_str_simple(const std::string& j, const char* key) {
     std::string pat = std::string("\"") + key + "\":\"";
     size_t p = j.find(pat);
@@ -778,6 +819,29 @@ std::string peer_register(const std::string& signaling_url,
     std::string resp = http_post_json(signaling_url, "/api/register", body);
     if (resp.empty()) return R"({"ok":false,"error":"network"})";
     return resp;
+}
+
+std::string peer_probe(const std::string& signaling_url) {
+    std::string base = signaling_url;
+    while (!base.empty() && base.back() == '/') base.pop_back();
+    if (base.empty()) return R"({"ok":false,"error":"empty url"})";
+    DWORD ms = 0;
+    std::string resp = http_get(base, "/health", &ms);
+    if (resp.empty()) {
+        LOG_WARN("peer", "probe unreachable url=%s", base.c_str());
+        return R"({"ok":false,"error":"unreachable"})";
+    }
+    // Accept any JSON with "ok":true (or literal ok field). Do not invent success.
+    bool ok = (resp.find("\"ok\":true") != std::string::npos) ||
+              (resp.find("\"ok\": true") != std::string::npos);
+    if (!ok) {
+        LOG_WARN("peer", "probe bad body url=%s body=%.120s", base.c_str(), resp.c_str());
+        return R"({"ok":false,"error":"bad health response"})";
+    }
+    char out[128];
+    snprintf(out, sizeof(out), "{\"ok\":true,\"rtt_ms\":%u}", (unsigned)ms);
+    LOG("peer", "probe ok url=%s rtt=%ums", base.c_str(), (unsigned)ms);
+    return out;
 }
 
 std::string peer_login(const std::string& signaling_url,

@@ -52,6 +52,9 @@ std::string peer_register(const std::string& signaling_url,
                           const std::string& user,
                           const std::string& password);
 
+/// GET /health via WinHTTP (same stack as login). Returns {ok,rtt_ms} or {ok:false,error}.
+std::string peer_probe(const std::string& signaling_url);
+
 void peer_logout();
 bool peer_online();
 PeerRole peer_role();

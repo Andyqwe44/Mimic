@@ -60,5 +60,5 @@ Set-Content -Path $verFile -Value $Version -Encoding utf8
 Write-Host "    OK installed v$Version"
 
 if ($StartAfter) {
-    & "$PSScriptRoot\Start-MimicServer.ps1" -InstallDir $InstallDir
+    & "$PSScriptRoot\Start-MimicServer.ps1" -InstallDir $InstallDir -Restart -Background
 }
