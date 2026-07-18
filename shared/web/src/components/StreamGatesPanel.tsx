@@ -45,8 +45,8 @@ export function StreamGatesPanel({
   return (
     <RailCard
       icon={(
-        <span className="w-5 h-5 rounded bg-emerald-500/15 flex items-center justify-center">
-          <Power className="w-3 h-3 text-emerald-500" />
+        <span className="w-5 h-5 rounded bg-[var(--color-success-soft)] flex items-center justify-center text-emerald-500">
+          <Power className="w-3.5 h-3.5" strokeWidth={2} />
         </span>
       )}
       title={t('gates.title')}

@@ -112,6 +112,7 @@
     "badge_probing": "探测中…",
     "badge_missing": "服务器缺失",
     "badge_reachable": "可达 · {ms}ms",
+    "badge_reachable_plain": "可达",
     "badge_online": "已登录",
     "badge_online_rtt": "已登录 · {ms}ms",
     "role_controller": "控制中",

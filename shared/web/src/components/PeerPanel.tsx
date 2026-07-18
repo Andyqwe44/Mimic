@@ -285,8 +285,13 @@ export function PeerPanel({
     headerBadges.push({ text: t('peer.badge_probing'), tone: 'warn' })
   } else if (probe === 'missing') {
     headerBadges.push({ text: t('peer.badge_missing'), tone: 'error' })
-  } else if (probe === 'ok' && rttMs != null) {
-    headerBadges.push({ text: t('peer.badge_reachable', { ms: rttMs }), tone: 'success' })
+  } else if (probe === 'ok') {
+    headerBadges.push({
+      text: rttMs != null
+        ? t('peer.badge_reachable', { ms: rttMs })
+        : t('peer.badge_reachable_plain'),
+      tone: 'success',
+    })
   } else {
     headerBadges.push({ text: t('peer.badge_offline'), tone: 'muted' })
   }
@@ -294,8 +299,8 @@ export function PeerPanel({
   return (
     <RailCard
       icon={(
-        <span className="w-5 h-5 rounded bg-accent/15 flex items-center justify-center">
-          <Cable className="w-3 h-3 text-accent" />
+        <span className="w-5 h-5 rounded bg-[var(--color-accent-soft)] flex items-center justify-center text-accent">
+          <Cable className="w-3.5 h-3.5" strokeWidth={2} />
         </span>
       )}
       title={t('peer.title')}

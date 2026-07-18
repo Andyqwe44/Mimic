@@ -21,6 +21,12 @@
   --color-info: #3B82F6;
   --color-warning: #eab308;
   --color-error: #ef4444;
+  /* Soft fills (rgba) — avoid Tailwind color-mix opacity mods on Android WebView */
+  --color-accent-soft: rgba(59, 130, 246, 0.12);
+  --color-blue-soft: rgba(96, 165, 250, 0.14);
+  --color-success-soft: rgba(34, 197, 94, 0.12);
+  --color-warn-soft: rgba(245, 158, 11, 0.12);
+  --color-error-soft: rgba(239, 68, 68, 0.12);
 }
 
 /* Dark theme — VSCode-inspired deep blue-gray */
@@ -37,6 +43,11 @@
   --color-border: #2d2d2d;
   --color-border-strong: #383838;
   --color-accent-light: #264f78;
+  --color-accent-soft: rgba(59, 130, 246, 0.18);
+  --color-blue-soft: rgba(96, 165, 250, 0.18);
+  --color-success-soft: rgba(34, 197, 94, 0.18);
+  --color-warn-soft: rgba(245, 158, 11, 0.18);
+  --color-error-soft: rgba(239, 68, 68, 0.18);
 }
 
 @theme {
@@ -67,11 +78,46 @@ html, body, #root {
   height: 100dvh;
   margin: 0;
   padding: 0;
+  /* Lock document scroll so bottom PrimaryNav stays pinned (Android WebView). */
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+#root {
+  /* Absolute fill: survives WebView where 100dvh ≠ visual viewport. */
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
 }
 body {
   font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Roboto', 'Oxygen', 'Ubuntu', sans-serif;
   background-color: var(--color-bg-primary); color: var(--color-text-primary);
   -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+}
+
+/* Lucide SVG: force stroke paint (some WebViews drop currentColor on nested path). */
+svg.lucide {
+  display: block;
+  flex-shrink: 0;
+  stroke: currentColor;
+  fill: none;
+}
+
+/* Collapsible tiles: grid 0fr/1fr (PC) + max-height (Android WebView fallback). */
+.collapsible-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 150ms ease-out, max-height 150ms ease-out;
+  max-height: 0;
+  overflow: hidden;
+}
+.collapsible-body[data-open='true'] {
+  grid-template-rows: 1fr;
+  max-height: var(--collapsible-max, 720px);
+}
+.collapsible-body-inner {
+  min-height: 0;
+  overflow: hidden;
 }
 /* Reserve scrollbar space on desktop — on phone it looks like a left shift */
 .overflow-y-auto, .overflow-y-scroll, .overflow-auto, .overflow-scroll {

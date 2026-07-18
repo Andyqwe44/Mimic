@@ -112,6 +112,7 @@
     "badge_probing": "Probing…",
     "badge_missing": "Server missing",
     "badge_reachable": "Reachable · {ms}ms",
+    "badge_reachable_plain": "Reachable",
     "badge_online": "Logged in",
     "badge_online_rtt": "Logged in · {ms}ms",
     "role_controller": "Controlling",

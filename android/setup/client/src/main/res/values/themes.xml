@@ -1,11 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Match shared/web dark chrome — no green status strip above the React UI. -->
     <style name="Theme.MimicClient" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <item name="colorPrimary">#1B6B4A</item>
-        <item name="colorPrimaryVariant">#0F3D2B</item>
+        <item name="colorPrimary">#3B82F6</item>
+        <item name="colorPrimaryVariant">#2563EB</item>
         <item name="colorOnPrimary">#FFFFFF</item>
-        <item name="android:statusBarColor">#0F3D2B</item>
-        <item name="android:navigationBarColor">#0F172A</item>
-        <item name="android:windowBackground">#0F172A</item>
+        <item name="android:statusBarColor">#1E1E1E</item>
+        <item name="android:navigationBarColor">#1E1E1E</item>
+        <item name="android:windowBackground">#1E1E1E</item>
+        <item name="android:windowLightStatusBar">false</item>
     </style>
 </resources>

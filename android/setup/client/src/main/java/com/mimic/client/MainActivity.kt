@@ -8,6 +8,7 @@ import android.graphics.Color
 import android.media.projection.MediaProjectionManager
 import android.os.Bundle
 import android.util.Log
+import android.view.View
 import android.view.ViewGroup
 import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
@@ -21,6 +22,7 @@ import android.widget.FrameLayout
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.WindowCompat
 import androidx.webkit.WebViewAssetLoader
 import org.json.JSONObject
 import java.util.concurrent.Executors
@@ -54,15 +56,24 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         supportActionBar?.hide()
+        // Keep system bars chrome-matched; Web UI owns the layout (no green strip).
+        WindowCompat.setDecorFitsSystemWindows(window, true)
+        window.statusBarColor = Color.parseColor("#1E1E1E")
+        window.navigationBarColor = Color.parseColor("#1E1E1E")
 
         val root = FrameLayout(this)
-        webView = WebView(this)
+        webView = WebView(this).apply {
+            setBackgroundColor(Color.parseColor("#1E1E1E"))
+            overScrollMode = View.OVER_SCROLL_NEVER
+            isVerticalScrollBarEnabled = false
+            isHorizontalScrollBarEnabled = false
+        }
         errBanner = TextView(this).apply {
             setBackgroundColor(Color.parseColor("#B91C1C"))
             setTextColor(Color.WHITE)
             setPadding(24, 24, 24, 24)
             textSize = 12f
-            visibility = android.view.View.GONE
+            visibility = View.GONE
         }
         root.addView(
             webView,

@@ -3,15 +3,17 @@ import type { ReactNode } from 'react'
 import { ChevronDown, Pin } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Tooltip } from './Toolkit'
+import { CollapsibleBody } from './CollapsibleBody'
 import { COLLAPSIBLE_HEADER } from '../lib/constants'
 
 export type RailBadgeTone = 'accent' | 'success' | 'warn' | 'error' | 'muted'
 
+/** Soft fills use CSS vars (rgba) — avoid Tailwind opacity color-mix on Android WebView. */
 const BADGE_TONE: Record<RailBadgeTone, string> = {
-  accent: 'text-accent bg-accent/10',
-  success: 'text-emerald-500 bg-emerald-500/10',
-  warn: 'text-amber-500 bg-amber-500/10',
-  error: 'text-error bg-red-500/10',
+  accent: 'text-accent bg-[var(--color-accent-soft)]',
+  success: 'text-emerald-500 bg-[var(--color-success-soft)]',
+  warn: 'text-amber-500 bg-[var(--color-warn-soft)]',
+  error: 'text-error bg-[var(--color-error-soft)]',
   muted: 'text-text-muted bg-bg-tertiary',
 }
 
@@ -63,10 +65,10 @@ export function RailCard({
         }}
         className={COLLAPSIBLE_HEADER}
       >
-        <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
           <span className="shrink-0">{icon}</span>
           <span className="text-sm font-medium text-text-primary shrink-0">{title}</span>
-          <div className="flex items-center gap-1 min-w-0 overflow-hidden">
+          <div className="flex items-center gap-1 min-w-0 flex-1 flex-wrap">
             {(badges || []).filter((b) => b.text).map((b, i) => (
               <RailBadge key={`${b.text}-${i}`} text={b.text} tone={b.tone} />
             ))}
@@ -94,17 +96,14 @@ export function RailCard({
           />
         </div>
       </div>
-      <div
-        className="grid transition-[grid-template-rows] duration-150 ease-out"
-        style={{ gridTemplateRows: expanded ? '1fr' : '0fr' }}
-      >
-        <div className="overflow-hidden min-h-0" data-layout-measure="">
+      <CollapsibleBody expanded={expanded} maxPx={480}>
+        <div data-layout-measure="">
           <div className="border-t border-border" />
           <div className={`${maxBodyClass} overflow-y-auto overflow-x-hidden p-3 space-y-2 min-w-0`}>
             {children}
           </div>
         </div>
-      </div>
+      </CollapsibleBody>
     </div>
   )
 }

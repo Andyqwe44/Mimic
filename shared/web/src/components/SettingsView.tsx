@@ -6,6 +6,7 @@ import {
   Monitor, MousePointer2, Keyboard, Pencil, FolderOpen,
 } from 'lucide-react'
 import { Tooltip, ActionBtn } from './Toolkit'
+import { CollapsibleBody } from './CollapsibleBody'
 import { hostCall, addLog } from '../lib/bridge'
 import {
   COLLAPSIBLE_HEADER, SELECTABLE_BTN, CAPTURE_METHODS, RENDER_METHODS,
@@ -64,15 +65,10 @@ export function SettingsCard({
           className={`w-4 h-4 text-text-muted transition-transform duration-150 ${expanded ? 'rotate-180' : ''}`}
         />
       </div>
-      <div
-        className="grid transition-[grid-template-rows] duration-150 ease-out"
-        style={{ gridTemplateRows: expanded ? '1fr' : '0fr' }}
-      >
-        <div className="overflow-hidden min-h-0">
-          <div className="border-t border-border" />
-          <div className="p-4">{children}</div>
-        </div>
-      </div>
+      <CollapsibleBody expanded={expanded} maxPx={1200}>
+        <div className="border-t border-border" />
+        <div className="p-4">{children}</div>
+      </CollapsibleBody>
     </div>
   )
 }

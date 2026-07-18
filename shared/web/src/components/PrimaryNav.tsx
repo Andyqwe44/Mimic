@@ -66,7 +66,7 @@ export function PrimaryNav({
     return (
       <nav
         aria-label={t('nav.aria')}
-        className={`shrink-0 border-t border-border bg-bg-secondary/95 backdrop-blur-sm
+        className={`shrink-0 border-t border-border bg-bg-secondary
           ${SHELL_PAD.safeBottom}
           pl-[max(0.375rem,env(safe-area-inset-left,0px))]
           pr-[max(0.375rem,env(safe-area-inset-right,0px))]`}

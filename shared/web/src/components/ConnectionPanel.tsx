@@ -72,6 +72,7 @@ export function ConnectionPanel({
   const recommendedMethod = android
     ? 'mediaprojection'
     : winState === 'minimized' ? 'dxgi' : 'wgc'
+  // Android badges parallel PC 「桌面 / WGC」: 「主屏|应用 / MP」
   const methodBadge = android
     ? (METHOD_SHORT.mediaprojection || 'MP')
     : (METHOD_SHORT[recommendedMethod] || recommendedMethod)
@@ -83,8 +84,8 @@ export function ConnectionPanel({
     <>
       <RailCard
         icon={(
-          <span className="w-5 h-5 rounded bg-blue-400/15 flex items-center justify-center">
-            <MonitorUp className="w-3 h-3 text-blue-400" />
+          <span className="w-5 h-5 rounded bg-[var(--color-blue-soft)] flex items-center justify-center text-blue-400">
+            <MonitorUp className="w-3.5 h-3.5" strokeWidth={2} />
           </span>
         )}
         title={t('connection.title')}

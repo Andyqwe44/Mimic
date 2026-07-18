@@ -326,26 +326,41 @@ class AndroidHost(
         context.startActivity(intent)
     }
 
+    /** Match PC peer_probe: ok+rtt_ms on success, ok:false on unreachable (铁律 5). */
     private fun peerProbe(baseUrl: String): JSONObject {
-        val health = httpGetJson("$baseUrl/health")
-        val cluster = try {
-            httpGetJson("$baseUrl/api/cluster")
+        val base = baseUrl.trimEnd('/')
+        if (base.isEmpty()) {
+            return JSONObject().put("ok", false).put("error", "empty url")
+        }
+        val t0 = android.os.SystemClock.elapsedRealtime()
+        val health = try {
+            httpGetJson("$base/health")
         } catch (_: Exception) {
             null
         }
-        val o = JSONObject().put("ok", true).put("url", baseUrl).put("reachable", health != null)
-        if (health != null) {
-            o.put("role", health.optString("role", ""))
-            o.put("instanceId", health.optString("instanceId", ""))
+        val ms = (android.os.SystemClock.elapsedRealtime() - t0).toInt().coerceAtLeast(0)
+        if (health == null || !health.optBoolean("ok", true)) {
+            return JSONObject().put("ok", false).put("error", "unreachable")
+        }
+        val cluster = try {
+            httpGetJson("$base/api/cluster")
+        } catch (_: Exception) {
+            null
         }
         val nodeCount = when {
             cluster?.has("nodeCount") == true -> cluster.getInt("nodeCount")
             cluster?.optJSONArray("nodes") != null -> cluster.getJSONArray("nodes").length()
-            health?.has("nodeCount") == true -> health.getInt("nodeCount")
-            else -> 0
-        }
-        o.put("node_count", nodeCount)
-        return o
+            health.has("nodeCount") -> health.getInt("nodeCount")
+            else -> 1
+        }.coerceAtLeast(1)
+        return JSONObject()
+            .put("ok", true)
+            .put("url", base)
+            .put("reachable", true)
+            .put("rtt_ms", ms)
+            .put("node_count", nodeCount)
+            .put("role", health.optString("role", ""))
+            .put("instanceId", health.optString("instanceId", ""))
     }
 
     private fun appendLog(tagName: String, msg: String) {
