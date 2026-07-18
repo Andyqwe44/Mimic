@@ -52,19 +52,29 @@ if ($setupSrc.FullName -ne $setupApkOut) {
     Copy-Item $setupSrc.FullName $setupApkOut -Force
 }
 
+$clientApkPath = Join-Path $outRoot $clientName
+$clientSha = ''
+$clientSize = 0
+if (Test-Path $clientApkPath) {
+    $clientSha = (Get-FileHash -Algorithm SHA256 -Path $clientApkPath).Hash.ToLowerInvariant()
+    $clientSize = (Get-Item $clientApkPath).Length
+}
 $manifest = [ordered]@{
     schema         = '1'
     app            = $Version
     platform       = 'android'
     channel        = 'stable'
+    # Full APK replace only — Android has no PC-style multi-file overlay updater.
     full_update    = $true
     download_base  = 'http://47.107.43.5/mimic/android/'
     setup_apk      = $setupName
     client_apk     = $clientName
     apk            = $clientName
+    client_sha256  = $clientSha
+    client_size    = $clientSize
     has_apk        = $true
     has_client_apk = $true
-    message        = 'Thin Setup APK downloads Client APK from CDN (PC-style)'
+    message        = 'Full APK update (PackageInstaller). SHA-256 verified before install.'
 }
 $utf8 = New-Object System.Text.UTF8Encoding $false
 $jsonText = ($manifest | ConvertTo-Json -Depth 6) + "`n"

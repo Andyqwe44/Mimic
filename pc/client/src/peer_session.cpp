@@ -807,7 +807,8 @@ bool open_signaling_ws(const std::string& http_base, const std::string& token) {
     }
     ips += "]";
     std::string presence = std::string("{\"type\":\"presence\",\"deviceName\":\"") + g_device_name +
-                           "\",\"lanIps\":" + ips + "}";
+                           "\",\"lanIps\":" + ips +
+                           ",\"platform\":\"windows\",\"peerProto\":2}";
     ws_send_text(s, presence);
     return true;
 }

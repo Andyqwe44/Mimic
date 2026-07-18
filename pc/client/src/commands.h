@@ -66,6 +66,17 @@ static constexpr UINT WM_SELFTEST_EVENT = WM_USER + 103;
 /// Drain queued test_target JSON lines to the WebView (main thread only).
 void selftest_drain_to_webview();
 
+// Peer signaling/LAN UI events (devices, invite, session_*, peer_frame, …).
+// WS/LAN reader threads must NOT call PostWebMessageAsJson directly — same STA
+// rule as WM_SELFTEST_EVENT. Without this, PeerPanel never sees devices/invite.
+static constexpr UINT WM_PEER_UI_EVENT = WM_USER + 104;
+
+/// Enqueue peer JSON for STA delivery (any thread).
+void peer_ui_enqueue(const std::string& json);
+
+/// Drain peer UI queue to WebView (main thread only).
+void peer_ui_drain_to_webview();
+
 struct UpdateProgress {
     bool active = false;       // download thread running
     bool succeeded = false;    // all files done OK

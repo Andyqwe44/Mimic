@@ -19,9 +19,11 @@ import com.mimic.client.target.TargetDescriptor
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -342,14 +344,16 @@ class AndroidHost(
             .put("body", "APK update from CDN android/ (not mimic/client)")
             .put("download_base", base)
         if (has && apkName.isNotBlank()) {
-            val size = tryHeadSize(base + apkName)
-            val diff = JSONArray().put(
-                JSONObject()
-                    .put("path", apkName)
-                    .put("size", size)
-                    .put("dl", size)
-            )
-            o.put("diff", diff)
+            val size = manifest.optLong("client_size", 0).takeIf { it > 0 }
+                ?: tryHeadSize(base + apkName)
+            val sha = manifest.optString("client_sha256", "")
+            val entry = JSONObject()
+                .put("path", apkName)
+                .put("size", size)
+                .put("dl", size)
+            if (sha.isNotBlank()) entry.put("sha256", sha)
+            o.put("diff", JSONArray().put(entry))
+            o.put("body", "Full APK replace (Android PackageInstaller — not PC multi-file incremental)")
         } else {
             o.put("diff", JSONArray())
         }
@@ -361,6 +365,7 @@ class AndroidHost(
         val base = manifest.optString("download_base", CDN_BASE).trimEnd('/') + "/"
         val apkName = manifest.optString("client_apk", manifest.optString("apk", ""))
         if (apkName.isBlank()) throw Exception("client_apk missing")
+        val expectSha = manifest.optString("client_sha256", "").lowercase()
         val url = base + apkName
         val dir = File(context.cacheDir, "updates").apply { mkdirs() }
         val out = File(dir, apkName)
@@ -369,6 +374,15 @@ class AndroidHost(
             if (total > 0) {
                 pushBytes(apkName, read, total)
             }
+        }
+        if (expectSha.isNotBlank()) {
+            val actual = sha256File(out)
+            if (!actual.equals(expectSha, ignoreCase = true)) {
+                out.delete()
+                pushProgress("error", "sha256 mismatch")
+                throw Exception("apk sha256 mismatch (got $actual)")
+            }
+            appendLog("update", "apk sha256 ok")
         }
         pushProgress("done", apkName)
         main.post { promptInstall(out) }
@@ -522,6 +536,19 @@ class AndroidHost(
         } finally {
             conn.disconnect()
         }
+    }
+
+    private fun sha256File(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        FileInputStream(file).use { input ->
+            val buf = ByteArray(64 * 1024)
+            while (true) {
+                val n = input.read(buf)
+                if (n <= 0) break
+                digest.update(buf, 0, n)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
     private fun httpDownload(url: String, dest: File, onProgress: (Long, Long) -> Unit) {

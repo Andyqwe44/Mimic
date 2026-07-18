@@ -303,11 +303,16 @@ export default function App() {
     }
   }, [startDownload])
 
-  // Subscribe to C++ download progress pushes.
+  // Subscribe to host download progress pushes.
   useEffect(() => onUpdateProgress((m) => {
     setUpdateProgress(m)
-    if (m.phase === 'done') addLog('[update] download complete, launching updater...')
-    else if (m.phase === 'error') {
+    if (m.phase === 'done') {
+      addLog(
+        isAndroidHost()
+          ? '[update] APK download complete — opening system installer'
+          : '[update] download complete, launching updater...',
+      )
+    } else if (m.phase === 'error') {
       addLog(`[update] failed: ${m.error_file || m.file}`)
       setUpdateDownloading(false)
     }

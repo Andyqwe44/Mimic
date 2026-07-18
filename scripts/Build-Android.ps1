@@ -79,19 +79,25 @@ Copy-Item $setupApk.FullName (Join-Path $out $setupName) -Force
 Copy-Item $clientApk.FullName (Join-Path $out $clientName) -Force
 Copy-Item $setupApk.FullName (Join-Path $root "release\$setupName") -Force
 
+$clientApkPath = Join-Path $out $clientName
+$clientSha = (Get-FileHash -Algorithm SHA256 -Path $clientApkPath).Hash.ToLowerInvariant()
+$clientSize = (Get-Item $clientApkPath).Length
 $manifest = [ordered]@{
     schema         = '1'
     app            = $ver
     platform       = 'android'
     channel        = 'stable'
+    # Android installs one signed APK — full replace only (not PC multi-file incremental).
     full_update    = $true
     download_base  = 'http://47.107.43.5/mimic/android/'
     setup_apk      = $setupName
     client_apk     = $clientName
     apk            = $clientName
+    client_sha256  = $clientSha
+    client_size    = $clientSize
     has_apk        = $true
     has_client_apk = $true
-    message        = 'Thin Setup → CDN Client; shared/web UI; in-app APK update'
+    message        = 'Full APK update (Android PackageInstaller). SHA-256 verified before install.'
 }
 $utf8 = New-Object System.Text.UTF8Encoding $false
 $jsonText = ($manifest | ConvertTo-Json -Depth 6) + "`n"

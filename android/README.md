@@ -51,15 +51,19 @@ powershell -File scripts\Build-Android.ps1
 - 已装但更旧 → 下载并覆盖安装  
 - 按钮「Re-download」可强制重下  
 
-## 应用内更新（不是系统 A/B）
+## 应用内更新（全量 APK，不是 PC 增量）
 
-安卓**第三方 App** 一般不是 A/B 双分区（那是系统 OTA）。我们的逻辑与多数应用商店相同：
+安卓安装单元是**整包签名 APK**，没有 PC 那种「多文件 sha256 差量覆盖目录」的 updater。
 
-1. 下载新 APK 到缓存  
-2. `PackageInstaller` / 系统安装器 **同 `applicationId` 覆盖安装**（签名需一致）  
-3. 进程重启后即新版本  
+当前设计（正确且刻意）：
 
-Settings → Check Update 走 `check_update` / `download_update`（shared/web 同一套 UI）。
+1. CDN `version.json`：`full_update: true` + `client_apk` + `client_sha256`  
+2. 下载整包 APK → **SHA-256 校验** → 系统安装器同 `applicationId` 覆盖安装  
+3. UI / 原生改动都打进 APK（`shared/web` 在 assets），所以每次更新都是整包  
+
+若将来要「更小下载」，应做 **APK 二进制差分（bsdiff）** 或上 Play 分发，而不是移植 PC 的 `files{}` 清单。
+
+Settings → Check Update 走 `check_update` / `download_update`（shared/web 同一套 UI，`mode: full`）。
 
 ## 手机测试
 

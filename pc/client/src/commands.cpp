@@ -902,6 +902,30 @@ void selftest_drain_to_webview() {
     }
 }
 
+// Peer UI queue — WS/LAN reader threads → STA → PostJsonToWebView
+static std::mutex g_peer_ui_mtx;
+static std::vector<std::string> g_peer_ui_q;
+
+void peer_ui_enqueue(const std::string& json) {
+    {
+        std::lock_guard<std::mutex> lk(g_peer_ui_mtx);
+        g_peer_ui_q.push_back(json);
+    }
+    HWND hwnd = (HWND)get_main_hwnd();
+    if (hwnd) PostMessageW(hwnd, WM_PEER_UI_EVENT, 0, 0);
+}
+
+void peer_ui_drain_to_webview() {
+    std::vector<std::string> batch;
+    {
+        std::lock_guard<std::mutex> lk(g_peer_ui_mtx);
+        batch.swap(g_peer_ui_q);
+    }
+    for (const auto& json : batch) {
+        PostJsonToWebView(json);
+    }
+}
+
 static void st_cleanup() {
     g_st_running = false;
     if (g_st_sock != INVALID_SOCKET) { closesocket(g_st_sock); g_st_sock = INVALID_SOCKET; }
@@ -3347,7 +3371,8 @@ void backend_init() {
     // Agent connects outbound via connect_server hostCall.
     // Peer sessions: Mimic signaling + LAN media.
     peer_init(PeerCallbacks{
-        [](const std::string& json) { PostJsonToWebView(json.c_str()); },
+        // Must marshal to STA — off-thread PostWebMessage silently drops devices/invite.
+        [](const std::string& json) { peer_ui_enqueue(json); },
         [](const std::string& actionJson) {
             std::string r = execute_remote_control_json(actionJson);
             if (r.find("\"ok\":false") != std::string::npos)
