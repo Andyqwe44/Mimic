@@ -1,6 +1,6 @@
 // PrimaryNav — side rail (desktop) or bottom bar (phone). Same IA.
 import { useLayoutEffect, type ReactNode, type RefObject } from 'react'
-import { Monitor, SlidersHorizontal, FileText, Settings, ChevronsLeft, ChevronsRight } from 'lucide-react'
+import { Monitor, SlidersHorizontal, FileText, Settings } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Tooltip } from './Toolkit'
 import { H, NAV, RADIUS, SHELL_PAD, TEXT } from '../lib/design'
@@ -117,26 +117,35 @@ export function PrimaryNav({
       className={`shrink-0 flex flex-col border-r border-border bg-bg-secondary transition-[width] duration-200
         ${wide ? NAV.sideWide : NAV.sideCompact} ${SHELL_PAD.safeTop}`}
     >
-      <Tooltip text={wide ? t('nav.collapse') : t('nav.expand')}>
-        <button
-          type="button"
-          onClick={() => {
-            onToggleExpand?.()
-            addLog(`[Nav] rail ${wide ? 'collapse' : 'expand'}`)
-          }}
-          className={`mx-1.5 mt-2 mb-1 flex items-center justify-center gap-1 h-9 ${RADIUS.lg}
-            text-text-primary hover:bg-bg-hover transition-colors`}
-        >
-          {wide ? (
-            <>
-              <span className={`${TEXT.xs} font-bold tracking-wide`}>MIMIC</span>
-              <ChevronsLeft className={`${H.iconSm} text-text-muted shrink-0`} />
-            </>
-          ) : (
-            <ChevronsRight className={`${H.icon} text-accent`} />
-          )}
-        </button>
-      </Tooltip>
+      {/* Brand = rail collapse control; same horizontal inset as nav items below */}
+      <div className="px-1.5 pt-2 pb-1">
+        <Tooltip text={wide ? t('nav.collapse') : t('nav.expand')} className="w-full">
+          <button
+            type="button"
+            aria-expanded={wide}
+            aria-label={wide ? t('nav.collapse') : t('nav.expand')}
+            onClick={() => {
+              onToggleExpand?.()
+              addLog(`[Nav] rail ${wide ? 'collapse' : 'expand'}`)
+            }}
+            className={`w-full ${NAV.touchMin} flex items-center gap-2 ${RADIUS.lg} px-2 py-2
+              text-text-primary hover:bg-bg-hover transition-colors
+              ${wide ? '' : 'justify-center'}`}
+          >
+            {/* Mark slot aligns with page icons; later: wide logo vs square icon */}
+            <span
+              className={`${H.icon} flex items-center justify-center shrink-0
+                ${TEXT.xs} font-bold tracking-tight text-accent`}
+              aria-hidden
+            >
+              M
+            </span>
+            {wide && (
+              <span className={`${TEXT.xs} font-bold tracking-wide truncate`}>MIMIC</span>
+            )}
+          </button>
+        </Tooltip>
+      </div>
 
       <div className="flex-1 flex flex-col gap-1 px-1.5">
         {items.map((it) => {

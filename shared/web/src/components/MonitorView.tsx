@@ -15,6 +15,7 @@ import { ActionBtn, Tooltip } from './Toolkit'
 import { STATE_LABEL, codeToName, resolveInputMethods } from '../lib/constants'
 import { THIN_CLIENT } from '../lib/features'
 import { addLog, hostCall } from '../lib/bridge'
+import { SHELL_PAD } from '../lib/design'
 import type { WindowInfo, Rect } from '../lib/types'
 
 // ── Types ──
@@ -845,7 +846,7 @@ export function MonitorView({
       </div>
 
       {/* ── Preview canvas (full width) ── */}
-      <div className="flex-1 overflow-hidden p-4 min-h-0">
+      <div className={`flex-1 overflow-hidden ${SHELL_PAD.page} min-h-0`}>
         <div
           ref={containerRef}
           data-no-page-swipe

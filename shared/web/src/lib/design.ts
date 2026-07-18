@@ -149,8 +149,9 @@ export const NAV = {
 } as const
 
 export const SHELL_PAD = {
-  page: 'p-4 max-[359px]:p-2',
-  pageY: 'py-4 max-[359px]:py-2',
+  /** Match Log panel density — full-bleed content width, generous padding */
+  page: 'p-6 max-[359px]:p-3',
+  pageY: 'py-6 max-[359px]:py-3',
   safeBottom: 'pb-[env(safe-area-inset-bottom,0px)]',
   safeTop: 'pt-[env(safe-area-inset-top,0px)]',
 } as const

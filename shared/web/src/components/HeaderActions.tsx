@@ -1,6 +1,6 @@
-// HeaderActions — compact lang / permission / theme strip (from former TopBar).
+// HeaderActions — compact lang / permission / theme / update strip (from former TopBar).
 import { useEffect, useRef, useState } from 'react'
-import { User, Shield } from 'lucide-react'
+import { User, Shield, RefreshCw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { ThemeBtn, Tooltip } from './Toolkit'
 import { addLog } from '../lib/bridge'
@@ -27,6 +27,8 @@ export function HeaderActions({
   onSwitchPermission,
   hidePermission,
   compact,
+  onCheckUpdate,
+  hasUpdate,
 }: {
   dark: boolean
   onToggleTheme: () => void
@@ -37,6 +39,9 @@ export function HeaderActions({
   /** Android: no UAC elevation — hide Windows admin toggle */
   hidePermission?: boolean
   compact?: boolean
+  /** Always-reachable update entry (escape hatch if Settings scroll/layout fails). */
+  onCheckUpdate?: () => void
+  hasUpdate?: boolean
 }) {
   const { t } = useTranslation()
   const [langOpen, setLangOpen] = useState(false)
@@ -121,6 +126,28 @@ export function HeaderActions({
       )}
 
       <ThemeBtn dark={dark} onToggle={onToggleTheme} />
+
+      {onCheckUpdate && (
+        <Tooltip text={hasUpdate ? t('settings.check_update_latest_tip') : t('settings.check_update_tip')}>
+          <button
+            type="button"
+            onClick={() => {
+              onCheckUpdate()
+              addLog('[Update] header check')
+            }}
+            className={`${ICON_CELL} relative`}
+            aria-label={hasUpdate ? t('settings.check_update_latest') : t('settings.check_update')}
+          >
+            <RefreshCw className={`${H.icon} ${hasUpdate ? 'text-accent' : ''}`} />
+            {hasUpdate && (
+              <span
+                aria-hidden
+                className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-accent"
+              />
+            )}
+          </button>
+        </Tooltip>
+      )}
     </div>
   )
 }

@@ -7,6 +7,7 @@ import { Tooltip } from './Toolkit'
 import { useTranslation } from 'react-i18next'
 import { logMgr, addLog, hostCall } from '../lib/bridge'
 import { COLLAPSIBLE_HEADER } from '../lib/constants'
+import { SHELL_PAD } from '../lib/design'
 import type { HistoryFile } from '../lib/types'
 
 export function LogPanel({
@@ -93,7 +94,7 @@ export function LogPanel({
   // Shows two card types: "Current Session" (ring buffer) + per-file "History" cards
   if (!compact) {
     return (
-      <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-3">
+      <div className={`flex-1 min-h-0 overflow-y-auto ${SHELL_PAD.page} space-y-3`}>
         {/* Current session card */}
         <div className="bg-bg-secondary rounded-xl ring-1 ring-inset ring-border overflow-hidden">
           <div

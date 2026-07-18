@@ -968,18 +968,18 @@ export default function App() {
                   </button>
                 </Tooltip>
               )}
-              {(shellMode !== 'bottom' || !isNarrow) && (
-                <HeaderActions
-                  dark={resolvedDark}
-                  onToggleTheme={() => setTheme(resolvedDark ? 'light' : 'dark')}
-                  locale={locale}
-                  setLocale={setLocale}
-                  isAdmin={isAdmin}
-                  onSwitchPermission={switchPermission}
-                  hidePermission={androidHost}
-                  compact={isNarrow || isShort}
-                />
-              )}
+              <HeaderActions
+                dark={resolvedDark}
+                onToggleTheme={() => setTheme(resolvedDark ? 'light' : 'dark')}
+                locale={locale}
+                setLocale={setLocale}
+                isAdmin={isAdmin}
+                onSwitchPermission={switchPermission}
+                hidePermission={androidHost}
+                compact={isNarrow || isShort || shellMode === 'bottom'}
+                onCheckUpdate={checkForUpdate}
+                hasUpdate={displayHasUpdate}
+              />
             </div>
           }
           statusBar={
