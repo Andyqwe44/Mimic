@@ -31,7 +31,7 @@ $repo = 'Andyqwe44/mimic'
 $api = "https://gitee.com/api/v5/repos/$repo"
 $doClient = -not $ServerOnly
 $doServer = -not $ClientOnly
-$doAndroid = -not $SkipAndroid -and $doClient  # ship Android zip on client-tagged releases
+$doAndroid = -not $SkipAndroid -and $doClient  # ship Android Setup APK on client-tagged releases
 if (-not $ServerVersion) { $ServerVersion = if ($ServerOnly) { $Version } else { Get-ServerVersion } }
 if (-not $AndroidVersion) {
     $aj = Join-Path (Get-RepoRoot) 'android\version.json'
@@ -43,7 +43,8 @@ $tag = if ($doClient) { "v$Version" } else { "server-v$ServerVersion" }
 $root = Get-RepoRoot
 $mimicClient = Join-Path $root "release\MimicClient_Setup_v$Version.exe"
 $mimicServer = Join-Path $root "release\MimicServer_Setup_v$ServerVersion.exe"
-$mimicAndroid = Join-Path $root "release\MimicAndroid_Setup_v$AndroidVersion.zip"
+# Phone install: attach Setup APK directly (no zip — unzipping on mobile is painful).
+$mimicAndroid = Join-Path $root "release\MimicAndroid_Setup_v$AndroidVersion.apk"
 
 $assets = @()
 if ($doClient) {
@@ -58,7 +59,7 @@ if ($doAndroid) {
     if (-not (Test-Path $mimicAndroid)) {
         & "$PSScriptRoot\Pack-MimicAndroid.ps1" -Version $AndroidVersion
     }
-    if (-not (Test-Path $mimicAndroid)) { throw "missing android setup zip: $mimicAndroid" }
+    if (-not (Test-Path $mimicAndroid)) { throw "missing android setup apk: $mimicAndroid" }
     $assets += $mimicAndroid
 }
 
@@ -105,7 +106,7 @@ $tag — installers (payload from CDN)
 
 $(if ($doClient) { "- MimicClient_Setup (PC): http://47.107.43.5/mimic/client/`n- Incremental: http://47.107.43.5/mimic/client/version.json`n" })
 $(if ($doServer) { "- MimicServer_Setup: http://47.107.43.5/mimic/server/ (signaling; auto-joins Bootstrap)`n" })
-$(if ($doAndroid) { "- MimicAndroid_Setup (zip): http://47.107.43.5/mimic/android/ (skeleton; APK when built)`n" })
+$(if ($doAndroid) { "- MimicAndroid_Setup.apk: install on phone → downloads Client from CDN`n- CDN: http://47.107.43.5/mimic/android/`n" })
 "@
 
 $body = @{

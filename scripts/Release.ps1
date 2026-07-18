@@ -230,6 +230,6 @@ if ($PublishGitee) {
         Write-Host "  Gitee Server:  https://gitee.com/Andyqwe44/mimic/releases/download/v$ver/MimicServer_Setup_v$serverVer.exe"
     }
     if ($doClient) {
-        Write-Host "  Gitee Android: https://gitee.com/Andyqwe44/mimic/releases/download/v$ver/MimicAndroid_Setup_v$androidVer.zip"
+        Write-Host "  Gitee Android: https://gitee.com/Andyqwe44/mimic/releases/download/v$ver/MimicAndroid_Setup_v$androidVer.apk"
     }
 }
