@@ -97,7 +97,7 @@ export function PrimaryNav({
                     ${RADIUS.lg} transition-colors
                     ${active
                       ? 'text-accent'
-                      : 'text-text-secondary active:bg-bg-hover/60'}`}
+                      : 'text-text-secondary active:bg-bg-hover'}`}
                 >
                   {it.icon}
                   <span className={`${TEXT.tiny} font-medium truncate max-w-full`}>{it.label}</span>
@@ -158,7 +158,7 @@ export function PrimaryNav({
               className={`relative w-full ${NAV.touchMin} flex items-center gap-2 ${RADIUS.lg} px-2 py-2
                 transition-colors
                 ${active
-                  ? 'bg-accent/15 text-accent'
+                  ? 'bg-accent-soft-mid text-accent'
                   : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary'}
                 ${wide ? '' : 'justify-center'}`}
             >

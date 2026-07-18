@@ -38,7 +38,7 @@ export function BottomBar({
         <Monitor className="w-3 h-3 text-text-tertiary shrink-0" />
         <span className="truncate">{selWin}</span>
       </span>
-      <span className="text-border/40 select-none hidden min-[360px]:inline">│</span>
+      <span className="text-border select-none hidden min-[360px]:inline">│</span>
       <span className="inline-flex items-center gap-1">
         <Camera className="w-3 h-3 text-text-tertiary" />
         <span className="font-medium text-text-primary">
@@ -77,7 +77,7 @@ export function BottomBar({
           <button
             type="button"
             onClick={onCheckUpdate}
-            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-accent/15 text-accent hover:bg-accent/25 transition-colors cursor-pointer"
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-accent-soft-mid text-accent hover:bg-accent-soft-strong transition-colors cursor-pointer"
           >
             <ArrowUp className="w-3 h-3" />
             {t('bottombar.update')}

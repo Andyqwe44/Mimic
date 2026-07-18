@@ -1,13 +1,13 @@
 {
     "schema":  "1",
-    "app":  "0.1.9",
+    "app":  "0.1.10",
     "platform":  "android",
     "channel":  "stable",
     "full_update":  true,
     "download_base":  "http://47.107.43.5/mimic/android/",
-    "setup_apk":  "MimicAndroid_Setup_v0.1.9.apk",
-    "client_apk":  "MimicClient_Android_v0.1.9.apk",
-    "apk":  "MimicClient_Android_v0.1.9.apk",
+    "setup_apk":  "MimicAndroid_Setup_v0.1.10.apk",
+    "client_apk":  "MimicClient_Android_v0.1.10.apk",
+    "apk":  "MimicClient_Android_v0.1.10.apk",
     "has_apk":  true,
     "has_client_apk":  true,
     "message":  "Thin Setup APK downloads Client APK from CDN (PC-style)"

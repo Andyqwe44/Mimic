@@ -157,9 +157,9 @@ export function ActionBtn({
           variant === 'primary'
             ? 'bg-accent text-white hover:bg-accent-hover'
             : variant === 'danger'
-              ? 'bg-error/20 text-error hover:bg-error/30'
+              ? 'bg-error-soft-mid text-error hover:bg-error-soft-mid'
               : variant === 'outline-accent'
-                ? 'border border-accent text-accent hover:bg-accent/10'
+                ? 'border border-accent text-accent hover:bg-accent-soft'
                 : 'border border-border text-text-secondary hover:bg-bg-hover'
         }`}
       >

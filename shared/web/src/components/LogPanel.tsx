@@ -127,7 +127,7 @@ export function LogPanel({
                     })
                   }}
                   disabled={!scrolledUp}
-                  className={`p-1 rounded-md transition-colors ${scrolledUp ? 'text-accent bg-accent/15 hover:bg-accent/25' : 'text-text-muted/30 cursor-not-allowed'}`}
+                  className={`p-1 rounded-md transition-colors ${scrolledUp ? 'text-accent bg-accent-soft-mid hover:bg-accent-soft-strong' : 'text-muted-soft cursor-not-allowed'}`}
                 >
                   <ArrowDown className="w-3.5 h-3.5" />
                 </button>
@@ -281,7 +281,7 @@ export function LogPanel({
                         if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
                       }}
                       disabled={!cardsScrolledUp.has(fi)}
-                      className={`p-1 rounded-md transition-colors ${cardsScrolledUp.has(fi) ? 'text-accent bg-accent/15 hover:bg-accent/25' : 'text-text-muted/30 cursor-not-allowed'}`}
+                      className={`p-1 rounded-md transition-colors ${cardsScrolledUp.has(fi) ? 'text-accent bg-accent-soft-mid hover:bg-accent-soft-strong' : 'text-muted-soft cursor-not-allowed'}`}
                     >
                       <ArrowDown className="w-3.5 h-3.5" />
                     </button>
@@ -389,7 +389,7 @@ export function LogPanel({
         className={`${COLLAPSIBLE_HEADER} shrink-0`}
       >
         <div className="flex items-center gap-2">
-          <span className="w-5 h-5 rounded bg-amber-400/15 flex items-center justify-center shrink-0">
+          <span className="w-5 h-5 rounded bg-warn-soft flex items-center justify-center shrink-0">
             <FileText className="w-3 h-3 text-amber-400" />
           </span>
           <span className="text-sm font-medium text-text-primary">{t('log.title')}</span>
@@ -406,7 +406,7 @@ export function LogPanel({
                 })
               }}
               disabled={!scrolledUp}
-              className={`p-1 rounded-md transition-colors ${scrolledUp ? 'text-accent bg-accent/15 hover:bg-accent/25' : 'text-text-muted/30 cursor-not-allowed'}`}
+              className={`p-1 rounded-md transition-colors ${scrolledUp ? 'text-accent bg-accent-soft-mid hover:bg-accent-soft-strong' : 'text-muted-soft cursor-not-allowed'}`}
             >
               <ArrowDown className="w-3.5 h-3.5" />
             </button>

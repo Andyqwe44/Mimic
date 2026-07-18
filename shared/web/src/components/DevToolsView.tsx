@@ -70,8 +70,8 @@ export function DevToolsView({
               }}
               className={`inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-medium border transition-colors ${
                 testTargetRunning
-                  ? 'border-success/30 bg-success/10 text-success hover:bg-success/20'
-                  : 'border-accent-secondary/30 bg-accent-secondary/10 text-accent-secondary hover:bg-accent-secondary/20'
+                  ? 'border-success-ring bg-success-soft text-success hover:bg-success-soft-mid'
+                  : 'border-accent-secondary-ring bg-accent-secondary-soft text-accent-secondary hover:bg-accent-secondary-soft-mid'
               }`}
             >
               <Play className={`w-3 h-3 ${testTargetRunning ? 'fill-current' : ''}`} />
@@ -113,7 +113,7 @@ export function DevToolsView({
                   className={`inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-medium border transition-colors ${
                     selfTestRunning
                       ? 'border-border bg-bg-tertiary text-text-muted cursor-not-allowed'
-                      : 'border-accent/30 bg-accent/10 text-accent hover:bg-accent/20'
+                      : 'border-accent-ring bg-accent-soft text-accent hover:bg-accent-soft-mid'
                   }`}
                 >
                   <Crosshair className="w-3 h-3" />
@@ -295,7 +295,7 @@ export function DevToolsView({
               })],
             ] as [string, () => void][]).map(([label, fn]) => (
               <button key={label} onClick={fn}
-                className="px-2.5 h-7 rounded-md text-[11px] font-medium bg-accent-secondary/10 text-accent-secondary hover:bg-accent-secondary/20 border border-accent-secondary/20 transition-colors">
+                className="px-2.5 h-7 rounded-md text-[11px] font-medium bg-accent-secondary-soft text-accent-secondary hover:bg-accent-secondary-soft-mid border border-accent-secondary-ring transition-colors">
                 {label}
               </button>
             ))}
@@ -369,7 +369,7 @@ export function DevToolsView({
               }],
             ] as [string, () => void][]).map(([label, fn]) => (
               <button key={label} onClick={fn}
-                className="px-2.5 h-7 rounded-md text-[11px] font-medium bg-accent-secondary/10 text-accent-secondary hover:bg-accent-secondary/20 border border-accent-secondary/20 transition-colors">
+                className="px-2.5 h-7 rounded-md text-[11px] font-medium bg-accent-secondary-soft text-accent-secondary hover:bg-accent-secondary-soft-mid border border-accent-secondary-ring transition-colors">
                 {label}
               </button>
             ))}
@@ -413,7 +413,7 @@ export function DevToolsView({
               [t('devtools.demo_selftest_error'), () => onDevInjectSelfTest?.({ phase: 'error', error: 'test_target 连接超时 (模拟)' })],
             ] as [string, () => void][]).map(([label, fn]) => (
               <button key={label} onClick={fn}
-                className="px-2.5 h-7 rounded-md text-[11px] font-medium bg-accent-secondary/10 text-accent-secondary hover:bg-accent-secondary/20 border border-accent-secondary/20 transition-colors">
+                className="px-2.5 h-7 rounded-md text-[11px] font-medium bg-accent-secondary-soft text-accent-secondary hover:bg-accent-secondary-soft-mid border border-accent-secondary-ring transition-colors">
                 {label}
               </button>
             ))}
@@ -427,7 +427,7 @@ export function DevToolsView({
               [t('devtools.demo_agent_disconnected'), () => onDevInjectAgent?.(false)],
             ] as [string, () => void][]).map(([label, fn]) => (
               <button key={label} onClick={fn}
-                className="px-2.5 h-7 rounded-md text-[11px] font-medium bg-accent-secondary/10 text-accent-secondary hover:bg-accent-secondary/20 border border-accent-secondary/20 transition-colors">
+                className="px-2.5 h-7 rounded-md text-[11px] font-medium bg-accent-secondary-soft text-accent-secondary hover:bg-accent-secondary-soft-mid border border-accent-secondary-ring transition-colors">
                 {label}
               </button>
             ))}

@@ -84,7 +84,7 @@ export function ConnectionPanel({
     <>
       <RailCard
         icon={(
-          <span className="w-5 h-5 rounded bg-[var(--color-blue-soft)] flex items-center justify-center text-blue-400">
+          <span className="w-5 h-5 rounded bg-blue-soft flex items-center justify-center text-blue-400">
             <MonitorUp className="w-3.5 h-3.5" strokeWidth={2} />
           </span>
         )}
@@ -102,7 +102,7 @@ export function ConnectionPanel({
         onTogglePin={onTogglePin}
       >
         {cantCapture && (
-          <div className="text-xs text-error bg-red-500/10 rounded-lg px-2 py-1.5">
+          <div className="text-xs text-error bg-error-soft rounded-lg px-2 py-1.5">
             {t('connection.minimized_warning', { method: streamMethod.toUpperCase() })}
           </div>
         )}
@@ -124,7 +124,7 @@ export function ConnectionPanel({
                     onDisconnect()
                     setSelTitle(DESKTOP_TITLE)
                   }}
-                  className="h-7 w-7 flex items-center justify-center rounded-md bg-accent-secondary/10 hover:bg-accent-secondary/20 text-accent-secondary border border-accent-secondary/20 transition-colors shrink-0"
+                  className="h-7 w-7 flex items-center justify-center rounded-md bg-accent-secondary-soft hover:bg-accent-secondary-soft-mid text-accent-secondary border border-accent-secondary-ring transition-colors shrink-0"
                 >
                   <Unlink className="w-3.5 h-3.5" />
                 </button>

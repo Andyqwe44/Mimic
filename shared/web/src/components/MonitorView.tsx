@@ -750,7 +750,7 @@ export function MonitorView({
           <span className="text-sm font-medium text-text-primary truncate max-w-[120px]">
             {selWin.title}
           </span>
-          <span className="text-[11px] font-medium text-accent bg-accent/10 px-1.5 py-0.5 rounded shrink-0">
+          <span className="text-[11px] font-medium text-accent bg-accent-soft px-1.5 py-0.5 rounded shrink-0">
             {stateLabel}
           </span>
         </div>
@@ -782,9 +782,9 @@ export function MonitorView({
               placeholder={t('monitor.ime_dock_placeholder')}
               className={`flex-1 min-w-0 h-7 px-2 rounded-md text-xs outline-none border transition-colors ${
                 composing
-                  ? 'border-accent bg-accent/5 text-text-primary'
+                  ? 'border-accent bg-accent-soft text-text-primary'
                   : focused
-                    ? 'border-accent/50 bg-bg-primary text-text-primary'
+                    ? 'border-accent-ring bg-bg-primary text-text-primary'
                     : 'border-border bg-bg-primary text-text-primary'
               } placeholder:text-text-tertiary`}
             />
@@ -802,7 +802,7 @@ export function MonitorView({
             }}
             className={`inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-xs font-medium transition-all duration-150 shrink-0 ${
               mappingEnabled
-                ? 'bg-accent/10 text-accent border border-accent/30'
+                ? 'bg-accent-soft text-accent border border-accent-ring'
                 : 'border border-border text-text-secondary hover:bg-bg-hover'
             }`}
           >
@@ -854,7 +854,7 @@ export function MonitorView({
             !isDesktop && previewing && mappingEnabled
               ? focused
                 ? 'ring-accent shadow-[0_0_0_2px_rgba(38,79,120,0.3)]'
-                : 'ring-accent/40 hover:ring-accent/70'
+                : 'ring-accent-ring hover:ring-accent-ring'
               : 'ring-border'
           }`}
           onContextMenu={(e) => {
@@ -875,19 +875,19 @@ export function MonitorView({
           {previewing && children}
 
           {keyToast && (
-            <div className="absolute bottom-12 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-lg bg-bg-tertiary/95 text-xs text-text-primary font-mono shadow-lg backdrop-blur-sm pointer-events-none z-10">
+            <div className="absolute bottom-12 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-lg bg-bg-tertiary text-xs text-text-primary font-mono shadow-lg pointer-events-none z-10">
               [{keyToast.text}]
             </div>
           )}
 
           {/* Mapping-on: no bottom status chip — it occludes the preview. */}
           {mouseOn && isDesktop && previewing && mappingEnabled && isSelfTarget && selfTargetMode === 'warn' && (
-            <div className="absolute top-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-lg bg-error/15 text-xs text-error flex items-center gap-1.5 shadow-lg backdrop-blur-sm pointer-events-none z-10">
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-lg bg-error-soft text-xs text-error flex items-center gap-1.5 shadow-lg pointer-events-none z-10">
               {t('monitor.self_target_warn')}
             </div>
           )}
           {mouseOn && previewing && !mappingEnabled && (
-            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-lg bg-bg-tertiary/90 text-xs text-text-muted flex items-center gap-1.5 shadow-lg backdrop-blur-sm pointer-events-none z-10">
+            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-lg bg-bg-tertiary text-xs text-text-muted flex items-center gap-1.5 shadow-lg pointer-events-none z-10">
               <Power className="w-3.5 h-3.5" />
               {t('monitor.preview_no_mapping', { hotkey: mappingHotkey })}
             </div>

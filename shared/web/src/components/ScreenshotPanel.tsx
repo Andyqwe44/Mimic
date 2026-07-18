@@ -184,12 +184,12 @@ export function ScreenshotPanel({
         className={COLLAPSIBLE_HEADER}
       >
         <div className="flex items-center gap-2 min-w-0">
-          <span className="w-5 h-5 rounded bg-violet-400/15 flex items-center justify-center shrink-0">
+          <span className="w-5 h-5 rounded bg-violet-soft flex items-center justify-center shrink-0">
             <Camera className="w-3 h-3 text-violet-400" />
           </span>
           <span className="text-sm font-medium text-text-primary shrink-0">{t('screenshot.title')}</span>
           {capMethod && (
-            <span className="text-[11px] font-medium text-accent bg-accent/10 px-1.5 py-0.5 rounded shrink-0">
+            <span className="text-[11px] font-medium text-accent bg-accent-soft px-1.5 py-0.5 rounded shrink-0">
               {METHOD_SHORT[capMethod] || capMethod.toUpperCase()}
             </span>
           )}

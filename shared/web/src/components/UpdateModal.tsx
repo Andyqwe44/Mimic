@@ -82,7 +82,7 @@ function VersionChip({
     <div className="flex flex-col items-center gap-1 min-w-0">
       <span className={
         accent
-          ? 'px-3 py-1.5 rounded-lg bg-accent/10 ring-1 ring-inset ring-accent/30 text-sm font-mono font-semibold text-accent'
+          ? 'px-3 py-1.5 rounded-lg bg-accent-soft ring-1 ring-inset ring-accent-ring text-sm font-mono font-semibold text-accent'
           : 'px-3 py-1.5 rounded-lg bg-bg-tertiary text-sm font-mono text-text-muted'
       }>
         v{version}
@@ -141,7 +141,7 @@ export function UpdateModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/60" onClick={canClose ? onClose : undefined} />
+      <div className="absolute inset-0 bg-scrim" onClick={canClose ? onClose : undefined} />
       {/* Card — 宽高固定 (MODAL_CARD)，各状态同框，切换不跳 */}
       <div className={`relative ${MODAL_CARD}`}>
         {/* Header */}
@@ -172,7 +172,7 @@ export function UpdateModal({
           <div className="flex-1 min-h-0 flex flex-col items-center justify-center gap-3 px-5 text-center">
             <CheckCircle2 className={`${H.icon2xl} text-accent`} />
             <div className="text-sm font-medium text-text-primary">{t('update.latest_text')}</div>
-            <span className="px-3 py-1.5 rounded-lg bg-accent/10 ring-1 ring-inset ring-accent/30 text-sm font-mono font-semibold text-accent">
+            <span className="px-3 py-1.5 rounded-lg bg-accent-soft ring-1 ring-inset ring-accent-ring text-sm font-mono font-semibold text-accent">
               v{info.current}
             </span>
           </div>
@@ -230,7 +230,7 @@ export function UpdateModal({
                         </div>
                       )}
                     </div>
-                    <div className="bg-amber-500/10 ring-1 ring-inset ring-amber-500/30 rounded-lg p-3 text-xs text-text-primary leading-relaxed">
+                    <div className="bg-warn-soft ring-1 ring-inset ring-warn-ring rounded-lg p-3 text-xs text-text-primary leading-relaxed">
                       {t('update.jump_pad_first_hop', { jump })}
                     </div>
                   </>
@@ -244,7 +244,7 @@ export function UpdateModal({
                       <ArrowRight className="w-4 h-4 text-accent shrink-0" />
                       <VersionChip version={lat} label={t('update.role_latest')} accent />
                     </div>
-                    <div className="bg-amber-500/10 ring-1 ring-inset ring-amber-500/30 rounded-lg p-3 text-xs text-text-primary leading-relaxed">
+                    <div className="bg-warn-soft ring-1 ring-inset ring-warn-ring rounded-lg p-3 text-xs text-text-primary leading-relaxed">
                       {t('update.jump_pad_second_hop', { jump, latest: lat })}
                     </div>
                   </>
@@ -261,14 +261,14 @@ export function UpdateModal({
 
             {/* Server message (manifest "message") */}
             {info.message && (
-              <div className="bg-accent/10 ring-1 ring-inset ring-accent/30 rounded-lg p-3 text-xs text-text-primary leading-relaxed">
+              <div className="bg-accent-soft ring-1 ring-inset ring-accent-ring rounded-lg p-3 text-xs text-text-primary leading-relaxed">
                 {info.message}
               </div>
             )}
 
             {/* Resume banner — partial download detected in staging */}
             {hasResume && ss && (
-              <div className="bg-amber-500/10 ring-1 ring-inset ring-amber-500/30 rounded-lg p-3">
+              <div className="bg-warn-soft ring-1 ring-inset ring-warn-ring rounded-lg p-3">
                 <div className="flex items-start gap-2.5">
                   <RotateCcw className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />
                   <div className="flex-1 min-w-0">
@@ -318,7 +318,7 @@ export function UpdateModal({
                 {/* Header row — whole bar toggles, single-line horizontal */}
                 <button
                   onClick={() => setExpanded((v) => !v)}
-                  className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-bg-tertiary/50 transition-colors text-left"
+                  className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-bg-hover transition-colors text-left"
                 >
                   <span className="flex-1 min-w-0 text-xs text-text-secondary truncate">
                     {t('update.this_update')} · <span className="font-medium text-text-primary">{t('update.files', { n: nPending })}</span>
@@ -346,7 +346,7 @@ export function UpdateModal({
 
                 {/* Expanded file list */}
                 {expanded && (
-                  <div className="max-h-44 overflow-y-auto border-t border-border/60 divide-y divide-border/40">
+                  <div className="max-h-44 overflow-y-auto border-t border-border divide-y divide-border">
                     {diff.map((f, i) => {
                       const role = fileRole(f.path, t)
                       const isDone = ss?.done_paths?.includes(f.path)
@@ -356,7 +356,7 @@ export function UpdateModal({
                           <span
                             className={`w-14 shrink-0 text-center text-[10px] py-0.5 rounded ring-1 ring-inset
                               ${role.core
-                                ? 'bg-accent/10 text-accent ring-accent/30'
+                                ? 'bg-accent-soft text-accent ring-accent-ring'
                                 : 'bg-bg-tertiary text-text-muted ring-border'}`}
                           >
                             {role.label}

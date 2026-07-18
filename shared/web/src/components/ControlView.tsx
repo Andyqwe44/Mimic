@@ -125,7 +125,7 @@ export function ControlView({
         humanControl={peerControlMode === 'human'}
       />
       {peerControlMode === 'ai' && peerTransport !== 'none' && (
-        <div className={`${TEXT.smallMono} text-amber-500 bg-amber-500/10 ${RADIUS.lg} px-2 py-1.5`}>
+        <div className={`${TEXT.smallMono} text-amber-500 bg-warn-soft ${RADIUS.lg} px-2 py-1.5`}>
           {t('peer.ai_mode_hint')}
         </div>
       )}

@@ -67,7 +67,7 @@ export function SelfTestModal({
   if (state.phase === 'idle') return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim backdrop-blur-sm">
       <div className="w-[540px] max-w-[92vw] max-h-[88vh] overflow-y-auto bg-bg-secondary rounded-2xl ring-1 ring-inset ring-border shadow-2xl p-5">
         {/* Header */}
         <div className="flex items-center gap-2 mb-4">
@@ -105,7 +105,7 @@ export function SelfTestModal({
             <div className="flex justify-end">
               <button
                 onClick={onAbort}
-                className="px-3 h-8 rounded-md text-xs font-medium border border-error/40 text-error hover:bg-error/10 transition-colors"
+                className="px-3 h-8 rounded-md text-xs font-medium border border-error-ring text-error hover:bg-error-soft transition-colors"
               >
                 {t('selftest.abort')}
               </button>

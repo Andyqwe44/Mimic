@@ -95,7 +95,7 @@ export function HeaderActions({
                   addLog(`[Lang] ${code}`)
                 }}
                 className={`w-full ${PAD.sm} ${TEXT.xs} font-semibold text-left transition-colors
-                  ${locale === code ? 'bg-accent/15 text-accent' : 'text-text-secondary hover:bg-bg-hover'}`}
+                  ${locale === code ? 'bg-accent-soft-mid text-accent' : 'text-text-secondary hover:bg-bg-hover'}`}
               >
                 <span className="inline-block w-6">{abbr}</span>
                 <span className={`${TEXT.tiny} text-text-muted font-normal`}>{t(tipKey)}</span>

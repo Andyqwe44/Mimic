@@ -15,8 +15,11 @@
 | 字号 | `TEXT` | `TEXT.xs` = `text-xs` |
 | 圆角 | `RADIUS` | `RADIUS.lg` = `rounded-lg` |
 | 组件预设 | `MODAL_CARD`, `DIFF_CONTAINER`, `DIFF_COL` | 弹窗卡片、diff 折叠条列宽 |
+| 软色填充 | `SOFT`, `NAV.pillBg` | `bg-accent-soft` / `ring-accent-ring`（rgba，禁 `/N` opacity） |
 
 **原则**：不改布局，只改引用源。新组件必须用 design.ts；旧组件渐进迁移。
+
+**Android WebView**：禁止 `bg-accent/10` 等 Tailwind opacity 修饰（底层 `color-mix` 会变成实心色块）。用主题软色 `bg-accent-soft`、`bg-success-soft`、`ring-accent-ring` 等（见 `index.css` + `SOFT`）。
 
 ---
 

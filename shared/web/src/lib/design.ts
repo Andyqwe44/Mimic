@@ -137,9 +137,10 @@ export const NAV = {
   /** Sliding focus pill — shorter than touch target so it sits higher */
   pillH: 'h-9',           // 36px
   pillTop: 'top-1.5',     // 6px from content top
-  /** Thin accent ring (finer than ring-1) */
-  pillRing: 'ring-[0.5px] ring-inset ring-accent/40',
-  pillBg: 'bg-accent/12',
+  /** Thin accent ring — rgba token (not opacity color-mix) */
+  pillRing: 'ring-[0.5px] ring-inset ring-accent-ring',
+  /** Soft fill for sliding focus pill — rgba token */
+  pillBg: 'bg-accent-soft',
   /** Shared settle duration for page track + nav pill (ms) */
   settleMs: 300,
   settleEase: 'cubic-bezier(0.25, 0.85, 0.3, 1)',
@@ -154,6 +155,31 @@ export const SHELL_PAD = {
   pageY: 'py-6 max-[359px]:py-3',
   safeBottom: 'pb-[env(safe-area-inset-bottom,0px)]',
   safeTop: 'pt-[env(safe-area-inset-top,0px)]',
+} as const
+
+// ── Soft fills (Android-safe rgba theme colors — never use accent/N opacity mods) ──
+export const SOFT = {
+  accentBg: 'bg-accent-soft',
+  accentBgMid: 'bg-accent-soft-mid',
+  accentBgStrong: 'bg-accent-soft-strong',
+  accentRing: 'ring-accent-ring',
+  accentBorder: 'border-accent-ring',
+  secondaryBg: 'bg-accent-secondary-soft',
+  secondaryBgMid: 'bg-accent-secondary-soft-mid',
+  secondaryRing: 'ring-accent-secondary-ring',
+  secondaryBorder: 'border-accent-secondary-ring',
+  successBg: 'bg-success-soft',
+  successBgMid: 'bg-success-soft-mid',
+  successRing: 'ring-success-ring',
+  warnBg: 'bg-warn-soft',
+  warnRing: 'ring-warn-ring',
+  errorBg: 'bg-error-soft',
+  errorBgMid: 'bg-error-soft-mid',
+  errorRing: 'ring-error-ring',
+  blueBg: 'bg-blue-soft',
+  violetBg: 'bg-violet-soft',
+  mutedFg: 'text-muted-soft',
+  scrim: 'bg-scrim',
 } as const
 
 // ── Misc ──

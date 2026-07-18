@@ -42,11 +42,11 @@ export function SessionCapsule({
 
   const toneCls =
     tone === 'success'
-      ? 'text-success bg-success/15'
+      ? 'text-success bg-success-soft'
       : tone === 'info'
-        ? 'text-accent bg-accent/15'
+        ? 'text-accent bg-accent-soft-mid'
         : tone === 'danger'
-          ? 'text-error bg-error/15'
+          ? 'text-error bg-error-soft'
           : 'text-text-muted bg-bg-tertiary'
 
   const tip = error
@@ -60,7 +60,7 @@ export function SessionCapsule({
         onClick={onClick}
         className={`inline-flex items-center gap-1.5 max-w-full min-h-9 px-2.5 py-1 ${RADIUS.full}
           bg-bg-secondary ring-1 ring-inset hover:bg-bg-hover transition-colors shrink-0
-          ${error ? 'ring-error/40' : streaming || controlling ? 'ring-accent/35' : 'ring-border'}`}
+          ${error ? 'ring-error-ring' : streaming || controlling ? 'ring-accent-ring' : 'ring-border'}`}
       >
         <span className={`${TEXT.xs} font-semibold text-text-primary truncate max-w-[7rem]`}>
           {device}

@@ -21,12 +21,30 @@
   --color-info: #3B82F6;
   --color-warning: #eab308;
   --color-error: #ef4444;
-  /* Soft fills (rgba) — avoid Tailwind color-mix opacity mods on Android WebView */
+  /*
+   * Soft fills / rings — pre-baked rgba (NOT color-mix).
+   * Android System WebView often turns Tailwind `bg-accent/10` into opaque slabs
+   * because opacity modifiers use color-mix()/oklab. Prefer `bg-accent-soft` etc.
+   */
   --color-accent-soft: rgba(59, 130, 246, 0.12);
+  --color-accent-soft-mid: rgba(59, 130, 246, 0.18);
+  --color-accent-soft-strong: rgba(59, 130, 246, 0.25);
+  --color-accent-ring: rgba(59, 130, 246, 0.40);
+  --color-accent-secondary-soft: rgba(249, 115, 22, 0.12);
+  --color-accent-secondary-soft-mid: rgba(249, 115, 22, 0.20);
+  --color-accent-secondary-ring: rgba(249, 115, 22, 0.30);
   --color-blue-soft: rgba(96, 165, 250, 0.14);
+  --color-violet-soft: rgba(167, 139, 250, 0.14);
   --color-success-soft: rgba(34, 197, 94, 0.12);
+  --color-success-soft-mid: rgba(34, 197, 94, 0.20);
+  --color-success-ring: rgba(34, 197, 94, 0.40);
   --color-warn-soft: rgba(245, 158, 11, 0.12);
+  --color-warn-ring: rgba(245, 158, 11, 0.30);
   --color-error-soft: rgba(239, 68, 68, 0.12);
+  --color-error-soft-mid: rgba(239, 68, 68, 0.20);
+  --color-error-ring: rgba(239, 68, 68, 0.40);
+  --color-muted-soft: rgba(161, 161, 170, 0.30);
+  --color-scrim: rgba(0, 0, 0, 0.50);
 }
 
 /* Dark theme — VSCode-inspired deep blue-gray */
@@ -44,10 +62,24 @@
   --color-border-strong: #383838;
   --color-accent-light: #264f78;
   --color-accent-soft: rgba(59, 130, 246, 0.18);
+  --color-accent-soft-mid: rgba(59, 130, 246, 0.24);
+  --color-accent-soft-strong: rgba(59, 130, 246, 0.32);
+  --color-accent-ring: rgba(59, 130, 246, 0.45);
+  --color-accent-secondary-soft: rgba(249, 115, 22, 0.18);
+  --color-accent-secondary-soft-mid: rgba(249, 115, 22, 0.28);
+  --color-accent-secondary-ring: rgba(249, 115, 22, 0.40);
   --color-blue-soft: rgba(96, 165, 250, 0.18);
+  --color-violet-soft: rgba(167, 139, 250, 0.18);
   --color-success-soft: rgba(34, 197, 94, 0.18);
+  --color-success-soft-mid: rgba(34, 197, 94, 0.28);
+  --color-success-ring: rgba(34, 197, 94, 0.45);
   --color-warn-soft: rgba(245, 158, 11, 0.18);
+  --color-warn-ring: rgba(245, 158, 11, 0.40);
   --color-error-soft: rgba(239, 68, 68, 0.18);
+  --color-error-soft-mid: rgba(239, 68, 68, 0.28);
+  --color-error-ring: rgba(239, 68, 68, 0.45);
+  --color-muted-soft: rgba(90, 90, 90, 0.35);
+  --color-scrim: rgba(0, 0, 0, 0.55);
 }
 
 @theme {
@@ -70,6 +102,26 @@
   --color-info: var(--color-info);
   --color-warning: var(--color-warning);
   --color-error: var(--color-error);
+  /* First-class soft tokens → use bg-accent-soft (no /opacity) */
+  --color-accent-soft: var(--color-accent-soft);
+  --color-accent-soft-mid: var(--color-accent-soft-mid);
+  --color-accent-soft-strong: var(--color-accent-soft-strong);
+  --color-accent-ring: var(--color-accent-ring);
+  --color-accent-secondary-soft: var(--color-accent-secondary-soft);
+  --color-accent-secondary-soft-mid: var(--color-accent-secondary-soft-mid);
+  --color-accent-secondary-ring: var(--color-accent-secondary-ring);
+  --color-blue-soft: var(--color-blue-soft);
+  --color-violet-soft: var(--color-violet-soft);
+  --color-success-soft: var(--color-success-soft);
+  --color-success-soft-mid: var(--color-success-soft-mid);
+  --color-success-ring: var(--color-success-ring);
+  --color-warn-soft: var(--color-warn-soft);
+  --color-warn-ring: var(--color-warn-ring);
+  --color-error-soft: var(--color-error-soft);
+  --color-error-soft-mid: var(--color-error-soft-mid);
+  --color-error-ring: var(--color-error-ring);
+  --color-muted-soft: var(--color-muted-soft);
+  --color-scrim: var(--color-scrim);
 }
 
 * { box-sizing: border-box; }
@@ -188,4 +240,120 @@ svg.lucide {
 }
 .animate-ping-once {
   animation: ping-once 400ms ease-out forwards;
+}
+
+/*
+ * Android WebView safety net: remap Tailwind opacity utilities that use
+ * color-mix()/oklab onto pre-baked rgba tokens. Prefer first-class soft
+ * colors (bg-accent-soft) in new code; this catches remaining /N classes.
+ */
+.bg-accent\/5,
+.bg-accent\/10,
+.bg-accent\/12,
+.hover\:bg-accent\/10:hover {
+  background-color: var(--color-accent-soft) !important;
+}
+.bg-accent\/15,
+.bg-accent\/20,
+.hover\:bg-accent\/20:hover {
+  background-color: var(--color-accent-soft-mid) !important;
+}
+.bg-accent\/25,
+.hover\:bg-accent\/25:hover {
+  background-color: var(--color-accent-soft-strong) !important;
+}
+.ring-accent\/30,
+.ring-accent\/35,
+.ring-accent\/40 {
+  --tw-ring-color: var(--color-accent-ring) !important;
+}
+.border-accent\/30,
+.border-accent\/50 {
+  border-color: var(--color-accent-ring) !important;
+}
+
+.bg-accent-secondary\/10,
+.hover\:bg-accent-secondary\/10:hover {
+  background-color: var(--color-accent-secondary-soft) !important;
+}
+.bg-accent-secondary\/20,
+.hover\:bg-accent-secondary\/20:hover {
+  background-color: var(--color-accent-secondary-soft-mid) !important;
+}
+.border-accent-secondary\/20,
+.border-accent-secondary\/30,
+.ring-accent-secondary\/30 {
+  border-color: var(--color-accent-secondary-ring) !important;
+  --tw-ring-color: var(--color-accent-secondary-ring) !important;
+}
+
+.bg-success\/10,
+.bg-success\/15 {
+  background-color: var(--color-success-soft) !important;
+}
+.bg-success\/20,
+.hover\:bg-success\/20:hover {
+  background-color: var(--color-success-soft-mid) !important;
+}
+.ring-success\/40,
+.border-success\/30 {
+  --tw-ring-color: var(--color-success-ring) !important;
+  border-color: var(--color-success-ring) !important;
+}
+
+.bg-error\/10,
+.bg-error\/15,
+.hover\:bg-error\/10:hover {
+  background-color: var(--color-error-soft) !important;
+}
+.bg-error\/20,
+.bg-error\/30,
+.hover\:bg-error\/20:hover,
+.hover\:bg-error\/30:hover {
+  background-color: var(--color-error-soft-mid) !important;
+}
+.ring-error\/40,
+.border-error\/40 {
+  --tw-ring-color: var(--color-error-ring) !important;
+  border-color: var(--color-error-ring) !important;
+}
+
+.bg-amber-500\/10,
+.bg-amber-400\/15 {
+  background-color: var(--color-warn-soft) !important;
+}
+.ring-amber-500\/30,
+.border-amber-500\/30 {
+  --tw-ring-color: var(--color-warn-ring) !important;
+  border-color: var(--color-warn-ring) !important;
+}
+
+.bg-red-500\/10 {
+  background-color: var(--color-error-soft) !important;
+}
+.bg-emerald-500\/10,
+.bg-emerald-500\/15 {
+  background-color: var(--color-success-soft) !important;
+}
+.bg-blue-400\/15 {
+  background-color: var(--color-blue-soft) !important;
+}
+.bg-violet-400\/15 {
+  background-color: var(--color-violet-soft) !important;
+}
+
+.text-text-muted\/30 {
+  color: var(--color-muted-soft) !important;
+}
+.bg-black\/50 {
+  background-color: var(--color-scrim) !important;
+}
+.bg-bg-tertiary\/50,
+.bg-bg-tertiary\/60,
+.bg-bg-tertiary\/90,
+.bg-bg-tertiary\/95 {
+  background-color: var(--color-bg-tertiary) !important;
+}
+.bg-bg-secondary\/95 {
+  background-color: var(--color-bg-secondary) !important;
 }

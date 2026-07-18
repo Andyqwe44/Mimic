@@ -299,7 +299,7 @@ export function PeerPanel({
   return (
     <RailCard
       icon={(
-        <span className="w-5 h-5 rounded bg-[var(--color-accent-soft)] flex items-center justify-center text-accent">
+        <span className="w-5 h-5 rounded bg-accent-soft flex items-center justify-center text-accent">
           <Cable className="w-3.5 h-3.5" strokeWidth={2} />
         </span>
       )}
@@ -344,7 +344,7 @@ export function PeerPanel({
             <ActionBtn icon={<Radar className="w-3.5 h-3.5" />} label={t('peer.probe')} title={t('peer.probe_tip')}
               variant="outline" onClick={() => probeServer(false)} />
           </div>
-          <div className="text-[10px] text-text-muted bg-bg-tertiary/60 rounded-lg px-2 py-1.5">
+          <div className="text-[10px] text-text-muted bg-bg-tertiary rounded-lg px-2 py-1.5">
             {t('peer.cluster_hint', { n: probe === 'ok' ? clusterN : 0 })}
           </div>
         </>
@@ -356,7 +356,7 @@ export function PeerPanel({
           </div>
 
           {incoming && (
-            <div className="rounded-lg bg-amber-500/10 p-2 space-y-2 min-w-0">
+            <div className="rounded-lg bg-warn-soft p-2 space-y-2 min-w-0">
               <div className="text-xs text-text-primary truncate">{t('peer.invite_from', { name: incoming.fromDeviceName })}</div>
               <div className="flex flex-wrap gap-2">
                 <ActionBtn icon={<Phone className="w-3.5 h-3.5" />} label={t('peer.accept')} title={t('peer.accept_tip')}
@@ -378,7 +378,7 @@ export function PeerPanel({
                       onControlMode('human')
                       hostCall('peer_set_control_mode', { mode: 'human' })
                     }}
-                      className={`h-7 w-7 rounded-md flex items-center justify-center ${controlMode === 'human' ? 'bg-accent/20 text-accent' : 'text-text-muted hover:bg-bg-hover'}`}>
+                      className={`h-7 w-7 rounded-md flex items-center justify-center ${controlMode === 'human' ? 'bg-accent-soft-mid text-accent' : 'text-text-muted hover:bg-bg-hover'}`}>
                       <User className="w-3.5 h-3.5" />
                     </button>
                   </Tooltip>
@@ -387,7 +387,7 @@ export function PeerPanel({
                       onControlMode('ai')
                       hostCall('peer_set_control_mode', { mode: 'ai' })
                     }}
-                      className={`h-7 w-7 rounded-md flex items-center justify-center ${controlMode === 'ai' ? 'bg-accent/20 text-accent' : 'text-text-muted hover:bg-bg-hover'}`}>
+                      className={`h-7 w-7 rounded-md flex items-center justify-center ${controlMode === 'ai' ? 'bg-accent-soft-mid text-accent' : 'text-text-muted hover:bg-bg-hover'}`}>
                       <Bot className="w-3.5 h-3.5" />
                     </button>
                   </Tooltip>

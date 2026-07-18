@@ -10,10 +10,10 @@ export type RailBadgeTone = 'accent' | 'success' | 'warn' | 'error' | 'muted'
 
 /** Soft fills use CSS vars (rgba) — avoid Tailwind opacity color-mix on Android WebView. */
 const BADGE_TONE: Record<RailBadgeTone, string> = {
-  accent: 'text-accent bg-[var(--color-accent-soft)]',
-  success: 'text-emerald-500 bg-[var(--color-success-soft)]',
-  warn: 'text-amber-500 bg-[var(--color-warn-soft)]',
-  error: 'text-error bg-[var(--color-error-soft)]',
+  accent: 'text-accent bg-accent-soft',
+  success: 'text-emerald-500 bg-success-soft',
+  warn: 'text-amber-500 bg-warn-soft',
+  error: 'text-error bg-error-soft',
   muted: 'text-text-muted bg-bg-tertiary',
 }
 

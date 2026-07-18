@@ -166,7 +166,7 @@ function AndroidCapabilityCards() {
                 onClick={() => pick(id)}
                 className={`text-left px-3 py-2 rounded-lg text-xs font-medium transition-colors border
                   ${selected
-                    ? 'border-accent bg-accent/10 text-accent'
+                    ? 'border-accent bg-accent-soft text-accent'
                     : enabled
                       ? 'border-border bg-bg-primary text-text-secondary hover:bg-bg-hover'
                       : 'border-border bg-bg-primary text-text-secondary opacity-60 cursor-not-allowed'}`}
@@ -415,15 +415,15 @@ export function SettingsView({
                 {CAPTURE_METHODS.map((m) => {
                   const isActive = snapMethod === m.v
                   const ringClass = !autoSnap && isActive
-                    ? 'border-accent bg-accent/10 cursor-pointer'
+                    ? 'border-accent bg-accent-soft cursor-pointer'
                     : autoSnap && isActive
-                      ? 'border-accent-secondary bg-accent-secondary/10'
+                      ? 'border-accent-secondary bg-accent-secondary-soft'
                       : autoSnap
                         ? 'border-border bg-bg-primary opacity-50 cursor-not-allowed'
                         : 'border-border bg-bg-primary hover:bg-bg-hover cursor-pointer'
                   const tagClass = autoSnap && isActive
-                    ? 'text-accent-secondary bg-accent-secondary/10'
-                    : 'text-accent bg-accent/10'
+                    ? 'text-accent-secondary bg-accent-secondary-soft'
+                    : 'text-accent bg-accent-soft'
                   return (
                     <Tooltip key={m.v} text={t(m.desc)}>
                       <label className={`${SELECTABLE_BTN} ${ringClass}`}>
@@ -490,16 +490,16 @@ export function SettingsView({
                   const locked = autoStream || unsupported
                   const ringClass =
                     !autoStream && isActive && !unsupported
-                      ? 'border-accent bg-accent/10 cursor-pointer'
+                      ? 'border-accent bg-accent-soft cursor-pointer'
                       : autoStream && isActive
-                        ? 'border-accent-secondary bg-accent-secondary/10'
+                        ? 'border-accent-secondary bg-accent-secondary-soft'
                         : locked
                           ? 'border-border bg-bg-primary opacity-50 cursor-not-allowed'
                           : 'border-border bg-bg-primary hover:bg-bg-hover cursor-pointer'
                   const tagClass =
                     autoStream && isActive
-                      ? 'text-accent-secondary bg-accent-secondary/10'
-                      : 'text-accent bg-accent/10'
+                      ? 'text-accent-secondary bg-accent-secondary-soft'
+                      : 'text-accent bg-accent-soft'
                   return (
                     <Tooltip
                       key={m.v}
@@ -561,7 +561,7 @@ export function SettingsView({
                 const implemented = m.v === 'shared'
                 const ringClass =
                   isActive && implemented
-                    ? 'border-accent bg-accent/10 cursor-pointer'
+                    ? 'border-accent bg-accent-soft cursor-pointer'
                     : implemented
                       ? 'border-border bg-bg-primary hover:bg-bg-hover cursor-pointer'
                       : 'border-border bg-bg-primary opacity-50 cursor-not-allowed'
@@ -586,7 +586,7 @@ export function SettingsView({
                         {t(m.rec).split('/').map((s: string) => (
                           <span
                             key={s}
-                            className={`text-[11px] font-medium px-1.5 py-0.5 rounded ${implemented ? 'text-accent bg-accent/10' : 'text-text-muted bg-bg-tertiary'}`}
+                            className={`text-[11px] font-medium px-1.5 py-0.5 rounded ${implemented ? 'text-accent bg-accent-soft' : 'text-text-muted bg-bg-tertiary'}`}
                           >
                             {s}
                           </span>
@@ -624,7 +624,7 @@ export function SettingsView({
                   <Tooltip key={m.v} text={t(m.desc)}>
                     <label className={`${SELECTABLE_BTN} ${
                       isActive
-                        ? 'border-accent bg-accent/10 cursor-pointer'
+                        ? 'border-accent bg-accent-soft cursor-pointer'
                         : 'border-border bg-bg-primary hover:bg-bg-hover cursor-pointer'
                     }`}>
                       <input
@@ -638,7 +638,7 @@ export function SettingsView({
                       </span>
                       <span className="ml-auto">
                         <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded ${
-                          isActive ? 'text-accent bg-accent/10' : 'text-text-muted bg-bg-tertiary'
+                          isActive ? 'text-accent bg-accent-soft' : 'text-text-muted bg-bg-tertiary'
                         }`}>
                           {t(m.rec)}
                         </span>
@@ -663,7 +663,7 @@ export function SettingsView({
                   <Tooltip key={m.v} text={t(m.desc)}>
                     <label className={`${SELECTABLE_BTN} ${
                       isActive
-                        ? 'border-accent bg-accent/10 cursor-pointer'
+                        ? 'border-accent bg-accent-soft cursor-pointer'
                         : 'border-border bg-bg-primary hover:bg-bg-hover cursor-pointer'
                     }`}>
                       <input
@@ -677,7 +677,7 @@ export function SettingsView({
                       </span>
                       <span className="ml-auto">
                         <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded ${
-                          isActive ? 'text-accent bg-accent/10' : 'text-text-muted bg-bg-tertiary'
+                          isActive ? 'text-accent bg-accent-soft' : 'text-text-muted bg-bg-tertiary'
                         }`}>
                           {t(m.rec)}
                         </span>
@@ -688,9 +688,9 @@ export function SettingsView({
               })}
             </div>
             <div className="text-[11px] text-text-muted space-y-1">
-              <div>{t('settings.keyboard_note1', { keydown: <code className="text-accent bg-accent/10 px-1 rounded">keydown</code>, keyup: <code className="text-accent bg-accent/10 px-1 rounded">keyup</code> })}</div>
+              <div>{t('settings.keyboard_note1', { keydown: <code className="text-accent bg-accent-soft px-1 rounded">keydown</code>, keyup: <code className="text-accent bg-accent-soft px-1 rounded">keyup</code> })}</div>
               <div>{t('settings.keyboard_note2')}</div>
-              <div>{t('settings.keyboard_note3', { esc: <code className="text-accent bg-accent/10 px-1 rounded">Esc</code> })}</div>
+              <div>{t('settings.keyboard_note3', { esc: <code className="text-accent bg-accent-soft px-1 rounded">Esc</code> })}</div>
             </div>
           </div>
           </>
@@ -726,7 +726,7 @@ export function SettingsView({
                     <label
                       className={`${SELECTABLE_BTN} ${
                         isActive
-                          ? 'border-accent bg-accent/10 cursor-pointer'
+                          ? 'border-accent bg-accent-soft cursor-pointer'
                           : 'border-border bg-bg-primary hover:bg-bg-hover cursor-pointer'
                       }`}
                     >
@@ -744,7 +744,7 @@ export function SettingsView({
                       <span className="ml-auto">
                         <span
                           className={`text-[11px] font-medium px-1.5 py-0.5 rounded ${
-                            isActive ? 'text-accent bg-accent/10' : 'text-text-muted bg-bg-tertiary'
+                            isActive ? 'text-accent bg-accent-soft' : 'text-text-muted bg-bg-tertiary'
                           }`}
                         >
                           {m.v === 'warn' ? t('settings.self_target_warn_badge') : t('settings.self_target_exclude_badge')}
@@ -810,7 +810,7 @@ export function SettingsView({
                     </button>
                   </Tooltip>
                 ))}
-                <span className={`ml-1 text-[10px] px-1.5 py-0.5 rounded ${isAdmin ? 'text-accent bg-accent/10' : 'text-text-muted bg-bg-tertiary'}`}>
+                <span className={`ml-1 text-[10px] px-1.5 py-0.5 rounded ${isAdmin ? 'text-accent bg-accent-soft' : 'text-text-muted bg-bg-tertiary'}`}>
                   {t('settings.permission_current', { level: isAdmin ? t('settings.permission_current_admin') : t('settings.permission_current_normal') })}
                 </span>
               </div>
@@ -1005,7 +1005,7 @@ export function SettingsView({
             <label className="text-sm text-text-secondary w-24 shrink-0">{t('settings.mapping_key')}</label>
             {recording ? (
               <>
-                <span className={`h-7 px-3 rounded-lg border border-accent bg-accent/10 text-accent text-sm font-mono flex items-center ${displayCombo ? '' : 'animate-pulse'}`}>
+                <span className={`h-7 px-3 rounded-lg border border-accent bg-accent-soft text-accent text-sm font-mono flex items-center ${displayCombo ? '' : 'animate-pulse'}`}>
                   {displayCombo || t('settings.press_keys')}
                 </span>
                 <span className="flex-1" />
@@ -1030,7 +1030,7 @@ export function SettingsView({
                 </Tooltip>
                 {isModifierOnly && (
                   <Tooltip text={t('settings.modifier_only_tip')}>
-                  <span className="h-7 px-2 rounded-md text-xs font-medium text-accent-secondary bg-accent-secondary/10 border border-accent-secondary/30 flex items-center shrink-0 whitespace-nowrap">
+                  <span className="h-7 px-2 rounded-md text-xs font-medium text-accent-secondary bg-accent-secondary-soft border border-accent-secondary-ring flex items-center shrink-0 whitespace-nowrap">
                     {t('settings.modifier_only')}
                   </span>
                   </Tooltip>

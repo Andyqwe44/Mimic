@@ -45,7 +45,7 @@ export function StreamGatesPanel({
   return (
     <RailCard
       icon={(
-        <span className="w-5 h-5 rounded bg-[var(--color-success-soft)] flex items-center justify-center text-emerald-500">
+        <span className="w-5 h-5 rounded bg-success-soft flex items-center justify-center text-emerald-500">
           <Power className="w-3.5 h-3.5" strokeWidth={2} />
         </span>
       )}
@@ -62,7 +62,7 @@ export function StreamGatesPanel({
       </div>
 
       {!linkReady && (
-        <div className="text-[11px] text-amber-500 bg-amber-500/10 rounded-lg px-2 py-1.5">
+        <div className="text-[11px] text-amber-500 bg-warn-soft rounded-lg px-2 py-1.5">
           {t('gates.need_link')}
         </div>
       )}
@@ -75,7 +75,7 @@ export function StreamGatesPanel({
             onClick={onToggleStream}
             className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed min-w-0 ${
               streamOn
-                ? 'bg-accent/15 text-accent ring-1 ring-accent/40'
+                ? 'bg-accent-soft-mid text-accent ring-1 ring-accent-ring'
                 : 'bg-bg-tertiary text-text-secondary hover:bg-bg-hover'
             }`}
           >
@@ -84,7 +84,7 @@ export function StreamGatesPanel({
               {streamOn ? t('monitor.stream_gate_on') : t('monitor.stream_gate')}
             </span>
             <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${
-              streamOn ? 'bg-accent/20 text-accent' : 'bg-bg-hover text-text-muted'
+              streamOn ? 'bg-accent-soft-mid text-accent' : 'bg-bg-hover text-text-muted'
             }`}>
               {streamOn ? t('monitor.gate_open') : t('monitor.gate_closed')}
             </span>
@@ -97,7 +97,7 @@ export function StreamGatesPanel({
             onClick={onToggleControl}
             className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors min-w-0 ${
               controlOn
-                ? 'bg-success/15 text-success ring-1 ring-success/40'
+                ? 'bg-success-soft text-success ring-1 ring-success-ring'
                 : 'bg-bg-tertiary text-text-secondary hover:bg-bg-hover'
             }`}
           >
@@ -106,7 +106,7 @@ export function StreamGatesPanel({
               {controlOn ? t('monitor.control_gate_on') : t('monitor.control_gate')}
             </span>
             <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${
-              controlOn ? 'bg-success/20 text-success' : 'bg-bg-hover text-text-muted'
+              controlOn ? 'bg-success-soft-mid text-success' : 'bg-bg-hover text-text-muted'
             }`}>
               {controlOn ? t('monitor.gate_open') : t('monitor.gate_closed')}
             </span>
