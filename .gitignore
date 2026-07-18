@@ -91,3 +91,5 @@ test/frames/*.bgra
 test/video.mp4
 
 scripts/cdn/_last_release_dryrun.log
+
+scripts/cdn/_android_*.log
