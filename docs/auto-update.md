@@ -1,10 +1,10 @@
 # 自动更新系统 (Auto-Update)
 
 > 一句话:用户点「检查更新」→ 从 **CDN version.json**（`http://47.107.43.5/mimic/client/`）拉最新 manifest →
-> 验签 → 逐文件从 **download_base**（同一 CDN）下载到 staging → sha256 校验 → **提权的独立 updater** 覆盖安装目录 → 重启新版。
+> 验签 → 逐文件下载到 staging → **主应用安装新 updater.exe** → **updater 覆盖其余文件** → 重启。
 >
-> 首次端到端跑通:**0.3.12 → 0.3.13**(2026-07-12)。schema v3 多源：**0.3.32**。
-> **0.3.33+**：增量货架迁出 git → 阿里云 CDN；Gitee Release 只挂薄 Setup。
+> **0.3.37+**：无 `updater.new`；主应用负责换 updater，updater 永不覆盖自己。默认可增量更新。
+> schema v3 多源：**0.3.32**。CDN 货架：**0.3.33+**。
 
 ---
 
@@ -13,36 +13,17 @@
 ```
 ┌─ 用户点 Check Update ─────────────────────────────────────────────┐
 │                                                                    │
-│  ① check_update (commands.cpp / cmd_check_update)                 │
-│     候选 URL = settings.updateSources ∪ bootstrap[]               │
-│        bootstrap: Gitee main raw → GitHub raw (出厂)               │
-│     逐源 GET version.json；签名无效则换下一源                      │
-│     读 app 字段 → latest；persist sources 供下次优先               │
-│     逐文件比 sha256 → diff 列表                                    │
-│                                                                    │
-│  ② download_update (后台 std::thread / download_thread_func)       │
-│     每个 diff 文件:download_base + path  → git raw URL            │
-│        → 302 → raw CDN → 下载                                      │
-│     每文件 sha256 校验 → 写 %LOCALAPPDATA%\...\staging\            │
-│     全过 → g_up.succeeded = true                                   │
-│     (节流 WM_UPDATE_PROGRESS → 前端进度条)                         │
-│                                                                    │
-│  ③ 完成 (main.cpp WndProc / WM_UPDATE_PROGRESS, up.succeeded)      │
-│     update_launch_updater()                                        │
-│        ShellExecuteEx "runas" → UAC → updater.exe(管理员)         │
-│        参数: "<staging_dir>" <monitor_app_pid>                     │
-│     Sleep(200) → PostQuitMessage(0)  (旧 monitor_app 准备退出)     │
-│                                                                    │
-│  ④ updater.exe (updater/updater.cpp, requireAdministrator)        │
-│     等 <pid> 退出 (≤30s, 超时 Terminate) + Sleep 500ms            │
-│     解析 install 目录: exe-relative 优先 (<install>\bin\updater)  │
-│        → install = 父的父;注册表 InstallPath 兜底                 │
-│     copy_staging: 递归拷 staging\* → install\ (CopyFile 覆盖)      │
-│        自替换 updater 用改名技巧 (MoveFileEx self→.old 再拷)       │
-│     ShellExecute "open" install\bin\monitor_app.exe  (启新版)      │
-│     remove_tree(staging)  (清理)                                   │
-│                                                                    │
-│  ⑤ 新 monitor_app.exe 启动 → 新版本 ✓                             │
+│  ① check_update → manifest 验签 → sha256 diff                      │
+│  ② download_update → staging（含 bin/updater.exe 若变更）          │
+│  ③ update_launch_updater (单次 UAC)                                │
+│       若 staging 有 updater.exe:                                   │
+│         copy staging\bin\updater.exe → install\bin\updater.exe     │
+│         && 启动 install\bin\updater.exe <staging> <pid>            │
+│       否则: 直接 runas 已装 updater                                │
+│  ④ updater.exe                                                     │
+│       等旧进程退出 → 拷 staging→install（跳过 bin/updater.exe）   │
+│       sync_deletions（删 stale，含旧 updater.new）                 │
+│       启 bin\mimic_client.exe → 清 staging                         │
 └────────────────────────────────────────────────────────────────────┘
 ```
 

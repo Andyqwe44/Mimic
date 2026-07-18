@@ -66,8 +66,8 @@ if ($doClient) {
     }
     Write-Ok "LF-normalized $nFix file(s)"
 
-    # full_update: exe renamed monitor_app.exe → mimic_client.exe (breaks incremental path)
-    & "$PSScriptRoot\New-VersionJson.ps1" -ReleaseDir $rel -Version $ver -Schema 3 -JumpPad '0.3.31' -Full
+    # Incremental by default (0.3.37+). Pass -Full only when the update mechanism itself breaks.
+    & "$PSScriptRoot\New-VersionJson.ps1" -ReleaseDir $rel -Version $ver -Schema 3 -JumpPad '0.3.31'
 }
 
 if ($doServer) {

@@ -215,31 +215,6 @@ static void heal_local_manifest() {
     }
 }
 
-// First-launch updater self-heal. Breaks the pre-0.3.5 updater deadlock: an old
-// updater cannot overwrite its own running image, so a stale bin\updater.exe would
-// persist forever. If the installed updater.exe sha != version.json's expected sha
-// and bin\updater.new (a copy of the current updater) exists, launch it with
-// --self-install to replace updater.exe. We only START it; it does the copy.
-static void check_and_heal_updater() {
-    std::string installDir = paths_get_install_dir();
-    // Prefer the appdata baseline (rebuilt at startup to match the running exe);
-    // the installed version.json can be stale (old updater never refreshed it).
-    std::string manifest = read_file_str(paths_get_appdata_dir() + "\\version.json");
-    if (manifest.empty()) manifest = read_file_str(installDir + "\\version.json");
-    if (manifest.empty()) return;
-    size_t p = manifest.find("\"bin/updater.exe\"");
-    if (p == std::string::npos) return;
-    std::string expectSha = json_get_str(manifest.substr(p), "sha256");
-    if (expectSha.empty()) return;
-    std::string actualSha = sha256_hex_file((installDir + "\\bin\\updater.exe").c_str());
-    if (actualSha == expectSha) return;  // already current
-    std::string newPath = installDir + "\\bin\\updater.new";
-    if (GetFileAttributesA(newPath.c_str()) == INVALID_FILE_ATTRIBUTES) return;
-    LOG("main", "updater stale (have=%s want=%s) - launching updater.new --self-install",
-        actualSha.empty() ? "?" : actualSha.c_str(), expectSha.c_str());
-    ShellExecuteA(nullptr, "open", newPath.c_str(), "--self-install", installDir.c_str(), SW_HIDE);
-}
-
 // ── WinMain ─────────────────────────────────────────────────
 int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR lpCmdLine, _In_ int nCmdShow)
 {
@@ -341,9 +316,6 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR lpCm
     // Rebuild the appdata baseline manifest if it doesn't match this exe — keeps
     // the update diff correct without depending on the updater (see helper above).
     heal_local_manifest();
-
-    // Self-heal a stale updater.exe left by an older updater (see helper above).
-    check_and_heal_updater();
 
     backend_init();
 

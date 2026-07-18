@@ -1869,10 +1869,10 @@ UpdateProgress update_get_progress() {
     return g_up;
 }
 
-// Launch updater.exe for the finished (succeeded) download. Main thread (WndProc).
-// Guard against duplicate WM_UPDATE_PROGRESS — the download thread posts once per
-// chunk AND a terminal "done" post, which can both land in the queue before the
-// first is processed, causing two ShellExecuteEx runas calls (two UAC prompts).
+// Launch update apply for a finished download. Main thread (WndProc).
+// Ownership: MimicClient installs/replaces bin\updater.exe from staging; then the
+// (new) updater copies everything else. One UAC via cmd when a staged updater exists.
+// Guard against duplicate WM_UPDATE_PROGRESS (two UAC prompts).
 bool update_launch_updater() {
     static bool s_launched = false;  // one-shot
     if (s_launched) return false;
@@ -1883,29 +1883,50 @@ bool update_launch_updater() {
         stagingDir = g_up.staging_dir;
     }
     s_launched = true;
-    std::string installDir  = paths_get_install_dir();
-    std::string updaterPath = installDir + "\\bin\\updater.exe";
+    std::string installDir = paths_get_install_dir();
+    std::string installUpdater = installDir + "\\bin\\updater.exe";
+    std::string stagedUpdater  = stagingDir + "\\bin\\updater.exe";
     DWORD pid = GetCurrentProcessId();
-    // updater.exe is requireAdministrator (it overwrites Program Files). Launching
-    // it from this non-elevated process via CreateProcess fails with
-    // ERROR_ELEVATION_REQUIRED (740). ShellExecuteEx + "runas" raises the UAC
-    // prompt so the updater runs elevated.
-    // 铁律 9a: params do NOT quote the staging path (the updater strips quotes defensively).
-    std::string params = stagingDir + " " + std::to_string((unsigned long)pid);
+    const bool stageHasUpdater =
+        GetFileAttributesA(stagedUpdater.c_str()) != INVALID_FILE_ATTRIBUTES;
+
+    // Quote a path for cmd.exe when it contains spaces; updater parse_args strips quotes.
+    auto cmd_quote = [](const std::string& p) -> std::string {
+        if (p.find(' ') == std::string::npos && p.find('\t') == std::string::npos) return p;
+        return "\"" + p + "\"";
+    };
+
     SHELLEXECUTEINFOA sei = {};
-    sei.cbSize       = sizeof(sei);
-    sei.fMask        = SEE_MASK_NOCLOSEPROCESS;
-    sei.lpVerb       = "runas";
-    sei.lpFile       = updaterPath.c_str();
+    sei.cbSize = sizeof(sei);
+    sei.fMask  = SEE_MASK_NOCLOSEPROCESS;
+    sei.lpVerb = "runas";
+    sei.nShow  = SW_HIDE;
+
+    std::string file;
+    std::string params;
+    if (stageHasUpdater) {
+        // Main installs new updater, then runs it (single elevation).
+        file = "cmd.exe";
+        params = "/c copy /Y " + cmd_quote(stagedUpdater) + " " + cmd_quote(installUpdater) +
+                 " && " + cmd_quote(installUpdater) + " " + cmd_quote(stagingDir) + " " +
+                 std::to_string((unsigned long)pid);
+        LOG("cmd", "update_launch_updater: main will install staged updater then apply rest");
+    } else {
+        // Incremental with no updater change — run installed updater as-is.
+        file = installUpdater;
+        params = cmd_quote(stagingDir) + " " + std::to_string((unsigned long)pid);
+        LOG("cmd", "update_launch_updater: no staged updater — apply with installed updater");
+    }
+
+    sei.lpFile       = file.c_str();
     sei.lpParameters = params.c_str();
-    sei.nShow        = SW_HIDE;
     if (!ShellExecuteExA(&sei)) {
         LOG_ERROR("cmd", "update_launch_updater: ShellExecuteEx(runas) failed err=%lu",
             (unsigned long)GetLastError());
         return false;
     }
     if (sei.hProcess) CloseHandle(sei.hProcess);
-    LOG("cmd", "update_launch_updater: updater launched (elevated), staging=%s", stagingDir.c_str());
+    LOG("cmd", "update_launch_updater: elevated apply started, staging=%s", stagingDir.c_str());
     return true;
 }
 

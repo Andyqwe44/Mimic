@@ -317,9 +317,8 @@ export default function App() {
   const devInjectDownload = useCallback((phase: 'download' | 'done' | 'error') => {
     const cur = appVersion.replace(/^v/, '')
     const fakeDiff = [
-      { path: 'bin/monitor_app.exe', size: 524288, dl: 491520 },
+      { path: 'bin/mimic_client.exe', size: 524288, dl: 491520 },
       { path: 'bin/updater.exe', size: 131072, dl: 122880 },
-      { path: 'bin/updater.new', size: 131072, dl: 122880 },
       { path: 'frontend/assets/index-Cys4Z6Yf.js', size: 204800, dl: 196608 },
       { path: 'frontend/assets/index-ByT4uD_r.css', size: 65536, dl: 61440 },
       { path: 'frontend/index.html', size: 2048, dl: 2048 },
@@ -331,7 +330,7 @@ export default function App() {
     })
     setDemoUpdateDownloading(true)
     if (phase === 'download') {
-      setDemoUpdateProgress({ phase: 'download', current_file: 3, total_files: 6, skipped_files: 0, file: 'frontend/assets/index-Cys4Z6Yf.js', done_bytes: 460800, total_bytes: 1048576, skipped_bytes: 0 })
+      setDemoUpdateProgress({ phase: 'download', current_file: 3, total_files: 5, skipped_files: 0, file: 'frontend/assets/index-Cys4Z6Yf.js', done_bytes: 460800, total_bytes: 1048576, skipped_bytes: 0 })
     } else if (phase === 'done') {
       setDemoUpdateProgress({ phase: 'done', current_file: 6, total_files: 6, skipped_files: 0, file: '', done_bytes: 1048576, total_bytes: 1048576, skipped_bytes: 0 })
     } else {

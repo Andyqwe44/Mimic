@@ -276,9 +276,8 @@ export function DevToolsView({
                   body: '🚀 新功能\n- 这是一条模拟的更新日志\n- 用于测试 UpdateModal 在有更新时的展示效果\n\n🐛 修复\n- 修复了一个不存在的问题\n- 又修复了另一个不存在的问题',
                   url: '',
                   diff: [
-                    { path: 'bin/monitor_app.exe', size: 524288, dl: 491520 },
+                    { path: 'bin/mimic_client.exe', size: 524288, dl: 491520 },
                     { path: 'bin/updater.exe', size: 131072, dl: 122880 },
-                    { path: 'bin/updater.new', size: 131072, dl: 122880 },
                     { path: 'bin/logger.dll', size: 98304, dl: 90112 },
                     { path: 'frontend/assets/index-Cys4Z6Yf.js', size: 204800, dl: 196608 },
                     { path: 'frontend/assets/index-ByT4uD_r.css', size: 65536, dl: 61440 },
@@ -308,7 +307,7 @@ export function DevToolsView({
                 onDevInjectUpdate?.({
                   status: 'update', current: cur, latest: '9.9.99',
                   name: 'v9.9.99 — 重要安全更新', body: '此版本包含关键安全修复，必须立即更新。', url: '',
-                  diff: [{ path: 'bin/monitor_app.exe', size: 524288, dl: 491520 }, { path: 'frontend/index.html', size: 2048, dl: 2048 }],
+                  diff: [{ path: 'bin/mimic_client.exe', size: 524288, dl: 491520 }, { path: 'frontend/index.html', size: 2048, dl: 2048 }],
                   message: '⚠️ 模拟强制更新 — 真实版会隐藏关闭按钮。Dev 模式保留所有关闭入口。',
                   mandatory: false, mode: 'incremental', _dev: true,
                 })
@@ -319,9 +318,8 @@ export function DevToolsView({
                   status: 'update', current: cur, latest: '9.9.99',
                   name: 'v9.9.99 — Full Package', body: 'min_version 高于当前版本，强制全量下载。', url: '',
                   diff: [
-                    { path: 'bin/monitor_app.exe', size: 524288, dl: 491520 },
+                    { path: 'bin/mimic_client.exe', size: 524288, dl: 491520 },
                     { path: 'bin/updater.exe', size: 131072, dl: 122880 },
-                    { path: 'bin/updater.new', size: 131072, dl: 122880 },
                     { path: 'bin/logger.dll', size: 98304, dl: 90112 },
                     { path: 'bin/capture_wgc.dll', size: 147456, dl: 131072 },
                     { path: 'bin/capture_gdi.dll', size: 81920, dl: 73728 },
@@ -348,7 +346,7 @@ export function DevToolsView({
               [t('devtools.demo_resume'), () => {
                 const cur = appVersion.replace(/^v/, '')
                 const fakeDiff = [
-                  { path: 'bin/monitor_app.exe', size: 524288, dl: 491520 },
+                  { path: 'bin/mimic_client.exe', size: 524288, dl: 491520 },
                   { path: 'bin/logger.dll', size: 98304, dl: 98304 },
                   { path: 'bin/capture_wgc.dll', size: 65536, dl: 65536 },
                   { path: 'frontend/index.html', size: 2048, dl: 2048 },
@@ -364,7 +362,7 @@ export function DevToolsView({
                   staging_state: {
                     has_partial: true, done_files: 3, total_files: 7,
                     done_bytes: 688128, total_bytes: 1048320,
-                    done_paths: ['bin/monitor_app.exe', 'bin/logger.dll', 'bin/capture_wgc.dll'],
+                    done_paths: ['bin/mimic_client.exe', 'bin/logger.dll', 'bin/capture_wgc.dll'],
                   },
                   _dev: true,
                 })

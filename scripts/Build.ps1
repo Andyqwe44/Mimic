@@ -190,7 +190,7 @@ function Build-MimicClient {
         $upd = Join-Path $Root 'updater\build\updater.exe'
         if (Test-Path $upd) {
             Copy-Item $upd "$out\bin\" -Force
-            Copy-Item "$out\bin\updater.exe" "$out\bin\updater.new" -Force
+            # No updater.new — MimicClient installs updater.exe from staging; updater skips self.
         }
         $dist = Join-Path $Root 'mimic_web\dist'
         if (Test-Path $dist) { Copy-Item "$dist\*" "$out\frontend\" -Recurse -Force }

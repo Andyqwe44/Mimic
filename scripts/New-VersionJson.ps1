@@ -29,7 +29,7 @@ $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path $ReleaseDir).Path
 
 $entries = Get-ChildItem -Path $root -Recurse -File |
-    Where-Object { $_.Name -ne 'version.json' } |
+    Where-Object { $_.Name -ne 'version.json' -and $_.Name -ne 'payload.zip' } |
     ForEach-Object {
         [pscustomobject]@{
             Rel    = $_.FullName.Substring($root.Length + 1) -replace '\\', '/'
@@ -92,7 +92,10 @@ if (Test-Path $privPath) {
 }
 
 $manifest = [ordered]@{
-    schema        = $Schema
+    # MUST be a JSON string (not number). update_verify.cpp jstr_from only reads
+    # quoted values; a numeric schema makes 0.3.32–0.3.35 treat the digest as
+    # schema-1 (files-only) while we sign schema-3 → "signature INVALID".
+    schema        = "$Schema"
     app           = $Version
     channel       = $Channel
     released      = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ')

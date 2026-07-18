@@ -12,7 +12,7 @@
 #include <cstdlib>
 #pragma comment(lib, "bcrypt.lib")
 
-// ── Minimal JSON string-value extraction (values that are quoted strings) ──
+// ── Minimal JSON value extraction (quoted string OR bare number/bool/null) ──
 static std::string jstr_from(const std::string& s, const char* key, size_t from) {
     std::string k = "\""; k += key; k += "\"";
     size_t p = s.find(k, from);
@@ -21,14 +21,21 @@ static std::string jstr_from(const std::string& s, const char* key, size_t from)
     if (p == std::string::npos) return "";
     p++;
     while (p < s.size() && (s[p] == ' ' || s[p] == '\t')) p++;
-    if (p >= s.size() || s[p] != '"') return "";
-    size_t e = p + 1;
-    while (e < s.size()) {
-        if (s[e] == '"' && s[e - 1] != '\\') break;
-        e++;
+    if (p >= s.size()) return "";
+    if (s[p] == '"') {
+        size_t e = p + 1;
+        while (e < s.size()) {
+            if (s[e] == '"' && s[e - 1] != '\\') break;
+            e++;
+        }
+        if (e >= s.size()) return "";
+        return s.substr(p + 1, e - p - 1);
     }
-    if (e >= s.size()) return "";
-    return s.substr(p + 1, e - p - 1);
+    // Number/bool/null — same as commands.cpp json_val (schema is often unquoted).
+    size_t e = p;
+    while (e < s.size() && s[e] != ',' && s[e] != '}' && s[e] != ']') e++;
+    while (e > p && (s[e - 1] == ' ' || s[e - 1] == '\t' || s[e - 1] == '\n' || s[e - 1] == '\r')) e--;
+    return s.substr(p, e - p);
 }
 
 // Extract quoted strings from a JSON string-array value for `key`.
