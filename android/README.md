@@ -1,50 +1,48 @@
-# Mimic Android (skeleton)
+# Mimic Android — thin Setup → CDN Client（对齐 PC）
 
-Same React UI as Windows (`shared/web`), hosted in a **Capacitor WebView**.
+和 PC 一样分两层：
 
-Electron is desktop-only and is **not** used here.
-
-## Goals (this phase)
-
-| Flow | Status |
-|------|--------|
-| Shared UI (`shared/web`) | wired via `webDir` |
-| Crash / unhandledrejection → `crash_log` | JS handlers + native stub |
-| Connect MimicServer (probe / login / WS) | via `hostCall` → MimicHost |
-| In-app update from CDN APK | stub → `http://47.107.43.5/mimic/android/` |
-| Bidirectional remote control | **later** (phone↔PC) |
-
-## Layout
+| 角色 | 文件 | 放哪 |
+|------|------|------|
+| **Setup（薄安装器）** | `MimicAndroid_Setup_v*.apk` | Gitee Release / 也可放 CDN |
+| **Client（完整应用）** | `MimicClient_Android_v*.apk` | **只放 CDN** `http://47.107.43.5/mimic/android/` |
 
 ```
-android/
-  capacitor.config.ts   # webDir → ../shared/web/dist
-  package.json
-  version.json          # CDN manifest (APK channel)
-  plugins/MimicHost/    # Capacitor plugin sources (copy into generated project)
-  README.md
+手机下载 Setup.apk（小入口）
+  → 打开 Mimic Setup
+  → GET CDN /android/version.json
+  → 下载 client_apk
+  → 系统安装 Mimic Client
 ```
 
-Native Android Studio project is generated with Capacitor (`npx cap add android`) and is gitignored until the first stable APK is published.
+对应 PC：`MimicClient_Setup.exe` → CDN `payload.zip`。
 
-## One-time setup (dev machine)
+## 工程
+
+```
+android/setup/     # Gradle 双模块
+  setup/           # com.mimic.setup — 薄安装器
+  client/          # com.mimic.client — 客户端（当前为 stub，后续接 Capacitor+shared/web）
+```
+
+## 构建
 
 ```powershell
-cd shared\web; npm install; npm run build
-cd ..\..\android
-npm install
-npx cap add android
-# Copy plugins/MimicHost into android/app (see plugins/README.md)
-npx cap sync android
-npx cap open android
+powershell -File scripts\Build-Android.ps1
+# 产物: release\MimicAndroid\*.apk + version.json
 ```
 
-## CDN update (same idea as PC)
+需要本机已装 **Android Studio（SDK）**；日常可用命令行 Gradle，不必每次开 Studio。
 
-1. Build signed APK → upload to `http://47.107.43.5/mimic/android/`
-2. Publish `version.json` + `MimicClient_vX.Y.Z.apk`
-3. App calls `check_update` / `download_update` → PackageInstaller
+## 手机测试
 
-## Version
+1. 把 `MimicAndroid_Setup_v0.1.0.apk` 传到手机（Gitee / CDN / 数据线）。
+2. 允许「未知来源」安装 Setup。
+3. 打开 **Mimic Setup** → 允许「安装未知应用」→ 自动从 CDN 拉 Client → 确认安装。
+4. 打开 **Mimic** → 点 Probe Bootstrap，应能访问 `http://47.107.43.5:8443`。
 
-Bump `android/package.json` + `android/version.json` together (independent of PC `APP_VERSION`).
+## Cursor / Android Studio
+
+- **不用「连接」Studio**；Cursor 改代码，终端跑 `Build-Android.ps1`。
+- Studio 用于：SDK 管理、真机调试、签名配置。
+- Cursor 可装 Kotlin 语法扩展，**不能**替代完整 Android 构建链。

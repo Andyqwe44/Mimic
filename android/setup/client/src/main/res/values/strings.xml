@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Mimic</string>
+    <string name="hello">Mimic Client %1$s</string>
+    <string name="stub_hint">Installed via Mimic Setup from CDN.\nNext: Capacitor + shared/web UI.</string>
+    <string name="probe">Probe Bootstrap</string>
+</resources>

@@ -1,4 +1,5 @@
-# Pack MimicAndroid for Gitee Release + CDN (APK if present, else scaffold zip).
+# Pack MimicAndroid thin Setup for Gitee (+ stage CDN tree).
+# Prefer Build-Android.ps1 first so APKs exist under release\MimicAndroid\.
 param(
     [string]$Version = ''
 )
@@ -14,75 +15,80 @@ if (-not $Version) { $Version = [string]$vj.app }
 if (-not $Version) { throw 'android version missing' }
 
 $outRoot = Join-Path $Root 'release\MimicAndroid'
+$setupName = if ($vj.setup_apk) { [string]$vj.setup_apk } else { "MimicAndroid_Setup_v$Version.apk" }
+$clientName = if ($vj.client_apk) { [string]$vj.client_apk } else { "MimicClient_Android_v$Version.apk" }
 $zip = Join-Path $Root "release\MimicAndroid_Setup_v$Version.zip"
-$apkName = if ($vj.apk) { [string]$vj.apk } else { "MimicClient_v$Version.apk" }
+$setupApkOut = Join-Path $Root "release\$setupName"
 
 Write-Step "pack MimicAndroid v$Version"
-if (Test-Path $outRoot) { Remove-Item $outRoot -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $outRoot | Out-Null
 
-Copy-Item $vjPath $outRoot -Force
-Copy-Item (Join-Path $androidRoot 'README.md') $outRoot -Force
-Copy-Item (Join-Path $androidRoot 'package.json') $outRoot -Force
-Copy-Item (Join-Path $androidRoot 'capacitor.config.ts') $outRoot -Force
-if (Test-Path (Join-Path $androidRoot 'plugins')) {
-    Copy-Item (Join-Path $androidRoot 'plugins') (Join-Path $outRoot 'plugins') -Recurse -Force
+$setupSrc = @(
+    (Join-Path $outRoot $setupName),
+    (Join-Path $Root "android\setup\setup\build\outputs\apk\debug\setup-debug.apk"),
+    (Join-Path $Root "android\setup\setup\build\outputs\apk\release\*.apk")
+) | ForEach-Object { Get-Item $_ -ErrorAction SilentlyContinue } | Select-Object -First 1
+
+$clientSrc = @(
+    (Join-Path $outRoot $clientName),
+    (Join-Path $Root "android\setup\client\build\outputs\apk\debug\client-debug.apk"),
+    (Join-Path $Root "android\setup\client\build\outputs\apk\release\*.apk")
+) | ForEach-Object { Get-Item $_ -ErrorAction SilentlyContinue } | Select-Object -First 1
+
+if (-not $setupSrc -or -not $clientSrc) {
+    Write-Warn2 'APKs missing — run: powershell -File scripts\Build-Android.ps1'
+    throw 'MimicAndroid APKs not built'
 }
 
-# Prefer a built APK from Capacitor/Gradle if available
-$apkCandidates = @(
-    (Join-Path $androidRoot "android\app\build\outputs\apk\debug\app-debug.apk"),
-    (Join-Path $androidRoot "android\app\build\outputs\apk\release\app-release.apk"),
-    (Join-Path $Root "release\$apkName"),
-    (Join-Path $outRoot $apkName)
-)
-$apkSrc = $apkCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-$hasApk = $false
-if ($apkSrc) {
-    Copy-Item $apkSrc (Join-Path $outRoot $apkName) -Force
-    $hasApk = $true
-    Write-Ok "included APK: $apkName"
-} else {
-    Write-Warn2 'No APK found — shipping scaffold zip (open in Android Studio; see INSTALL.txt)'
+Copy-Item $setupSrc.FullName (Join-Path $outRoot $setupName) -Force
+Copy-Item $clientSrc.FullName (Join-Path $outRoot $clientName) -Force
+Copy-Item $setupSrc.FullName $setupApkOut -Force
+
+$manifest = [ordered]@{
+    schema         = '1'
+    app            = $Version
+    platform       = 'android'
+    channel        = 'stable'
+    full_update    = $true
+    download_base  = 'http://47.107.43.5/mimic/android/'
+    setup_apk      = $setupName
+    client_apk     = $clientName
+    apk            = $clientName
+    has_apk        = $true
+    has_client_apk = $true
+    message        = 'Thin Setup APK downloads Client APK from CDN (PC-style)'
 }
+$utf8 = New-Object System.Text.UTF8Encoding $false
+$jsonText = ($manifest | ConvertTo-Json -Depth 6) + "`n"
+[IO.File]::WriteAllText((Join-Path $outRoot 'version.json'), $jsonText, $utf8)
+[IO.File]::WriteAllText($vjPath, $jsonText, $utf8)
 
 $install = @"
-# MimicAndroid v$Version
+# MimicAndroid thin Setup v$Version
+
+Same model as PC MimicClient_Setup.exe:
+
+1. Install $setupName on the phone.
+2. Open Mimic Setup — downloads $clientName from CDN.
+3. System installer installs Mimic Client.
 
 CDN: http://47.107.43.5/mimic/android/
-
-$(if ($hasApk) {
-@"
-## Install (APK)
-1. Enable Install unknown apps for your browser/file manager.
-2. Download $apkName from this zip or CDN.
-3. Open the APK and install.
-"@
-} else {
-@"
-## Install (scaffold — first APK not built on this machine)
-1. On a machine with Android Studio + SDK:
-   cd shared/web && npm i && npm run build
-   cd android && npm i && npx cap add android
-   Copy plugins/MimicHost into the generated app (see plugins/README.md)
-   npx cap sync android && npx cap open android
-2. Build signed/debug APK, rename to $apkName, upload to CDN android/.
-"@
-})
-
-Bootstrap signaling: http://47.107.43.5:8443
-Same account as PC (demo / demo after server first run).
 "@
 Set-Content -Path (Join-Path $outRoot 'INSTALL.txt') -Value $install -Encoding utf8
 
-# Refresh version.json apk field + full_update
-$vj | Add-Member -NotePropertyName 'has_apk' -NotePropertyValue $hasApk -Force
-$vj.apk = $apkName
-$vj.app = $Version
-$utf8NoBom = New-Object System.Text.UTF8Encoding $false
-[IO.File]::WriteAllText((Join-Path $outRoot 'version.json'), (($vj | ConvertTo-Json -Depth 6) + "`n"), $utf8NoBom)
+# Gitee zip = Setup APK only (thin); Client stays on CDN
+$zipDir = Join-Path $env:TEMP ("mimic_android_setup_" + [Guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Force -Path $zipDir | Out-Null
+try {
+    Copy-Item (Join-Path $outRoot $setupName) $zipDir
+    Copy-Item (Join-Path $outRoot 'INSTALL.txt') $zipDir
+    Copy-Item (Join-Path $outRoot 'version.json') $zipDir
+    if (Test-Path $zip) { Remove-Item $zip -Force }
+    Compress-Archive -Path "$zipDir\*" -DestinationPath $zip -Force
+} finally {
+    Remove-Item $zipDir -Recurse -Force -ErrorAction SilentlyContinue
+}
 
-if (Test-Path $zip) { Remove-Item $zip -Force }
-Compress-Archive -Path "$outRoot\*" -DestinationPath $zip -Force
+Write-Ok $setupApkOut
 Write-Ok $zip
-Write-Output $zip
+Write-Ok "CDN client: $clientName (upload release\MimicAndroid\* to cdn/android/)"

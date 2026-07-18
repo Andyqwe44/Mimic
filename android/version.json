@@ -5,6 +5,10 @@
   "channel": "stable",
   "full_update": true,
   "download_base": "http://47.107.43.5/mimic/android/",
+  "setup_apk": "MimicAndroid_Setup_v0.1.0.apk",
+  "client_apk": "MimicClient_Android_v0.1.0.apk",
   "apk": "MimicClient_Android_v0.1.0.apk",
-  "message": "Android skeleton — crash log, signaling login, in-app APK update"
+  "has_apk": true,
+  "has_client_apk": true,
+  "message": "Thin Setup APK downloads Client APK from CDN (PC-style)"
 }

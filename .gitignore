@@ -30,6 +30,13 @@ android/android/
 android/.capacitor/
 android/node_modules/
 
+# Android Gradle (thin setup project)
+android/setup/**/build/
+android/setup/.gradle/
+android/setup/local.properties
+android/setup/**/*.iml
+android/setup/.idea/
+
 # === Dependencies ===
 **/node_modules/
 

@@ -78,7 +78,13 @@ powershell -File scripts\Release.ps1 -ServerOnly      # server/package.json
 
 CDN: `http://47.107.43.5/mimic/client/` · `.../server/` · `.../android/`。
 
-Gitee Release 附件：`MimicClient_Setup_*.exe` · `MimicServer_Setup_*.exe` · `MimicAndroid_Setup_*.zip`（骨架；有 APK 时 zip 内含 APK）。
+Gitee Release 附件：`MimicClient_Setup_*.exe` · `MimicServer_Setup_*.exe` · **`MimicAndroid_Setup_*.apk`**（薄安装器，对齐 PC Setup：安装后从 CDN 拉 Client APK）。
+
+Android 分发（与 PC 同构）：
+
+```
+手机装 MimicAndroid_Setup.apk  →  读 CDN version.json  →  下载 MimicClient_Android.apk  →  系统安装
+```
 
 ## Android skeleton (current)
 

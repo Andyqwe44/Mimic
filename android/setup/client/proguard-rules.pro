@@ -1,0 +1,1 @@
+# Client stub — keep simple
