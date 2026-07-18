@@ -1,62 +1,25 @@
 ---
-description: C++ 后端 — LOG 专用、铁律5 方法路由、WebMessage 命令
-globs: mimic_client/**/*.{cpp,h},capture/**/*.{cpp,h},input/**/*.{cpp,h},logger/**/*.{cpp,h},updater/**/*.{cpp,h},protocol/**/*.h
+description: PC C++ 后端 — LOG、命令、peer、更新
+globs: pc/**/*.{cpp,h,hpp},shared/protocol/**/*.h
 alwaysApply: false
 ---
 
-# C++ Backend
+# PC C++ backend (`pc/`)
 
-## 日志（唯一合法方式）
+## 日志
 
-```cpp
-#include "logger/logger.h"
-LOG_ERROR("tag", "format", args...);
-LOG_WARN("tag", "format", args...);
-LOG("tag", "format", args...);        // INFO
-LOG_DEBUG("tag", "format", args...);  // DEBUG
-```
+只用 `LOG` / `LOG_WARN` / `LOG_ERROR` / `LOG_DEBUG`（`pc/logger`）。禁止裸打印。
 
-禁用：`printf` / `fprintf` / `std::cout` / `std::cerr` / `puts` / `WriteConsole` / `OutputDebugString`（仅 `logger/logger.cpp` 例外）。
+生产默认 `LOG_LEVEL_INFO`。
 
-常用 tag：`wgc` `dxgi` `cmd` `main` `peer` `ui` `agent`。
+## Settings
 
-## 铁律 5 — 方法路由
+AppData：`%LOCALAPPDATA%\MimicClient\`（config / log / staging / WebView2）。
 
-**前端决定 method，C++ 只执行。** 禁止静默 fallback / 改写参数 / 谎报 method。
+## 角色
 
-单帧示例：
-- `wgc` + hwnd=0 → **error**（桌面用 `wgc-monitor` 或前端选 `dxgi`）
-- unknown method → **error**，不要 DesktopBlt 链
+本机 `pc/client` = **捕获 + 执行**。信令默认 Bootstrap `http://47.107.43.5:8443`。
 
-流：`dxgi` stream 未实现 → 返回 error，不要偷偷换成 WGC。
+`crash_log` hostCall：前端未捕获异常 → `LOG_ERROR("crash", ...)`。
 
-## WebMessage
-
-`hostCall(cmd, args)` ↔ `HandleWebMessage` → `{"id", "result"}`；失败显式 error。
-
-关键：`list_windows` / `capture_window` / `capture_stream_*` / `send_input` / `get_version` / `read_live_log` / `get_settings` / `set_settings` / peer_*。
-
-Settings：用户数据在 `paths_get_appdata_dir()`（`%LOCALAPPDATA%\MimicClient`）；优先 `set_settings` 整包原子写；启动用 `settings_get_boot_json` + `AddScriptToExecuteOnDocumentCreated`。
-
-## 薄客户端 + Peer
-
-本机 `mimic_client` = **捕获 + 执行**。信令默认 Bootstrap `http://47.107.43.5:8443`。
-
-| 目标 | 输入 | 安全 |
-|------|------|------|
-| 桌面 `hwnd=0` | 前台 `sendinput`（可占用键鼠） | 坐标仍限制在虚拟屏 `[0,1]` |
-| 具体窗口 | 后台 `sendmessage` | **坐标必须在窗口 `[0,1]`**；远端控制 **强制**当前 stream 的 hwnd |
-
-- **闸门：** `allow_stream` / `accept_control`（`set_stream_gate` / `set_control_gate`）；关则不推流 / 不执行远端输入
-- **远端视频：** WGC GPU → MF **硬编** H.264 → agent **出站**连 `controller_server`（WS 中继）；浏览器只访问服务端
-- Soft MFT 仅 fallback（≤1280）；**不用 MJPEG**
-- `THIN_CLIENT`：本机无视频预览；右侧闸门卡；捕获/输入设置在服务端网页
-- 压测：`test/h264_hw_bench`（`Build.ps1 -Module h264_bench`）
-
-文本上屏：后台 `WM_CHAR`；`focus:true` 仅测试需要插入符时显式打开。
-
-## Windows 路径（铁律 9）
-
-- `ShellExecuteEx`/`CreateProcess` 的 `lpParameters`：**路径不加引号**
-- 接收端：解析后立刻剥两端 `"`
-- 路径拼接用 `snprintf(..., "%s\\%s", ...)`；目录勿尾 `\\`（除 `"\\*"`）
+铁律 5：不静默回退方法；失败返回 error JSON。

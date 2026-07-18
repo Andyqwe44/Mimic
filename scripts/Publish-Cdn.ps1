@@ -10,22 +10,29 @@ param(
     [string]$SshHost = 'aliyun',
     [string]$RemoteRoot = 'C:/mimic/cdn',
     [switch]$ClientOnly,
-    [switch]$ServerOnly
+    [switch]$ServerOnly,
+    [switch]$AndroidOnly,
+    [switch]$SkipAndroid
 )
 
-if ($ClientOnly -and $ServerOnly) { throw 'Use only one of -ClientOnly / -ServerOnly' }
+if (($ClientOnly -and $ServerOnly) -or ($ClientOnly -and $AndroidOnly) -or ($ServerOnly -and $AndroidOnly)) {
+    throw 'Use only one of -ClientOnly / -ServerOnly / -AndroidOnly'
+}
 
 . "$PSScriptRoot\lib\Common.ps1"
 $ErrorActionPreference = 'Stop'
 $root = Get-RepoRoot
-$doClient = -not $ServerOnly
-$doServer = -not $ClientOnly
+$doClient = -not $ServerOnly -and -not $AndroidOnly
+$doServer = -not $ClientOnly -and -not $AndroidOnly
+$doAndroid = -not $SkipAndroid -and (-not $ClientOnly) -and (-not $ServerOnly)
+if ($AndroidOnly) { $doClient = $false; $doServer = $false; $doAndroid = $true }
 if (-not $Version) {
-    $Version = if ($doClient) { Get-AppVersion } else { Get-ServerVersion }
+    $Version = if ($doClient) { Get-AppVersion } elseif ($doServer) { Get-ServerVersion } else { '0.1.0' }
 }
 
 $clientDir = Join-Path $root 'release\MimicClient'
 $serverDir = Join-Path $root 'release\MimicServer'
+$androidDir = Join-Path $root 'release\MimicAndroid'
 
 if ($doClient -and -not (Test-Path (Join-Path $clientDir 'version.json'))) {
     throw "missing $clientDir\version.json — run New-VersionJson.ps1 first"
@@ -47,9 +54,9 @@ function New-PayloadZip([string]$SrcDir, [string]$ZipPath) {
     }
 }
 
-Write-Step "CDN publish → ${SshHost}:$RemoteRoot (client=$doClient server=$doServer)"
+Write-Step "CDN publish → ${SshHost}:$RemoteRoot (client=$doClient server=$doServer android=$doAndroid)"
 
-ssh -o BatchMode=yes $SshHost "cmd /c if not exist C:\mimic\cdn\client mkdir C:\mimic\cdn\client & if not exist C:\mimic\cdn\server mkdir C:\mimic\cdn\server"
+ssh -o BatchMode=yes $SshHost "cmd /c if not exist C:\mimic\cdn\client mkdir C:\mimic\cdn\client & if not exist C:\mimic\cdn\server mkdir C:\mimic\cdn\server & if not exist C:\mimic\cdn\android mkdir C:\mimic\cdn\android"
 if ($LASTEXITCODE) { throw 'ssh mkdir failed' }
 
 if ($doClient) {
@@ -74,6 +81,21 @@ if ($doServer) {
     if ($LASTEXITCODE) { throw 'scp server failed' }
 }
 
+if ($doAndroid) {
+    if (-not (Test-Path (Join-Path $androidDir 'version.json'))) {
+        Write-Step 'pack MimicAndroid (missing local tree)'
+        & "$PSScriptRoot\Pack-MimicAndroid.ps1"
+    }
+    Write-Step 'scp android tree'
+    ssh -o BatchMode=yes $SshHost "cmd /c if exist C:\mimic\cdn\android rd /s /q C:\mimic\cdn\android & mkdir C:\mimic\cdn\android"
+    scp -r "$androidDir\*" "${SshHost}:C:/mimic/cdn/android/"
+    if ($LASTEXITCODE) { throw 'scp android failed' }
+    $androidZip = Join-Path $root "release\MimicAndroid_Setup_v$((Get-Content -Raw (Join-Path $androidDir 'version.json') | ConvertFrom-Json).app).zip"
+    if (Test-Path $androidZip) {
+        scp $androidZip "${SshHost}:C:/mimic/cdn/android/"
+    }
+}
+
 Write-Step 'verify CDN HTTP'
 $base = 'http://47.107.43.5/mimic'
 if ($doClient) {
@@ -83,4 +105,11 @@ if ($doClient) {
 }
 if ($doServer) {
     Write-Host "  Server: $base/server/"
+}
+if ($doAndroid) {
+    try {
+        $aj = Invoke-RestMethod -Uri "$base/android/version.json" -Method Get -TimeoutSec 30
+        Write-Ok "CDN android version.json app=$($aj.app)"
+    } catch { Write-Warn2 "android version.json check: $_" }
+    Write-Host "  Android: $base/android/"
 }

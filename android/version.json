@@ -1,0 +1,10 @@
+{
+  "schema": "1",
+  "app": "0.1.0",
+  "platform": "android",
+  "channel": "stable",
+  "full_update": true,
+  "download_base": "http://47.107.43.5/mimic/android/",
+  "apk": "MimicClient_Android_v0.1.0.apk",
+  "message": "Android skeleton — crash log, signaling login, in-app APK update"
+}

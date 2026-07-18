@@ -1,11 +1,11 @@
-# Release.ps1 — build → CDN shelf → thin Setups → verify → git (source only) → Gitee.
+# Release.ps1 ??build ??CDN shelf ??thin Setups ??verify ??git (source only) ??Gitee.
 #
 #   powershell -File scripts\Release.ps1
 #   powershell -File scripts\Release.ps1 -DryRun
 #   powershell -File scripts\Release.ps1 -ClientOnly
 #   powershell -File scripts\Release.ps1 -ServerOnly
 #
-# Binaries live on http://47.107.43.5/mimic/ — NOT in git.
+# Binaries live on http://47.107.43.5/mimic/ ??NOT in git.
 
 [CmdletBinding()]
 param(
@@ -33,7 +33,7 @@ $serverSetup = Join-Path $root "release\MimicServer_Setup_v$serverVer.exe"
 
 if ($doClient) {
     Write-Step 'frontend (npm run build)'
-    Push-Location (Join-Path $root 'mimic_web')
+    Push-Location (Join-Path $root 'shared\web')
     try { npm run build; if ($LASTEXITCODE) { throw 'npm build failed' } } finally { Pop-Location }
     Write-Ok 'dist'
 
@@ -44,7 +44,7 @@ if ($doClient) {
     if (Test-Path $rel) { Remove-Item -Recurse -Force $rel }
     New-Item -ItemType Directory -Force -Path $rel | Out-Null
     foreach ($sub in 'bin', 'frontend', 'config') {
-        Copy-Item (Join-Path $root "mimic_client\build\$sub") $rel -Recurse -Force
+        Copy-Item (Join-Path $root "pc\client\build\$sub") $rel -Recurse -Force
     }
     Write-Ok 'release\MimicClient'
 
@@ -75,13 +75,23 @@ if ($doServer) {
     & "$PSScriptRoot\Pack-MimicServer.ps1" -Version $serverVer
 }
 
+$androidVer = '0.1.0'
+$ajPath = Join-Path $root 'android\version.json'
+if (Test-Path $ajPath) {
+    $androidVer = [string](Get-Content -Raw $ajPath | ConvertFrom-Json).app
+}
+if ($doClient) {
+    Write-Step 'pack MimicAndroid'
+    & "$PSScriptRoot\Pack-MimicAndroid.ps1" -Version $androidVer
+}
+
 Write-Step 'publish CDN'
 if ($doClient -and $doServer) {
     & "$PSScriptRoot\Publish-Cdn.ps1" -Version $ver
 } elseif ($ClientOnly) {
     & "$PSScriptRoot\Publish-Cdn.ps1" -Version $ver -ClientOnly
 } else {
-    & "$PSScriptRoot\Publish-Cdn.ps1" -Version $serverVer -ServerOnly
+    & "$PSScriptRoot\Publish-Cdn.ps1" -Version $serverVer -ServerOnly -SkipAndroid
 }
 Write-Ok 'CDN live'
 
@@ -106,9 +116,9 @@ if ($doClient -and -not $SkipVerify) {
     & powershell.exe @vArgs
     if ($LASTEXITCODE -ne 0) { throw 'isolated verification failed - nothing pushed, nothing published' }
 } elseif (-not $doClient) {
-    Write-Warn2 'ServerOnly — isolated Verify.ps1 skipped'
+    Write-Warn2 'ServerOnly ??isolated Verify.ps1 skipped'
 } else {
-    Write-Warn2 'SkipVerify — isolated Verify.ps1 skipped'
+    Write-Warn2 'SkipVerify ??isolated Verify.ps1 skipped'
 }
 
 if ($DryRun) {
@@ -119,7 +129,7 @@ if ($DryRun) {
     return
 }
 
-# Git — source only (release/ is gitignored)
+# Git ??source only (release/ is gitignored)
 Write-Step 'git commit + tag + push (source only)'
 $tagName = if ($doClient) { "v$ver" } else { "server-v$serverVer" }
 $eap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
@@ -133,7 +143,11 @@ try {
     } else {
         "release: server v$serverVer (CDN shelf; thin setup)"
     }
-    git commit -m $msg 2>&1 | Write-Host
+    $commitOut = git commit -m $msg 2>&1 | Out-String
+    Write-Host $commitOut
+    if ($LASTEXITCODE -ne 0 -and $commitOut -notmatch 'nothing to commit') {
+        throw "git commit failed (exit $LASTEXITCODE)"
+    }
     if ($doClient) {
         git tag -f "v$ver" 2>&1 | Write-Host
     }
@@ -146,12 +160,12 @@ try {
 
     git push github main 2>&1 | Write-Host
     if ($LASTEXITCODE) {
-        Write-Warn2 "git push github main failed (exit $LASTEXITCODE) — Gitee release continues"
+        Write-Warn2 "git push github main failed (exit $LASTEXITCODE) ??Gitee release continues"
     } else { Write-Ok 'pushed github main' }
     if ($doClient) {
         git push -f github "refs/tags/v${ver}" 2>&1 | Write-Host
         if ($LASTEXITCODE) {
-            Write-Warn2 "git push github tag failed (exit $LASTEXITCODE) — Gitee release continues"
+            Write-Warn2 "git push github tag failed (exit $LASTEXITCODE) ??Gitee release continues"
         } else { Write-Ok "pushed github v$ver" }
     }
 }
@@ -182,8 +196,11 @@ if ($doClient) {
 Write-Host "`n==================== release DONE ====================" -ForegroundColor Green
 Write-Host "  CDN:    $cdnBase/"
 if ($doClient) {
-    Write-Host "  Client: https://gitee.com/Andyqwe44/mimic/releases/download/v$ver/MimicClient_Setup_v$ver.exe"
+    Write-Host "  Client:  https://gitee.com/Andyqwe44/mimic/releases/download/v$ver/MimicClient_Setup_v$ver.exe"
 }
 if ($doServer) {
-    Write-Host "  Server: https://gitee.com/Andyqwe44/mimic/releases/download/v$serverVer/MimicServer_Setup_v$serverVer.exe"
+    Write-Host "  Server:  https://gitee.com/Andyqwe44/mimic/releases/download/v$ver/MimicServer_Setup_v$serverVer.exe"
+}
+if ($doClient) {
+    Write-Host "  Android: https://gitee.com/Andyqwe44/mimic/releases/download/v$ver/MimicAndroid_Setup_v$androidVer.zip"
 }

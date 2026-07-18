@@ -1,5 +1,5 @@
 {
-  "name": "mimic_web",
+  "name": "mimic-shared-web",
   "private": true,
   "version": "0.0.0",
   "type": "module",

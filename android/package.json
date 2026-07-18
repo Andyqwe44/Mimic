@@ -1,0 +1,24 @@
+{
+  "name": "mimic-android",
+  "private": true,
+  "version": "0.1.0",
+  "mimicReleaseNote": "skeleton zip until first signed APK",
+  "description": "Mimic Android shell — Capacitor WebView hosting shared/web",
+  "scripts": {
+    "build:web": "npm --prefix ../shared/web run build",
+    "sync": "npm run build:web && npx cap sync android",
+    "open": "npx cap open android",
+    "update:check": "node ./tools/print-update-url.mjs"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.4.2",
+    "@capacitor/app": "^7.0.2",
+    "@capacitor/core": "^7.4.2",
+    "@capacitor/filesystem": "^7.1.4",
+    "@capacitor/preferences": "^7.0.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.4.2",
+    "typescript": "~5.8.3"
+  }
+}

@@ -1,4 +1,4 @@
-# Pack MimicServer for Gitee Release (signaling only â€” no media).
+# Pack MimicServer for Gitee Release (signaling only â€?no media).
 param(
     [string]$Version = ''
 )
@@ -7,11 +7,11 @@ $Root = Split-Path $PSScriptRoot -Parent
 . "$PSScriptRoot\lib\Common.ps1"
 if (-not $Version) { $Version = Get-ServerVersion }
 
-$src = Join-Path $Root 'mimic_server'
+$src = Join-Path $Root 'server'
 $outRoot = Join-Path $Root "release\MimicServer"
 $zip = Join-Path $Root "release\MimicServer_v$Version.zip"
 
-if (-not (Test-Path (Join-Path $src 'server.js'))) { throw 'mimic_server/server.js missing' }
+if (-not (Test-Path (Join-Path $src 'server.js'))) { throw 'server/server.js missing' }
 
 Push-Location $src
 try {
@@ -39,7 +39,7 @@ node server.js --host 0.0.0.0 --port 8443
 ``````
 
 Put nginx/caddy TLS in front if needed. Clients default to Bootstrap
-http://47.107.43.5:8443 â€” every MimicServer auto-joins the mesh on start.
+http://47.107.43.5:8443 â€?every MimicServer auto-joins the mesh on start.
 
 Default account after first run: demo / demo (change in production).
 

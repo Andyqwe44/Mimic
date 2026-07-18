@@ -1,7 +1,7 @@
 # CLAUDE.md — Mimic (visual game AI / peer control)
 
-> **2026-07 架构：** MimicClient (`mimic_client`+`mimic_web`) ↔ MimicServer (`mimic_server`, Bootstrap mesh)。
-> 发版与目录以根目录 [README.md](README.md) 为准。下文部分路径名可能仍写旧称，以 README / `.cursor/rules` 为准。
+> **2026-07 目录重整：** `pc/`（Windows）· `server/` · `android/`（骨架）· `shared/web`+`shared/protocol`。
+> UI 共用 WebView；Android = Capacitor（非 Electron）。发版与路径以 [README.md](README.md) 为准。
 
 ## ⛔ 思想钢印 — 十条铁律
 
@@ -13,7 +13,7 @@
 
 **项目已配备统一日志系统。严禁使用任何裸打印函数。**
 
-以下符号**不得出现**于 `logger/logger.cpp` 以外的任何 C++ 文件中：
+以下符号**不得出现**于 `pc/logger/logger.cpp` 以外的任何 C++ 文件中：
 
 ```
 printf          fprintf         fprintf(stdout     fprintf(stderr
@@ -22,11 +22,11 @@ puts            putchar         fputs              fwrite(..., stdout
 WriteConsole    OutputDebugString
 ```
 
-**唯一例外**：`logger/logger.cpp` 自身。
+**唯一例外**：`pc/logger/logger.cpp` 自身。
 
 **唯一合法方式**：
 ```cpp
-#include "logger/logger.h"
+#include "logger/logger.h"  // from pc/logger
 LOG_ERROR("tag", "format", args...);  // 错误 — operation failed, must fix
 LOG_WARN("tag", "format", args...);   // 警告 — fallback used, retryable
 LOG("tag", "format", args...);        // INFO — status change, user action
@@ -96,7 +96,7 @@ CLAUDE.md 只放核心规则、架构概览、构建命令。以下内容**必�
 
 ### 铁律 8: 版本号单一真相源 — `version.h`
 
-**只改 Client 版本文件：`mimic_client/src/version.h`。** Server 用 `mimic_server/package.json`。其余 Client 消费者自动继承：
+**PC Client：`pc/client/src/version.h`。** Server：`server/package.json`。Android：`android/version.json`。其余 PC 消费者自动继承：
 
 | 消费者 | 继承方式 |
 |--------|----------|
@@ -145,49 +145,40 @@ C++ for real-time capture + WebView2 + peer; Node MimicServer for signaling (Boo
 
 ## Architecture
 
-``
-┌─ MimicClient (mimic_client + mimic_web) ─────────────────────────┐
-│  WebView2 · WGC → HW H.264 · peer invite · LAN media             │
-│  Default signaling → Bootstrap http://47.107.43.5:8443           │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │ login / WS (not media)
-                               ▼
-┌─ MimicServer (mimic_server, symmetric) ──────────────────────────┐
-│  Same package everywhere · auto-join Bootstrap · /api/cluster    │
-└─────────────────────────────────────────────────────────────────┘
-``
+详图与 roadmap → 根目录 [README.md](README.md)。
+
+```
+pc/client + shared/web  →  Windows WebView2
+android   + shared/web  →  Capacitor WebView
+server/                 →  Bootstrap signaling
+```
 
 | Language | Role |
 |----------|------|
-| C++ | MimicClient host: Win32, WebView2, capture, peer, updater |
-| TypeScript/React | UI (`mimic_web`) |
-| Node | MimicServer signaling + Bootstrap registry |
-
-详图与 roadmap → 根目录 [README.md](README.md)。
+| C++ | PC host: Win32, WebView2, capture, peer, updater (`pc/`) |
+| TypeScript/React | Shared UI (`shared/web`) |
+| Node | MimicServer (`server/`) |
+| Kotlin | Android MimicHost plugin (`android/plugins`) |
 
 ## Project Structure
 
-``
-mimic/
-├── .cursor/rules/     # project-core / cpp-backend / monitor-web / build-release
-├── logger/ capture/ input/ updater/
-├── mimic_client/      # C++ WebView2 host → mimic_client.exe
-├── mimic_web/         # React UI (npm run build → frontend/)
-├── mimic_server/      # Node signaling + Bootstrap mesh
-├── scripts/           # Build.ps1 / Release.ps1 (-ClientOnly/-ServerOnly) / CDN
-├── installer/         # thin MimicClient_Setup + MimicServer_Setup
-└── protocol/
-``
+```
+pc/ client capture input logger updater …
+server/
+android/
+shared/web  shared/protocol
+scripts/ installer/ docs/
+```
 
 ## Build Commands
 
 全 PowerShell，**仅 Prod**（无 Vite HMR / `-Dev`；测试用装机包或应用内更新）。
 
-``powershell
-cd mimic_web; npm run build
-powershell -File scripts\Build.ps1                       # all
+```powershell
+cd shared\web; npm run build
+powershell -File scripts\Build.ps1
 powershell -File scripts\Build.ps1 -Module mimic_client
-``
+```
 
 | | Value |
 |--|-------|
@@ -200,20 +191,20 @@ Exit code `2` = already running.
 
 ## Release Workflow
 
-``powershell
-# Client: bump mimic_client/src/version.h
-# Server: bump mimic_server/package.json
+```powershell
+# PC: bump pc/client/src/version.h
+# Server: bump server/package.json
 powershell -File scripts\Release.ps1
 powershell -File scripts\Release.ps1 -ClientOnly
 powershell -File scripts\Release.ps1 -ServerOnly
 powershell -File scripts\Release.ps1 -DryRun
-``
+```
 
-货架 CDN：`http://47.107.43.5/mimic/{client,server}/`。Gitee 只挂 thin Setup。
+货架 CDN：`http://47.107.43.5/mimic/{client,server,android}/`。Gitee 只挂 thin Setup。
 
 **仓库迁移（2026-07，v0.3.31）**：发布仓 `gitee.com/Andyqwe44/mimic`；旧 `tictactoe` 仓冻结于 v0.3.31 跳板，勿删。
 
-### 用户一键更新### 用户一键更新
+### 用户一键更新
 
 ```
 Settings → Check Update

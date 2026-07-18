@@ -19,17 +19,22 @@ test_target/build/
 test_target/**/WebView2UserData/
 
 # Generated code
-monitor_app/src/embedded_assets.h
+pc/client/src/embedded_assets.h
 
-# Vite / frontend dist (staged by Build.ps1 into monitor_app/build*)
-monitor_web/dist/
-controller_web/dist/
+# Vite / frontend dist (staged by Build.ps1 into pc/client/build)
+shared/web/dist/
+pc/legacy/controller_web/dist/
+
+# Capacitor-generated Android Studio project (plugin sources under android/plugins stay)
+android/android/
+android/.capacitor/
+android/node_modules/
 
 # === Dependencies ===
 **/node_modules/
 
 # Signaling server runtime
-signaling_server/data/
+server/data/
 mimic_server/data/
 
 # CDN helper scratch on local (remote nginx conf backups stay on server)
@@ -64,7 +69,7 @@ log/
 ai/logs/
 
 # === Secrets ===
-# Update-signing private key (public key lives in monitor_app/src/update_pubkey.h)
+# Update-signing private key (public key lives in pc/client/src/update_pubkey.h)
 scripts/.signing/
 
 # === Temp / Scratch ===

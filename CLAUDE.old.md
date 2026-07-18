@@ -1,5 +1,13 @@
 # Archive notes
 
+## 2026-07-18 — Deep layout: pc / server / android / shared
+
+- Moved Windows stack under `pc/` (`client`, capture, input, logger, updater, …).
+- `mimic_web` → `shared/web`; `protocol` → `shared/protocol`; `mimic_server` → `server/`.
+- Added `android/` Capacitor skeleton (MimicHost plugin, crash_log, probe, APK CDN stub).
+- Electron rejected for mobile; shared WebView UI via `hostCall` bridge abstraction.
+- Bidirectional phone↔PC control deferred (README roadmap).
+
 ## 2026-07-18 — Bootstrap mesh + Mimic rename + dual release (v0.3.36 / server 0.2.0)
 
 - Renamed `monitor_app`/`monitor_web`/`signaling_server` → `mimic_client`/`mimic_web`/`mimic_server`; exe `mimic_client.exe`; AppData `MimicClient`.

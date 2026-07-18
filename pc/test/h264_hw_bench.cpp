@@ -19,7 +19,7 @@
 
 #include "../logger/logger.h"
 #include "../capture/include/capture_wgc_ffi.h"
-#include "../mimic_client/src/h264_encoder.h"
+#include "../client/src/h264_encoder.h"
 #include <atomic>
 #include <chrono>
 #include <cstdio>

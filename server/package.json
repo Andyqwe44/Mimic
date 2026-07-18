@@ -1,6 +1,6 @@
 {
   "name": "mimic-signaling",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "Mimic signaling server — account, devices, session mutex (no media relay)",
   "main": "server.js",

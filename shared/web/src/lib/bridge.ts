@@ -1,7 +1,7 @@
-// ═══ WebView2 WebMessage bridge — replaces Tauri invoke() ═══
-//   JS hostCall() → postMessage(JSON) → C++ HandleWebMessage → PostWebMessageAsJson
-//   → JS 'message' event → resolve by msg.id
+// ═══ Host bridge — WebView2 (Windows) or Capacitor MimicHost (Android) ═══
+//   JS hostCall() → native → {id, result} → resolve
 import type { LogEntry, HistoryFile } from './types'
+import { getHostPlatform } from './platform'
 
 // ── Pending call tracker ──
 type PendingCall = {
@@ -13,10 +13,27 @@ type PendingCall = {
 let _callId = 0
 const _pending = new Map<number, PendingCall>()   // id → {resolve, reject, timer}
 
-// ── hostCall — async C++ command invocation ──
+function unwrapResult(raw: any): any {
+  return raw && typeof raw === 'object' && 'result' in raw ? raw.result : raw
+}
+
+async function hostCallAndroid(cmd: string, args?: Record<string, any>): Promise<any> {
+  const plugin = window.Capacitor?.Plugins?.MimicHost
+  if (!plugin?.call) {
+    throw new Error('MimicHost plugin missing — sync Capacitor android project')
+  }
+  const raw = await plugin.call({ cmd, args: args || {} })
+  return unwrapResult(raw)
+}
+
+// ── hostCall — async native command invocation ──
 // Auto-unwraps {id, result} envelope → caller receives raw result.
 // 30s timeout rejects with descriptive error.
 export function hostCall(cmd: string, args?: Record<string, any>): Promise<any> {
+  if (getHostPlatform() === 'android') {
+    return hostCallAndroid(cmd, args)
+  }
+
   return new Promise((resolve, reject) => {
     const id = ++_callId
     const timer = setTimeout(() => {
@@ -24,9 +41,7 @@ export function hostCall(cmd: string, args?: Record<string, any>): Promise<any> 
       reject(new Error(`hostCall timeout: ${cmd}`))
     }, 30000)
     _pending.set(id, {
-      resolve: (raw: any) => {
-        resolve(raw && typeof raw === 'object' && 'result' in raw ? raw.result : raw)
-      },
+      resolve: (raw: any) => resolve(unwrapResult(raw)),
       reject,
       timer,
     })
@@ -186,6 +201,24 @@ export const logMgr = new LogManager()
 // ── Convenience: add UI-side log entry ──
 export function addLog(msg: string) {
   logMgr.add(msg)
+}
+
+/** Wire window crash handlers → host `crash_log` (Windows + Android). */
+export function installCrashHandlers() {
+  if ((installCrashHandlers as any)._done) return
+  ;(installCrashHandlers as any)._done = true
+  const report = (kind: string, message: string, stack?: string) => {
+    const detail = stack ? `${message}\n${stack}` : message
+    hostCall('crash_log', { kind, message: detail.slice(0, 8000) }).catch(() => {})
+    addLog(`[crash] ${kind}: ${message}`)
+  }
+  window.addEventListener('error', (ev) => {
+    report('error', ev.message || String(ev.error), ev.error?.stack)
+  })
+  window.addEventListener('unhandledrejection', (ev) => {
+    const r = ev.reason
+    report('unhandledrejection', r?.message || String(r), r?.stack)
+  })
 }
 
 // ═══ Self-test report bus ═══

@@ -1,39 +1,48 @@
 ---
-description: Mimic — 铁律、愿景、目录与沟通约定（每会话加载）
+description: Mimic 项目核心铁律与目录（PC / Server / Android）
 alwaysApply: true
 ---
 
 # Project Core
 
-视觉游戏 AI / 远程控制宿主：**pixels in, actions out**。C++ 做实时（capture / WebView2 / peer），TS/React 做 UI，MimicServer 做信令。
+视觉游戏 AI / 远程控制宿主：**pixels in, actions out**。
+
+- **PC (Windows)**：C++ 实时（capture / WebView2 / TCP / log）
+- **Shared UI**：TS/React（`shared/web`）— PC WebView2 与 Android Capacitor 共用
+- **Server**：Node 信令 Bootstrap mesh（`server/`）
+- **Android**：Capacitor WebView 骨架（`android/`）— 崩溃日志 / 连服 / APK 更新
 
 ## 铁律（必守）
 
 1. **中文思考回答**；代码、commit、PR 描述用英文。
-2. **C++ 日志只用 `LOG*()`** — 禁止 `printf`/`std::cout`/`OutputDebugString` 等（例外：`logger/logger.cpp`）。
+2. **C++ 日志只用 `LOG*()`** — 禁止 `printf`/`std::cout`/`OutputDebugString` 等（例外：`pc/logger/logger.cpp`）。
 3. **存档** = 更新 README + 更新 CLAUDE.md/本规则相关摘要 + commit（用户明确要求时）。
 4. **禁止原生 HTML `title`** — 只用 `<Tooltip text="...">`。
-5. **禁止欺骗** — C++ 不静默改参数/回退；失败返回 `{"ok":false,"error":"..."}`；前端画的 = 实际发的。
+5. **禁止欺骗** — C++/原生不静默改参数；失败返回 `{"ok":false,"error":"..."}`；前端画的 = 实际发的。
 6. **前端交互优化** — 先状态转换表 → 等用户确认 → 再改码。
 7. **CLAUDE.md 精简** — 详细历史进 `CLAUDE.old.md`；Cursor 细则在 `.cursor/rules/`。
-8. **版本真相源** — Client 只改 `mimic_client/src/version.h`；Server 改 `mimic_server/package.json`（lib DLL 用 Build.ps1 `$LibVer`，勿绑回 APP_VERSION）。
+8. **版本真相源** — PC 只改 `pc/client/src/version.h`；Server 改 `server/package.json`；Android 改 `android/package.json` + `android/version.json`（lib DLL 用 Build.ps1 `$LibVer`）。
 9. **跨进程参数不加引号包路径**；被调进程必须剥两端引号。
 10. **禁止编造工具返回值** — 未调用就说未调用；关键结论先 `git` 核实。
 
 ## 目录速览
 
 ```
-logger/  capture/  input/  mimic_client/  mimic_web/  mimic_server/  scripts/  protocol/  updater/
+pc/          # Windows：client + capture/input/logger/updater
+server/      # MimicServer
+android/     # Capacitor 骨架
+shared/web/  # 共用 React UI
+shared/protocol/
+scripts/ installer/ docs/
 ```
 
 | 层 | 职责 |
 |----|------|
-| `mimic_client` | Win32 + WebView2 host + peer + capture |
-| `mimic_web` | React UI（`hostCall` bridge） |
-| `mimic_server` | 对称信令 + Bootstrap 组网 |
-| `scripts/` | 全 PowerShell 构建/发布（无 cmd/bash） |
+| `pc/client` | Win32 + WebView2 host + peer + capture |
+| `shared/web` | React UI（`hostCall` → WebView2 或 Capacitor MimicHost） |
+| `server` | 对称信令 + Bootstrap 组网 |
+| `android` | 手机端壳；先骨架，后双向远控 |
 
-测试以 **生产安装包 / 应用内更新** 为准（无 Vite HMR Dev 双轨）。
+详细构建/发版 → `build-release`；C++ → `cpp-backend`；前端 → `monitor-web`（globs 指向 `shared/web`）。
 
-详细构建/发版 → `build-release`；C++ → `cpp-backend`；前端 → `monitor-web`（规则文件名保留，globs 已指向 `mimic_web`）。
-权威长文仍以根目录 `CLAUDE.md` 为准；变更详史 → `CLAUDE.old.md`。
+测试以发行版 / 装机更新为准（无 Dev/HMR 轨道）。

@@ -1,79 +1,25 @@
 ---
-description: mimic_web 前端 — Tooltip、design tokens、i18n、className 规则
-globs: mimic_web/**/*.ts,mimic_web/**/*.tsx,mimic_web/**/*.css
+description: shared/web 前端 — Tooltip、design tokens、i18n、跨端 bridge
+globs: shared/web/**/*.ts,shared/web/**/*.tsx,shared/web/**/*.css
 alwaysApply: false
 ---
 
-# mimic_web
+# shared/web
 
-## Tooltip
-
-禁止原生 `title=`。一律：
-
-```tsx
-<Tooltip text={t('some.key')}>
-  <button>...</button>
-</Tooltip>
-```
-
-## i18n
-
-- 词典：`locales/{en,zh-CN,zh-TW}.json`；入口 `lib/i18n.ts`；持久化 AppData `settings.json` 的 `locale`（经 **`set_settings` 整包写入**，非 localStorage；勿再用并发 `set_setting` 刷盘）。
-- TopBar：语言单格下拉（En/简/繁）；权限单格图标切换（User/Shield）；主题图标。与 Settings 同数据源。
-- Boot：`lib/bootSettings.ts` + C++ `__BOOT_SETTINGS__` 注入，首帧无默认蓝闪烁。
-- 插值：**`{var}`**（`i18n.ts` 已设 `prefix:'{'` / `suffix:'}'`）。勿写 `{{var}}`，否则会原样显示花括号。
-- `constants.ts` 里 `STATE_LABEL` / `CAPTURE_MODES.label|desc` / 鼠标键盘 `name` 等存的是 **key**，渲染必须 `t(...)`。
-- 专有名词/缩写（WGC、DXGI、TCP、PostMessage、SendInput、Game Agent Monitor…）可留英文；其余用户可见文案走目标语言。
-- 桌面目标：C++ 仍返回 `" Entire Desktop"`；UI 用 `displayTargetTitle()`（`lib/windowTitle.ts`）本地化显示。
-
-## DevMode overlays（企业级 · 铁律 5）
-
-仿 Android Developer Options：**状态栏只读 SSOT，Demo 只写 overlay**。
-
-```
-displayX = demoX ?? realX
-```
-
-| 层 | 内容 | 关 DevMode |
-|----|------|------------|
-| Overlay | `demoAgentOverride` / `demoUpdateInfo` / `demoSelfTest` | 全部清 null |
-| Capabilities | frame dump、Test Target、真自检 | 关掉 / 中止 |
-| SSOT | `agentConnectedReal` ← `get_agent_status`；真 `updateInfo` | **重检**，不盲回滚 |
-
-- DevTools「界面预览」**禁止** `setAgentConnectedReal` / 真 `setUpdateInfo`；只 `setDemo*`。
-- 假更新弹窗纯前端画，按钮不调 `download_update` / `check_update`。
-- 关 Dev：`leaveDevModeCleanup` = 清 overlay → 关能力 → `refreshAgentStatus()`。
-
-```tsx
-// ✅
-{t(STATE_LABEL[winState] || winState)}
-{t(m.label)}  /  text={t(m.desc)}
-{t('settings.version', { version: appVersion })}
-// ❌ 直接渲染 key / 漏传插值参数
-{STATE_LABEL[winState]}
-{t('settings.version')}
-```
-
-参考：`MonitorView` / `SettingsView` 的 `t()` 用法。
-
-## 设计令牌 — `src/lib/design.ts`
-
-可复用尺寸/间距/字号/圆角必须来自 `design.ts`（`H` `GAP` `TEXT` `RADIUS` `MODAL_W` `BTN_SIZE_CLASS`…）。禁止在新组件里散落 magic Tailwind。
-
-**ActionBtn 自动宽度**（`btnAutoSize`）：按**视觉单位**计宽——拉丁字母=1，CJK/全角≈2。阈值：≤3→xs，≤6→sm，≤7→md，≤14→lg，否则 xl。按钮加 `whitespace-nowrap`，避免中文四字标签（如「检查更新」）被挤成两行。
-
-## className 禁止静默覆盖
-
-外部 `className` **不得**覆盖组件内部的 `h-*`/`w-*`/`px-*`/`text-*`/`bg-*` 等原子类（Tailwind 声明顺序不确定）。
-
-- 尺寸 → 组件 `size` prop（如 `ActionBtn`）
-- 颜色 → `variant` prop
-- `className` 仅布局：`flex-1` `shrink-0` `self-center`
+PC WebView2 与 Android Capacitor **共用**同一套 React UI。
 
 ## Bridge
 
-`hostCall` 已 unwrap `{id, result}`；SharedBuffer 用 `e.additionalData`（对象，非 `getAdditionalData()`）。
+- Windows：`chrome.webview.postMessage`（`bridge.ts`）
+- Android：`Capacitor.Plugins.MimicHost.call`（同 `hostCall` API）
+- 平台探测：`lib/platform.ts`
 
-**薄客户端 (`lib/features.ts` `THIN_CLIENT`)**：隐藏 Mapping/IME/DevTools/Model/鼠标键盘模式与本地预览画布；右侧 `StreamGatesPanel`（发送画面 / 接受控制）→ `set_stream_gate` / `set_control_gate`。捕获/输入设置在 `controller_web`（由独立 `controller_server` 提供）；agent 出站 `connect_server`。
+## UI 规则
 
-**预览映射（非 thin 调试）**：`mappingEnabled && previewing` 时 `set_mapping_controller {on:1}`；生产/thin 不依赖。
+- **禁止原生 HTML `title`** — 只用 `<Tooltip text="...">`
+- i18n：`locales/`；插值 `{var}`
+- DevMode overlay / SSOT：关 Dev = 清 overlay；假更新弹窗不调下载 API
+
+## Android skeleton
+
+暂不实现捕获/输入；不支持的 `hostCall` 由 MimicHost 返回明确 error。崩溃 / probe / APK 更新优先。

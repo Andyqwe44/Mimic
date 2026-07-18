@@ -481,7 +481,7 @@ static void agent_push_status();
 static void on_server_text(const std::string& json);
 
 // ── TCP server (port 9999): H.264 NAL out + CONTROL_MSG JSON in ──
-#include "../../protocol/protocol.h"
+#include "../../../shared/protocol/protocol.h"
 
 struct TcpClient {
     SOCKET sock = INVALID_SOCKET;
@@ -2966,6 +2966,13 @@ std::string dispatch_command(const std::string& json) {
     else if (cmd == "clear_log") result = cmd_clear_log();
     else if (cmd == "log_ui_event") {
         result = cmd_log_ui_event(json_get_str(args, "event"), json_get_str(args, "detail"));
+    }
+    else if (cmd == "crash_log") {
+        // Shared UI crash handlers (Windows + Android) — never silent.
+        LOG_ERROR("crash", "%s | %s",
+                  json_get_str(args, "kind").c_str(),
+                  json_get_str(args, "message").c_str());
+        result = R"({"ok":true})";
     }
     else if (cmd == "read_live_log") result = cmd_read_live_log();
     else if (cmd == "benchmark_methods") {

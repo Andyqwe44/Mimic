@@ -1,4 +1,4 @@
-# Common.ps1 â€” shared helpers for the PowerShell build/release pipeline.
+# Common.ps1 â€?shared helpers for the PowerShell build/release pipeline.
 #
 # Dot-source from Build.ps1 / Verify.ps1 / Publish.ps1 / Release.ps1:
 #     . "$PSScriptRoot\lib\Common.ps1"
@@ -22,22 +22,22 @@ function Write-Warn2{ param([string]$Message) Write-Host "    WARN: $Message" -F
 
 # Single source of truth (é“å¾‹ 8): parse APP_VERSION from version.h.
 function Get-AppVersion {
-    $vh = Join-Path (Get-RepoRoot) 'mimic_client\src\version.h'
+    $vh = Join-Path (Get-RepoRoot) 'pc\client\src\version.h'
     $line = Select-String -Path $vh -Pattern '#define\s+APP_VERSION\s+"([^"]+)"' -List
     if (-not $line) { throw "APP_VERSION not found in $vh" }
     $line.Matches[0].Groups[1].Value
 }
 
-# MimicServer version â€” independent channel (mimic_server/package.json).
+# MimicServer version â€?independent channel (server/package.json).
 function Get-ServerVersion {
-    $pj = Join-Path (Get-RepoRoot) 'mimic_server\package.json'
-    if (-not (Test-Path $pj)) { throw "mimic_server/package.json not found: $pj" }
+    $pj = Join-Path (Get-RepoRoot) 'server\package.json'
+    if (-not (Test-Path $pj)) { throw "server/package.json not found: $pj" }
     $j = Get-Content -Raw $pj | ConvertFrom-Json
     if (-not $j.version) { throw "version missing in $pj" }
     [string]$j.version
 }
 
-# Enter the MSVC x64 build environment in THIS PowerShell session â€” replaces
+# Enter the MSVC x64 build environment in THIS PowerShell session â€?replaces
 # `call vcvars64.bat`. Idempotent: no-op if cl.exe is already on PATH. Uses the
 # VS-provided DevShell module so we never shell out to a .bat.
 # Override the VS location with $env:GAM_VS_PATH if it differs.
@@ -57,12 +57,12 @@ function Enter-BuildShell {
     }
 }
 
-# Generate a module's version resource header â€” replaces the cmd
+# Generate a module's version resource header â€?replaces the cmd
 # `echo #define ... >> build\_ver_module.h` blocks. rc.exe includes this to stamp
 # VERSIONINFO without quoting hell. $FileType: VFT_DLL for libs/DLLs, VFT_APP for exes.
 # $Version here is the MODULE's own version (see $LibVer in Build.ps1), decoupled
 # from APP_VERSION so a bump of the app doesn't churn every DLL's bytes. No
-# APP_VERSION #define is emitted â€” DLL code must not embed the app version.
+# APP_VERSION #define is emitted â€?DLL code must not embed the app version.
 function New-VerModuleHeader {
     param(
         [Parameter(Mandatory)][string]$OutPath,

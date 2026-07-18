@@ -1,6 +1,6 @@
 ---
-description: 构建、版本号、发布与增量更新约定
-globs: scripts/**/*.ps1,installer/**/*.iss,release/**/*.json,mimic_client/src/version.h,mimic_server/package.json,docs/auto-update.md
+description: 构建与发版（PC / Server / Android CDN）
+globs: scripts/**/*.ps1,installer/**/*.iss,release/**/*.json,pc/client/src/version.h,server/package.json,android/version.json,docs/auto-update.md
 alwaysApply: false
 ---
 
@@ -10,32 +10,30 @@ alwaysApply: false
 
 | 产品 | 真相源 |
 |------|--------|
-| MimicClient | `mimic_client/src/version.h` → `APP_VERSION` |
-| MimicServer | `mimic_server/package.json` → `version`（独立通道） |
+| MimicClient (PC) | `pc/client/src/version.h` → `APP_VERSION` |
+| MimicServer | `server/package.json` → `version` |
+| Mimic Android | `android/package.json` + `android/version.json` |
 
-原生 lib/DLL（logger/capture/input）用 `Build.ps1` 的 `$LibVer` + `/Brepro`，**不要**绑回 `APP_VERSION`。
-
-## 构建（全 PowerShell，仅 Prod）
+## 构建
 
 ```powershell
-powershell -File scripts\Build.ps1                         # 全部
+cd shared\web; npm run build
+powershell -File scripts\Build.ps1
 powershell -File scripts\Build.ps1 -Module mimic_client
-cd mimic_web; npm run build                                # 再编宿主嵌入 frontend/
 ```
 
-输出：`mimic_client/build/{bin,frontend,config}`（exe = `mimic_client.exe`）。
-
-单实例：exit code `2` = 已在运行。Mutex `Global\MimicClient_8A3F2D`。AppData `%LOCALAPPDATA%\MimicClient\`。
+输出：`pc/client/build/{bin,frontend,config}`（exe = `mimic_client.exe`）。
 
 ## 一键发布
 
 ```powershell
-# bump version.h 和/或 mimic_server/package.json 后:
-powershell -File scripts\Release.ps1              # 双包
+# bump version.h 和/或 server/package.json 后:
+powershell -File scripts\Release.ps1
 powershell -File scripts\Release.ps1 -ClientOnly
 powershell -File scripts\Release.ps1 -ServerOnly
 powershell -File scripts\Release.ps1 -DryRun
 ```
 
-货架在 CDN：`http://47.107.43.5/mimic/{client,server}/`（不在 git）。  
-详踩坑：`docs/auto-update.md`。
+Android APK 通道：上传到 CDN `http://47.107.43.5/mimic/android/`（`version.json` + apk）；详见 `android/README.md`。
+
+CDN client/server：`scripts/Publish-Cdn.ps1`。

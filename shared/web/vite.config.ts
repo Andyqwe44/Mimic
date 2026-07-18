@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 
 // Single source of truth (铁律 8): parse APP_VERSION from version.h
 const versionHeader = readFileSync(
-  fileURLToPath(new URL('../mimic_client/src/version.h', import.meta.url)),
+  fileURLToPath(new URL('../../pc/client/src/version.h', import.meta.url)),
   'utf8',
 )
 const appVersion = versionHeader.match(/APP_VERSION\s+"([^"]+)"/)?.[1] ?? '0.0.0'

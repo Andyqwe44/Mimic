@@ -8,9 +8,11 @@
 param(
     [Parameter(Mandatory)][string]$Version,
     [string]$ServerVersion = '',
+    [string]$AndroidVersion = '',
     [switch]$DryRun,
     [switch]$ClientOnly,
-    [switch]$ServerOnly
+    [switch]$ServerOnly,
+    [switch]$SkipAndroid
 )
 
 if ($ClientOnly -and $ServerOnly) { throw 'Use only one of -ClientOnly / -ServerOnly' }
@@ -29,12 +31,19 @@ $repo = 'Andyqwe44/mimic'
 $api = "https://gitee.com/api/v5/repos/$repo"
 $doClient = -not $ServerOnly
 $doServer = -not $ClientOnly
+$doAndroid = -not $SkipAndroid -and $doClient  # ship Android zip on client-tagged releases
 if (-not $ServerVersion) { $ServerVersion = if ($ServerOnly) { $Version } else { Get-ServerVersion } }
+if (-not $AndroidVersion) {
+    $aj = Join-Path (Get-RepoRoot) 'android\version.json'
+    if (Test-Path $aj) { $AndroidVersion = [string](Get-Content -Raw $aj | ConvertFrom-Json).app }
+    if (-not $AndroidVersion) { $AndroidVersion = '0.1.0' }
+}
 
 $tag = if ($doClient) { "v$Version" } else { "server-v$ServerVersion" }
 $root = Get-RepoRoot
 $mimicClient = Join-Path $root "release\MimicClient_Setup_v$Version.exe"
 $mimicServer = Join-Path $root "release\MimicServer_Setup_v$ServerVersion.exe"
+$mimicAndroid = Join-Path $root "release\MimicAndroid_Setup_v$AndroidVersion.zip"
 
 $assets = @()
 if ($doClient) {
@@ -44,6 +53,13 @@ if ($doClient) {
 if ($doServer) {
     if (-not (Test-Path $mimicServer)) { throw "missing thin server setup: $mimicServer" }
     $assets += $mimicServer
+}
+if ($doAndroid) {
+    if (-not (Test-Path $mimicAndroid)) {
+        & "$PSScriptRoot\Pack-MimicAndroid.ps1" -Version $AndroidVersion
+    }
+    if (-not (Test-Path $mimicAndroid)) { throw "missing android setup zip: $mimicAndroid" }
+    $assets += $mimicAndroid
 }
 
 Write-Step "Publish $tag to Gitee$(if ($DryRun) { ' (dry-run)' })"
@@ -85,10 +101,11 @@ if ($existing) {
 }
 
 $bodyText = @"
-$tag — thin Setups (payload from CDN)
+$tag — installers (payload from CDN)
 
-$(if ($doClient) { "- MimicClient_Setup: http://47.107.43.5/mimic/client/payload.zip`n- Incremental: http://47.107.43.5/mimic/client/version.json`n" })
-$(if ($doServer) { "- MimicServer_Setup: http://47.107.43.5/mimic/server/payload.zip (signaling; auto-joins Bootstrap)`n" })
+$(if ($doClient) { "- MimicClient_Setup (PC): http://47.107.43.5/mimic/client/`n- Incremental: http://47.107.43.5/mimic/client/version.json`n" })
+$(if ($doServer) { "- MimicServer_Setup: http://47.107.43.5/mimic/server/ (signaling; auto-joins Bootstrap)`n" })
+$(if ($doAndroid) { "- MimicAndroid_Setup (zip): http://47.107.43.5/mimic/android/ (skeleton; APK when built)`n" })
 "@
 
 $body = @{
