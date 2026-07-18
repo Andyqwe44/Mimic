@@ -1,37 +1,78 @@
 package com.mimic.client
 
 import android.annotation.SuppressLint
+import android.graphics.Color
 import android.os.Bundle
+import android.util.Log
+import android.view.ViewGroup
+import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.FrameLayout
+import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.webkit.WebViewAssetLoader
 import org.json.JSONObject
 import java.util.concurrent.Executors
 
 /**
  * Hosts shared/web (same React UI as Windows WebView2).
- * JS hostCall → MimicAndroid.post → AndroidHost → __mimicResolve.
+ *
+ * Loads via WebViewAssetLoader (https://appassets.androidplatform.net/...) —
+ * NOT file:///android_asset/ — because Chromium blocks ES modules on file://
+ * which produced a blank white WebView under the ActionBar.
  */
 class MainActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
     private lateinit var host: AndroidHost
+    private lateinit var errBanner: TextView
     private val io = Executors.newCachedThreadPool()
+    private val tag = "MimicWeb"
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        supportActionBar?.hide()
+
+        val root = FrameLayout(this)
         webView = WebView(this)
-        setContentView(webView)
+        errBanner = TextView(this).apply {
+            setBackgroundColor(Color.parseColor("#B91C1C"))
+            setTextColor(Color.WHITE)
+            setPadding(24, 24, 24, 24)
+            textSize = 12f
+            visibility = android.view.View.GONE
+        }
+        root.addView(
+            webView,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        )
+        root.addView(
+            errBanner,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        )
+        setContentView(root)
 
         host = AndroidHost(this) { msg ->
             val payload = JSONObject.quote(msg.toString())
             webView.evaluateJavascript("window.__mimicPush && window.__mimicPush($payload)", null)
         }
+
+        val assetLoader = WebViewAssetLoader.Builder()
+            .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this))
+            .build()
 
         val s = webView.settings
         s.javaScriptEnabled = true
@@ -41,12 +82,34 @@ class MainActivity : AppCompatActivity() {
         s.mediaPlaybackRequiresUserGesture = false
         s.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
         s.cacheMode = WebSettings.LOAD_DEFAULT
+        @Suppress("DEPRECATION")
+        s.allowFileAccessFromFileURLs = true
+        @Suppress("DEPRECATION")
+        s.allowUniversalAccessFromFileURLs = true
 
         WebView.setWebContentsDebuggingEnabled(true)
-        webView.webChromeClient = WebChromeClient()
+
+        webView.webChromeClient = object : WebChromeClient() {
+            override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
+                val m = consoleMessage ?: return super.onConsoleMessage(consoleMessage)
+                val line = "${m.messageLevel()} ${m.sourceId()}:${m.lineNumber()} ${m.message()}"
+                Log.e(tag, line)
+                if (m.messageLevel() == ConsoleMessage.MessageLevel.ERROR) {
+                    runOnUiThread {
+                        errBanner.visibility = android.view.View.VISIBLE
+                        errBanner.text = (errBanner.text.toString() + "\n" + m.message()).trim()
+                    }
+                }
+                return true
+            }
+        }
+
         webView.webViewClient = object : WebViewClient() {
-            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                return false
+            override fun shouldInterceptRequest(
+                view: WebView?,
+                request: WebResourceRequest?
+            ): WebResourceResponse? {
+                return request?.url?.let { assetLoader.shouldInterceptRequest(it) }
             }
 
             override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
@@ -55,11 +118,29 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 injectBridgeShim()
+                Log.i(tag, "page finished $url")
+            }
+
+            override fun onReceivedError(
+                view: WebView?,
+                request: WebResourceRequest?,
+                error: android.webkit.WebResourceError?
+            ) {
+                val msg = "WebError ${error?.errorCode}: ${error?.description} url=${request?.url}"
+                Log.e(tag, msg)
+                if (request?.isForMainFrame == true) {
+                    runOnUiThread {
+                        errBanner.visibility = android.view.View.VISIBLE
+                        errBanner.text = msg
+                    }
+                }
             }
         }
 
         webView.addJavascriptInterface(JsBridge(), "MimicAndroid")
-        webView.loadUrl("file:///android_asset/www/index.html")
+        // AssetsPathHandler maps URL path /assets/* → assets/* on disk
+        // so www/index.html → https://appassets.androidplatform.net/assets/www/index.html
+        webView.loadUrl("https://appassets.androidplatform.net/assets/www/index.html")
     }
 
     private fun injectBridgeShim() {
@@ -106,6 +187,12 @@ class MainActivity : AppCompatActivity() {
                   }
                 }
               };
+              window.addEventListener('error', function(ev) {
+                console.error('window.onerror', ev.message, ev.filename, ev.lineno);
+              });
+              window.addEventListener('unhandledrejection', function(ev) {
+                console.error('unhandledrejection', String(ev.reason));
+              });
             })();
         """.trimIndent()
         webView.evaluateJavascript(js, null)

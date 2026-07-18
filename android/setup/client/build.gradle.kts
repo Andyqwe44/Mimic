@@ -11,8 +11,8 @@ android {
         applicationId = "com.mimic.client"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.1.1"
+        versionCode = 3
+        versionName = "0.1.2"
     }
 
     buildTypes {
@@ -40,4 +40,7 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
+    // Serve assets via https://appassets.androidplatform.net so Vite ES modules work
+    // (file:///android_asset/ cannot load <script type="module"> → white screen)
+    implementation("androidx.webkit:webkit:1.11.0")
 }
