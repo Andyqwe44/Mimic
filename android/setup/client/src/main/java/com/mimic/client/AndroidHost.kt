@@ -60,6 +60,71 @@ class AndroidHost(
             else JSONObject().put("ok", false).put("error", "accept_control gate closed")
         }
         peer.onListTargets = { listTargets() }
+        peer.onSetTarget = { json -> applyRemoteSetTarget(json) }
+    }
+
+    /**
+     * Controller picked a remote target — apply on controlled Android (parity with PC).
+     * Auto-opens stream/control gates; starts capture when MediaProjection consent exists.
+     */
+    private fun applyRemoteSetTarget(json: JSONObject): JSONObject {
+        val id = json.optString("id", json.optString("target_id", ""))
+        val tid = when {
+            id.isNotBlank() -> id
+            json.optLong("hwnd", -1L) == 0L -> "display:0"
+            else -> activeTargetId
+        }
+        if (tid.isBlank()) {
+            return JSONObject().put("ok", false).put("error", "missing target id")
+        }
+        activeTargetId = tid
+        appendLog("peer", "set_target id=$tid")
+
+        // Launch app targets so the controlled device shows the chosen app.
+        if (tid.startsWith("app:")) {
+            val rest = tid.removePrefix("app:")
+            val slash = rest.indexOf('/')
+            val pkg = if (slash >= 0) rest.substring(0, slash) else rest
+            val act = if (slash >= 0) rest.substring(slash + 1) else ""
+            if (pkg.isNotBlank()) {
+                val launch = AppLauncher.launch(context, pkg, act.ifBlank { null })
+                if (!launch.optBoolean("ok", false)) {
+                    appendLog("peer", "set_target launch failed: ${launch.optString("error")}")
+                }
+            }
+        }
+
+        allowStream = true
+        acceptControl = true
+        main.post {
+            pushToJs(
+                JSONObject()
+                    .put("type", "gates")
+                    .put("allow_stream", true)
+                    .put("accept_control", true)
+                    .put("target_id", tid),
+            )
+        }
+
+        if (!capture.hasProjectionConsent()) {
+            main.post { requestProjection?.invoke() }
+            return JSONObject()
+                .put("ok", true)
+                .put("id", tid)
+                .put("pending_consent", true)
+                .put("peer_proto", 2)
+        }
+
+        val startArgs = JSONObject().put("target_id", tid).put("id", tid)
+        val started = capture.start(startArgs, caps.active)
+        return if (started.optBoolean("ok", false)) {
+            started.put("id", tid).put("peer_proto", 2)
+        } else {
+            JSONObject()
+                .put("ok", false)
+                .put("error", started.optString("error", "capture start failed"))
+                .put("id", tid)
+        }
     }
 
     fun onProjectionResult(resultCode: Int, data: Intent?) {
@@ -102,7 +167,8 @@ class AndroidHost(
             "get_log_dir" -> JSONObject().put("dir", context.filesDir.absolutePath)
             "get_settings" -> {
                 val raw = prefs.getString("settings", null)
-                if (raw.isNullOrBlank()) JSONObject() else JSONObject(raw)
+                val inner = if (raw.isNullOrBlank()) JSONObject() else JSONObject(raw)
+                JSONObject().put("ok", true).put("settings", inner)
             }
             "set_settings" -> {
                 val s = args.optJSONObject("settings") ?: args

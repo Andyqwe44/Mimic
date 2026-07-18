@@ -119,6 +119,29 @@ std::string sha1_b64(const std::string& input) {
     return result;
 }
 
+/** Wire credential: hex(SHA-256(UTF-8(password))). Never send plaintext password. */
+std::string sha256_hex(const std::string& input) {
+    BCRYPT_ALG_HANDLE alg = nullptr;
+    BCRYPT_HASH_HANDLE hash = nullptr;
+    std::string result;
+    if (BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, nullptr, 0) != 0) return result;
+    if (BCryptCreateHash(alg, &hash, nullptr, 0, nullptr, 0, 0) == 0) {
+        BCryptHashData(hash, (PUCHAR)input.data(), (ULONG)input.size(), 0);
+        UCHAR digest[32];
+        if (BCryptFinishHash(hash, digest, 32, 0) == 0) {
+            static const char* kHex = "0123456789abcdef";
+            result.resize(64);
+            for (int i = 0; i < 32; ++i) {
+                result[(size_t)i * 2] = kHex[digest[i] >> 4];
+                result[(size_t)i * 2 + 1] = kHex[digest[i] & 0xf];
+            }
+        }
+        BCryptDestroyHash(hash);
+    }
+    BCryptCloseAlgorithmProvider(alg, 0);
+    return result;
+}
+
 std::string random_key_b64() {
     uint8_t raw[16];
     BCryptGenRandom(nullptr, raw, 16, BCRYPT_USE_SYSTEM_PREFERRED_RNG);
@@ -823,8 +846,11 @@ void peer_shutdown() {
 std::string peer_register(const std::string& signaling_url,
                           const std::string& user,
                           const std::string& password) {
-    char body[512];
-    snprintf(body, sizeof(body), "{\"user\":\"%s\",\"password\":\"%s\"}", user.c_str(), password.c_str());
+    std::string pass_hash = sha256_hex(password);
+    if (pass_hash.size() != 64) return R"({"ok":false,"error":"hash failed"})";
+    char body[768];
+    snprintf(body, sizeof(body), "{\"user\":\"%s\",\"passHash\":\"%s\"}",
+             user.c_str(), pass_hash.c_str());
     std::string resp = http_post_json(signaling_url, "/api/register", body);
     if (resp.empty()) return R"({"ok":false,"error":"network"})";
     return resp;
@@ -904,11 +930,13 @@ std::string peer_login(const std::string& signaling_url,
         ips += "\"" + g_lan_ips[i] + "\"";
     }
     ips += "]";
-    char body[1024];
+    std::string pass_hash = sha256_hex(password);
+    if (pass_hash.size() != 64) return R"({"ok":false,"error":"hash failed"})";
+    char body[1536];
     snprintf(body, sizeof(body),
-             "{\"user\":\"%s\",\"password\":\"%s\",\"deviceId\":\"%s\",\"deviceName\":\"%s\","
+             "{\"user\":\"%s\",\"passHash\":\"%s\",\"deviceId\":\"%s\",\"deviceName\":\"%s\","
              "\"lanIps\":%s,\"platform\":\"windows\",\"peerProto\":2}",
-             user.c_str(), password.c_str(), g_device_id.c_str(), g_device_name.c_str(), ips.c_str());
+             user.c_str(), pass_hash.c_str(), g_device_id.c_str(), g_device_name.c_str(), ips.c_str());
     std::string resp = http_post_json(g_signaling_http, "/api/login", body);
     if (resp.empty() || !json_get_bool_simple(resp, "ok")) {
         if (resp.empty()) return R"({"ok":false,"error":"network"})";

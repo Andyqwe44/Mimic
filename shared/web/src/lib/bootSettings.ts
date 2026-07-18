@@ -25,6 +25,11 @@ export type BootSettings = {
   serverPort?: string
   /** Side nav labels visible (user toggle; default true) */
   navExpanded?: boolean
+  /** Peer signaling (local prefs; password hashed before wire) */
+  peerUrl?: string
+  peerUser?: string
+  peerPassword?: string
+  peerDeviceName?: string
 }
 
 declare global {

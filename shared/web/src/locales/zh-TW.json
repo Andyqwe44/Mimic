@@ -137,6 +137,11 @@
     "human_tip": "人工控制",
     "ai_tip": "AI 控制（本機模型）",
     "remote_windows": "遠端視窗",
+    "remote_targets": "遠端視窗 / 桌面",
+    "refresh_targets": "重新整理",
+    "wait_lan": "等待區域網路連線…",
+    "no_remote_targets": "尚無遠端目標 — 請稍候或重新整理",
+    "busy": "帳號忙碌 — 已有控制工作階段進行中",
     "ai_mode_hint": "AI 控制模式 — 動作來自本機模型；目標視窗仍由對端強制校驗。"
   },
 

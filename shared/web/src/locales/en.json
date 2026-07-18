@@ -137,6 +137,11 @@
     "human_tip": "Human control",
     "ai_tip": "AI control (local model)",
     "remote_windows": "Remote windows",
+    "remote_targets": "Remote window / desktop",
+    "refresh_targets": "Refresh",
+    "wait_lan": "Waiting for LAN link…",
+    "no_remote_targets": "No remote targets yet — wait or refresh",
+    "busy": "Account busy — another control session is active",
     "ai_mode_hint": "AI control mode — actions from local model; target still enforced on peer."
   },
 

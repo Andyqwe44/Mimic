@@ -86,28 +86,32 @@ export function ControlView({
   const [peerExpanded, setPeerExpanded] = useState(true)
   const [gatesExpanded, setGatesExpanded] = useState(true)
   const [ssExpanded, setSsExpanded] = useState(true)
+  const [remoteTargetId, setRemoteTargetId] = useState('')
+
+  const isController = peerRole === 'controller'
+  const showLocalConnection = !isController
+
+  const pickRemoteTarget = (w: { title: string; hwnd: number; id?: string }) => {
+    const id = w.id || undefined
+    setRemoteTargetId(id || String(w.hwnd))
+    hostCall('peer_set_target', {
+      hwnd: w.hwnd,
+      title: w.title,
+      id,
+    })
+      .then((res: { ok?: boolean; error?: string }) => {
+        if (res?.ok === false) {
+          addLog(`[Peer] set_target failed: ${res.error || 'unknown'}`)
+          return
+        }
+        addLog(`[Peer] set_target ${w.title}${id ? ` (${id})` : ''}`)
+      })
+      .catch((e) => addLog(`[Peer] set_target failed: ${e}`))
+  }
 
   return (
     <div className={`flex-1 overflow-y-auto ${SHELL_PAD.page} space-y-3 min-h-0`}>
-      <ConnectionPanel
-        onSelect={(w) => setSelWin(w)}
-        onDisconnect={() => {
-          setSelWin({ title: DESKTOP_TITLE, category: 'desktop', hwnd: 0 })
-          setExpectedCaptureState('desktop')
-          addLog('[Connection] disconnected, back to desktop')
-        }}
-        snapMethod={snapMethod}
-        setSnapMethod={setSnapMethod}
-        streamMethod={streamMethod}
-        setStreamMethod={setStreamMethod}
-        selWin={selWin}
-        winState={winState}
-        expectedCaptureState={expectedCaptureState}
-        setExpectedCaptureState={setExpectedCaptureState}
-        expanded={connExpanded}
-        onToggle={() => setConnExpanded((v) => !v)}
-      />
-
+      {/* Controller: peer first; local window picker is for controlled/idle only */}
       <PeerPanel
         expanded={peerExpanded}
         onToggle={() => setPeerExpanded((v) => !v)}
@@ -120,79 +124,129 @@ export function ControlView({
           addLog(`[Peer] remote windows: ${wins.length}`)
         }}
       />
-      <PeerRemoteView
-        active={peerRole === 'controller' && peerTransport !== 'none'}
-        humanControl={peerControlMode === 'human'}
-      />
-      {peerControlMode === 'ai' && peerTransport !== 'none' && (
+
+      {isController && (
+        <>
+          <PeerRemoteView
+            active={peerTransport !== 'none'}
+            humanControl={peerControlMode === 'human'}
+          />
+          {peerControlMode === 'ai' && peerTransport !== 'none' && (
+            <div className={`${TEXT.smallMono} text-amber-500 bg-warn-soft ${RADIUS.lg} px-2 py-1.5`}>
+              {t('peer.ai_mode_hint')}
+            </div>
+          )}
+          <div className={`${RADIUS.xl} bg-bg-secondary ${RING} p-2 space-y-1 max-h-56 overflow-y-auto min-w-0`}>
+            <div className={`${TEXT.smallMono} font-medium text-text-secondary px-1 flex items-center justify-between gap-2`}>
+              <span>{t('peer.remote_targets')}</span>
+              {peerTransport !== 'none' && (
+                <button
+                  type="button"
+                  className={`${TEXT.xs} text-accent shrink-0`}
+                  onClick={() => {
+                    hostCall('peer_request_windows')
+                      .then(() => addLog('[Peer] refresh remote targets'))
+                      .catch((e) => addLog(`[Peer] request_windows failed: ${e}`))
+                  }}
+                >
+                  {t('peer.refresh_targets')}
+                </button>
+              )}
+            </div>
+            {peerTransport === 'none' && (
+              <div className={`${TEXT.xs} text-text-muted px-1`}>{t('peer.wait_lan')}</div>
+            )}
+            {peerTransport !== 'none' && remotePeerWindows.length === 0 && (
+              <div className={`${TEXT.xs} text-text-muted px-1`}>{t('peer.no_remote_targets')}</div>
+            )}
+            {remotePeerWindows.map((w) => {
+              const key = w.id || String(w.hwnd)
+              const selected = remoteTargetId === key
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  className={`w-full text-left ${TEXT.xs} px-2 py-2 min-h-11 ${RADIUS.md} truncate ${
+                    selected ? 'bg-accent-soft text-accent' : 'hover:bg-bg-hover'
+                  }`}
+                  onClick={() => pickRemoteTarget(w)}
+                >
+                  {w.title || w.id || `(hwnd ${w.hwnd})`}
+                </button>
+              )
+            })}
+          </div>
+        </>
+      )}
+
+      {showLocalConnection && (
+        <ConnectionPanel
+          onSelect={(w) => setSelWin(w)}
+          onDisconnect={() => {
+            setSelWin({ title: DESKTOP_TITLE, category: 'desktop', hwnd: 0 })
+            setExpectedCaptureState('desktop')
+            addLog('[Connection] disconnected, back to desktop')
+          }}
+          snapMethod={snapMethod}
+          setSnapMethod={setSnapMethod}
+          streamMethod={streamMethod}
+          setStreamMethod={setStreamMethod}
+          selWin={selWin}
+          winState={winState}
+          expectedCaptureState={expectedCaptureState}
+          setExpectedCaptureState={setExpectedCaptureState}
+          expanded={connExpanded}
+          onToggle={() => setConnExpanded((v) => !v)}
+        />
+      )}
+
+      {!isController && peerControlMode === 'ai' && peerTransport !== 'none' && (
         <div className={`${TEXT.smallMono} text-amber-500 bg-warn-soft ${RADIUS.lg} px-2 py-1.5`}>
           {t('peer.ai_mode_hint')}
         </div>
       )}
-      {remotePeerWindows.length > 0 && (
-        <div className={`${RADIUS.xl} bg-bg-secondary ${RING} p-2 space-y-1 max-h-40 overflow-y-auto min-w-0`}>
-          <div className={`${TEXT.smallMono} font-medium text-text-secondary px-1`}>
-            {t('peer.remote_windows')}
-          </div>
-          {remotePeerWindows.map((w) => (
-            <button
-              key={w.id || String(w.hwnd)}
-              type="button"
-              className={`w-full text-left ${TEXT.xs} px-2 py-2 min-h-11 ${RADIUS.md} hover:bg-bg-hover truncate`}
-              onClick={() => {
-                hostCall('peer_set_target', {
-                  hwnd: w.hwnd,
-                  title: w.title,
-                  id: w.id || undefined,
-                })
-                  .then(() => addLog(`[Peer] set_target ${w.title}${w.id ? ` (${w.id})` : ''}`))
-                  .catch((e) => addLog(`[Peer] set_target failed: ${e}`))
-              }}
-            >
-              {w.title || w.id || `(hwnd ${w.hwnd})`}
-            </button>
-          ))}
+
+      {/* Gates / local preview are for controlled (or idle local use) — not the controlling device */}
+      {!isController && (
+        <div className="min-w-0">
+          {THIN_CLIENT ? (
+            <StreamGatesPanel
+              streamOn={previewing}
+              controlOn={acceptControl}
+              onToggleStream={onTogglePreview}
+              onToggleControl={onToggleAcceptControl}
+              targetTitle={displayTargetTitle(selWin.title, t)}
+              linkReady={linkReady || serverConnected || (peerRole === 'controlled' && peerTransport !== 'none')}
+              expanded={gatesExpanded}
+              onToggle={() => setGatesExpanded((v) => !v)}
+            />
+          ) : (
+            <ScreenshotPanel
+              selWin={selWin}
+              screenRatio={screenRatio}
+              snapMethod={snapMethod}
+              streamMethod={streamMethod}
+              renderMethod={renderMethod}
+              winState={winState}
+              expanded={ssExpanded}
+              onToggle={() => setSsExpanded((v) => !v)}
+              previewing={previewing}
+              previewingRef={previewingRef}
+              snapshotRef={snapshotRef}
+              snapshotStartRef={snapshotStartRef}
+              capMethod={capMethod}
+              onTakeSnapshot={takeSnapshot}
+              onTogglePreview={onTogglePreview}
+              pinned={false}
+              onTogglePin={() => {}}
+              showPin={false}
+              hasContentRef={ssHasContentRef}
+              onFps={onFps}
+              onDims={onDims}
+            />
+          )}
         </div>
       )}
-
-      <div className="min-w-0">
-        {THIN_CLIENT ? (
-          <StreamGatesPanel
-            streamOn={previewing}
-            controlOn={acceptControl}
-            onToggleStream={onTogglePreview}
-            onToggleControl={onToggleAcceptControl}
-            targetTitle={displayTargetTitle(selWin.title, t)}
-            linkReady={linkReady || serverConnected || (peerRole === 'controlled' && peerTransport !== 'none')}
-            expanded={gatesExpanded}
-            onToggle={() => setGatesExpanded((v) => !v)}
-          />
-        ) : (
-          <ScreenshotPanel
-            selWin={selWin}
-            screenRatio={screenRatio}
-            snapMethod={snapMethod}
-            streamMethod={streamMethod}
-            renderMethod={renderMethod}
-            winState={winState}
-            expanded={ssExpanded}
-            onToggle={() => setSsExpanded((v) => !v)}
-            previewing={previewing}
-            previewingRef={previewingRef}
-            snapshotRef={snapshotRef}
-            snapshotStartRef={snapshotStartRef}
-            capMethod={capMethod}
-            onTakeSnapshot={takeSnapshot}
-            onTogglePreview={onTogglePreview}
-            pinned={false}
-            onTogglePin={() => {}}
-            showPin={false}
-            hasContentRef={ssHasContentRef}
-            onFps={onFps}
-            onDims={onDims}
-          />
-        )}
-      </div>
     </div>
   )
 }

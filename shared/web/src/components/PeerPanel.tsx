@@ -43,17 +43,19 @@ export function PeerPanel({
 }) {
   const { t } = useTranslation()
   // Default = public Mimic signaling (Aliyun). Override anytime in the field.
-  const [url, setUrl] = useState('http://47.107.43.5:8443')
-  const [user, setUser] = useState('demo')
-  const [password, setPassword] = useState('demo')
-  const [deviceName, setDeviceName] = useState(() => {
+  const defaultDeviceName = () => {
     const plat = getHostPlatform()
     const prefix = plat === 'android' ? 'Android' : plat === 'windows' ? 'PC' : 'Web'
     const hint = typeof navigator !== 'undefined'
       ? (navigator.platform || navigator.userAgent || 'dev').slice(0, 10).replace(/\s+/g, '')
       : 'dev'
     return `${prefix}-${hint}`
-  })
+  }
+  const [url, setUrl] = useState('http://47.107.43.5:8443')
+  const [user, setUser] = useState('demo')
+  const [password, setPassword] = useState('demo')
+  const [deviceName, setDeviceName] = useState(defaultDeviceName)
+  const [credsReady, setCredsReady] = useState(false)
   const [online, setOnline] = useState(false)
   const [role, setRole] = useState('idle')
   const [devices, setDevices] = useState<Device[]>([])
@@ -68,6 +70,41 @@ export function PeerPanel({
 
   const pollRef = useRef(0)
   const probeRef = useRef(0)
+  const saveCredsRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Load persisted signaling credentials (local prefs only; wire still uses passHash).
+  useEffect(() => {
+    hostCall('get_settings').then((res: { settings?: Record<string, unknown> }) => {
+      const s = res?.settings
+      if (s && typeof s === 'object') {
+        if (typeof s.peerUrl === 'string' && s.peerUrl) setUrl(s.peerUrl)
+        if (typeof s.peerUser === 'string' && s.peerUser) setUser(s.peerUser)
+        if (typeof s.peerPassword === 'string') setPassword(s.peerPassword)
+        if (typeof s.peerDeviceName === 'string' && s.peerDeviceName) setDeviceName(s.peerDeviceName)
+      }
+    }).catch(() => {}).finally(() => setCredsReady(true))
+  }, [])
+
+  // Persist credentials (debounced).
+  useEffect(() => {
+    if (!credsReady) return
+    if (saveCredsRef.current) clearTimeout(saveCredsRef.current)
+    saveCredsRef.current = setTimeout(() => {
+      hostCall('get_settings').then((res: { settings?: Record<string, unknown> }) => {
+        const prev = (res?.settings && typeof res.settings === 'object') ? res.settings : {}
+        return hostCall('set_settings', {
+          settings: {
+            ...prev,
+            peerUrl: url,
+            peerUser: user,
+            peerPassword: password,
+            peerDeviceName: deviceName,
+          },
+        })
+      }).catch(() => {})
+    }, 800)
+    return () => { if (saveCredsRef.current) clearTimeout(saveCredsRef.current) }
+  }, [credsReady, url, user, password, deviceName])
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -142,16 +179,26 @@ export function PeerPanel({
         setIncoming(null)
         setStatus(t('peer.session_started'))
         refreshStatus()
-        hostCall('peer_request_windows').catch(() => {})
       } else if (d.type === 'session_end') {
         setRole('idle')
         onRole?.('idle')
         setTransport('none')
         setStatus(t('peer.session_ended'))
         onTransport?.('none')
+        onRemoteWindows?.([])
       } else if (d.type === 'peer_transport') {
-        setTransport(String(d.mode || 'none'))
-        onTransport?.(String(d.mode || 'none'))
+        const mode = String(d.mode || 'none')
+        setTransport(mode)
+        onTransport?.(mode)
+        // LAN ready → controller pulls remote window/desktop list
+        if (mode !== 'none') {
+          hostCall('peer_request_windows').catch(() => {})
+        }
+      } else if (d.type === 'error') {
+        const code = String(d.code || '')
+        const err = String(d.error || 'error')
+        setStatus(code === 'busy' ? t('peer.busy') : err)
+        addLog(`[Peer] ${code ? `${code}: ` : ''}${err}`)
       } else if (d.type === 'peer_frame') {
         hostCall('peer_get_frame').then((fr: {
           ok?: boolean; w?: number; h?: number; flags?: number; b64?: string
@@ -235,6 +282,7 @@ export function PeerPanel({
     setDevices([])
     setRole('idle')
     onRole?.('idle')
+    onRemoteWindows?.([])
     setStatus(t('peer.logged_out'))
     probeServer(true)
   }

@@ -3366,42 +3366,50 @@ void backend_init() {
             return "[]";
         },
         [](uint64_t hwnd, const std::string& target_id) -> std::string {
-            // Windows controlled path still keys off HWND; target_id is logged for v2 peers.
-            if (!target_id.empty())
-                LOG("peer", "set_target id=%s hwnd=%llu", target_id.c_str(),
-                    (unsigned long long)hwnd);
-            if (hwnd != 0 && !IsWindow((HWND)(uintptr_t)hwnd))
-                return R"({"ok":false,"error":"hwnd not a window"})";
-            // Must appear in current enumeration (security filter)
-            std::string list = cmd_list_windows();
-            char needle[64];
-            snprintf(needle, sizeof(needle), "\"hwnd\":%llu", (unsigned long long)hwnd);
-            char needle2[64];
-            snprintf(needle2, sizeof(needle2), "\"hwnd\": %llu", (unsigned long long)hwnd);
-            if (hwnd != 0 && list.find(needle) == std::string::npos &&
-                list.find(needle2) == std::string::npos)
-                return R"({"ok":false,"error":"hwnd not in allowed window list"})";
-            g_control_hwnd.store(hwnd);
-            g_accept_control.store(true);
-            // Auto-start stream gate for peer controlled
-            if (!g_streaming.load()) {
-                std::string method = "wgc";
-                {
-                    std::lock_guard<std::mutex> lk(g_remote_cfg_mtx);
-                    method = g_remote_capture.empty() ? "wgc" : g_remote_capture;
+            // Resolve v2 id → hwnd (desktop/display → 0; hwnd:N → N).
+            uint64_t effective = hwnd;
+            if (!target_id.empty()) {
+                if (target_id.rfind("desktop:", 0) == 0 || target_id.rfind("display:", 0) == 0) {
+                    effective = 0;
+                } else if (target_id.rfind("hwnd:", 0) == 0) {
+                    effective = _strtoui64(target_id.c_str() + 5, nullptr, 10);
                 }
-                cmd_capture_stream_start(hwnd, method, "h264");
-            } else {
-                g_allow_stream.store(true);
             }
-            char buf[256];
+            LOG("peer", "set_target id=%s hwnd=%llu effective=%llu", target_id.c_str(),
+                (unsigned long long)hwnd, (unsigned long long)effective);
+            if (effective != 0 && !IsWindow((HWND)(uintptr_t)effective))
+                return R"({"ok":false,"error":"hwnd not a window"})";
+            // Must appear in current enumeration (security filter). Desktop hwnd=0 always allowed.
+            if (effective != 0) {
+                std::string list = cmd_list_windows();
+                char needle[64];
+                snprintf(needle, sizeof(needle), "\"hwnd\":%llu", (unsigned long long)effective);
+                char needle2[64];
+                snprintf(needle2, sizeof(needle2), "\"hwnd\": %llu", (unsigned long long)effective);
+                if (list.find(needle) == std::string::npos &&
+                    list.find(needle2) == std::string::npos)
+                    return R"({"ok":false,"error":"hwnd not in allowed window list"})";
+            }
+            g_control_hwnd.store(effective);
+            g_accept_control.store(true);
+            g_allow_stream.store(true);
+            // Restart stream on target change so controller sees the new surface.
+            if (g_streaming.load())
+                cmd_capture_stream_stop();
+            std::string method = "wgc"; // hwnd=0 → monitor mode inside stream_start
+            {
+                std::lock_guard<std::mutex> lk(g_remote_cfg_mtx);
+                if (!g_remote_capture.empty()) method = g_remote_capture;
+            }
+            cmd_capture_stream_start(effective, method, "h264");
+            char buf[320];
             if (!target_id.empty()) {
                 snprintf(buf, sizeof(buf),
                          "{\"ok\":true,\"hwnd\":%llu,\"id\":\"%s\",\"peer_proto\":2}",
-                         (unsigned long long)hwnd, target_id.c_str());
+                         (unsigned long long)effective, target_id.c_str());
             } else {
                 snprintf(buf, sizeof(buf), "{\"ok\":true,\"hwnd\":%llu,\"peer_proto\":2}",
-                         (unsigned long long)hwnd);
+                         (unsigned long long)effective);
             }
             return buf;
         },

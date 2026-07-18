@@ -137,6 +137,11 @@
     "human_tip": "人工控制",
     "ai_tip": "AI 控制（本地模型）",
     "remote_windows": "远程窗口",
+    "remote_targets": "远程窗口 / 桌面",
+    "refresh_targets": "刷新",
+    "wait_lan": "等待局域网链路…",
+    "no_remote_targets": "暂无远程目标 — 请稍候或刷新",
+    "busy": "账号忙碌 — 已有控制会话进行中",
     "ai_mode_hint": "AI 控制模式 — 动作来自本地模型；目标窗口仍由对端强制校验。"
   },
 

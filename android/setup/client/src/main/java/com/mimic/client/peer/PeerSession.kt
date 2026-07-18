@@ -16,11 +16,13 @@ import okhttp3.WebSocketListener
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.NetworkInterface
+import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Android peer signaling — HTTP login + WebSocket + LAN media (parity with peer_session.cpp).
+ * Wire auth: passHash = hex(SHA-256(UTF-8(password))); never send plaintext password.
  */
 class PeerSession(
     private val context: Context,
@@ -62,6 +64,8 @@ class PeerSession(
 
     var onControlAction: ((JSONObject) -> JSONObject)? = null
     var onListTargets: (() -> JSONObject)? = null
+    /** Controlled side: apply remote set_target (id / hwnd / display). */
+    var onSetTarget: ((JSONObject) -> JSONObject)? = null
 
     fun statusJson(): JSONObject = JSONObject()
         .put("ok", true)
@@ -96,7 +100,7 @@ class PeerSession(
         val lanIps = collectLanIps()
         val body = JSONObject()
             .put("user", u)
-            .put("password", password)
+            .put("passHash", sha256Hex(password))
             .put("deviceId", deviceId)
             .put("deviceName", deviceName)
             .put("lanIps", JSONArray(lanIps))
@@ -136,7 +140,7 @@ class PeerSession(
         val password = args.optString("password", "")
         if (u.isBlank() || password.isBlank()) return err("missing user/password")
         return try {
-            val body = JSONObject().put("user", u).put("password", password)
+            val body = JSONObject().put("user", u).put("passHash", sha256Hex(password))
             httpPostJson("$base/api/register", body)
         } catch (e: Exception) {
             err(e.message ?: "network")
@@ -168,22 +172,24 @@ class PeerSession(
 
     fun accept(args: JSONObject = JSONObject()): JSONObject {
         if (!online) return err("not logged in")
-        val sessionId = args.optString("sessionId", "")
         val from = args.optString("fromDeviceId", args.optString("from", peerDeviceId))
-        if (from.isNotBlank()) peerDeviceId = from
-        val msg = JSONObject().put("type", "accept")
-        if (sessionId.isNotBlank()) msg.put("sessionId", sessionId)
-        sendWs(msg)
-        role = "controlled"
-        startLanAsControlled()
+        if (from.isBlank()) return err("missing fromDeviceId")
+        peerDeviceId = from
+        // Wait for session_start before LAN — matches PC peer_session.cpp
+        sendWs(
+            JSONObject()
+                .put("type", "invite_accept")
+                .put("fromDeviceId", from),
+        )
+        role = "ringing"
         return JSONObject().put("ok", true)
     }
 
     fun reject(args: JSONObject = JSONObject()): JSONObject {
         if (!online) return err("not logged in")
-        val sessionId = args.optString("sessionId", "")
-        val msg = JSONObject().put("type", "reject")
-        if (sessionId.isNotBlank()) msg.put("sessionId", sessionId)
+        val from = args.optString("fromDeviceId", args.optString("from", peerDeviceId))
+        val msg = JSONObject().put("type", "invite_reject")
+        if (from.isNotBlank()) msg.put("fromDeviceId", from)
         sendWs(msg)
         role = "idle"
         return JSONObject().put("ok", true)
@@ -217,10 +223,12 @@ class PeerSession(
         "peer_set_target" -> {
             if (!lan.ready) err("LAN not ready")
             else {
-                val o = JSONObject().put("type", "set_target")
+                val o = JSONObject().put("type", "set_target").put("peer_proto", 2)
                 val id = args.optString("id", args.optString("target_id", ""))
                 if (id.isNotBlank()) o.put("id", id)
                 if (args.has("hwnd")) o.put("hwnd", args.optLong("hwnd"))
+                val title = args.optString("title", "")
+                if (title.isNotBlank()) o.put("title", title)
                 lan.sendJson(o)
                 JSONObject().put("ok", true)
             }
@@ -306,17 +314,49 @@ class PeerSession(
         }
     }
 
+    private fun applySessionRole(msg: JSONObject) {
+        val sess = msg.optJSONObject("session")
+        var ctrl = msg.optString("controllerId", "")
+        var controlled = msg.optString("controlledId", "")
+        if (sess != null) {
+            if (ctrl.isBlank()) ctrl = sess.optString("controllerId", "")
+            if (controlled.isBlank()) controlled = sess.optString("controlledId", "")
+        }
+        if (ctrl.isBlank() && controlled.isBlank()) return
+        if (deviceId == ctrl) {
+            role = "controller"
+            peerDeviceId = controlled
+        } else {
+            role = "controlled"
+            peerDeviceId = ctrl
+        }
+    }
+
     private fun handleLanJson(json: JSONObject) {
         when (json.optString("type")) {
             "list_targets", "list_windows" -> {
+                // Response (has targets/windows) → forward to UI; bare request → reply.
+                if (json.has("targets") || json.has("windows")) {
+                    push(JSONObject().put("type", "peer_msg").put("payload", json))
+                    return
+                }
                 val targets = onListTargets?.invoke()
-                val arr = targets?.optJSONArray("targets") ?: org.json.JSONArray()
+                val arr = targets?.optJSONArray("targets") ?: JSONArray()
+                // Normalize for controller UI: ensure hwnd + title on each entry
+                val windows = JSONArray()
+                for (i in 0 until arr.length()) {
+                    val t = arr.optJSONObject(i) ?: continue
+                    val w = JSONObject(t.toString())
+                    if (!w.has("hwnd")) w.put("hwnd", t.optLong("hwnd", 0))
+                    if (!w.has("title")) w.put("title", t.optString("title", t.optString("id", "")))
+                    windows.put(w)
+                }
                 lan.sendJson(
                     JSONObject()
                         .put("type", if (json.optString("type") == "list_targets") "list_targets" else "list_windows")
                         .put("peer_proto", 2)
-                        .put("targets", arr)
-                        .put("windows", arr),
+                        .put("targets", windows)
+                        .put("windows", windows),
                 )
             }
             "control" -> {
@@ -324,9 +364,24 @@ class PeerSession(
                 onControlAction?.invoke(action)
             }
             "set_target" -> {
-                // Target selection is host-side; ack for protocol parity.
-                lan.sendJson(JSONObject().put("type", "set_target_ack").put("ok", true)
-                    .put("id", json.optString("id", "")))
+                val result = onSetTarget?.invoke(json)
+                    ?: JSONObject().put("ok", false).put("error", "no set_target handler")
+                val ack = JSONObject()
+                    .put("type", "set_target_ack")
+                    .put("ok", result.optBoolean("ok", false))
+                    .put("id", json.optString("id", result.optString("id", "")))
+                    .put("peer_proto", 2)
+                if (result.has("error")) ack.put("error", result.optString("error"))
+                lan.sendJson(ack)
+            }
+            "set_target_ack" -> {
+                if (!json.optBoolean("ok", false)) {
+                    push(
+                        JSONObject()
+                            .put("type", "peer_error")
+                            .put("error", json.optString("error", "set_target failed")),
+                    )
+                }
             }
             "need_key" -> { /* encoder keyframe request — next I-frame interval */ }
             else -> push(JSONObject().put("type", "peer_msg").put("payload", json))
@@ -366,13 +421,7 @@ class PeerSession(
                             push(msg)
                         }
                         "session_start", "session_state" -> {
-                            val sess = msg.optJSONObject("session")
-                            val myRole = sess?.optString("role") ?: msg.optString("role", role)
-                            if (myRole.isNotBlank()) role = myRole
-                            val peer = sess?.optString("peerDeviceId")
-                                ?: sess?.optString("otherDeviceId")
-                                ?: msg.optString("peerDeviceId", "")
-                            if (peer.isNotBlank()) peerDeviceId = peer
+                            applySessionRole(msg)
                             if (role == "controlled" && !lan.ready) startLanAsControlled()
                             if (lan.ready) transport = "lan"
                             push(msg)
@@ -396,7 +445,7 @@ class PeerSession(
                             transport = "none"
                             push(msg)
                         }
-                        "reject", "error" -> push(msg)
+                        "invite_rejected", "error" -> push(msg)
                         else -> push(msg)
                     }
                 } catch (e: Exception) {
@@ -485,5 +534,12 @@ class PeerSession(
     companion object {
         const val DEFAULT_BOOTSTRAP = "http://47.107.43.5:8443"
         private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
+
+        fun sha256Hex(password: String): String {
+            val digest = MessageDigest.getInstance("SHA-256").digest(password.toByteArray(Charsets.UTF_8))
+            val sb = StringBuilder(digest.size * 2)
+            for (b in digest) sb.append("%02x".format(b))
+            return sb.toString()
+        }
     }
 }

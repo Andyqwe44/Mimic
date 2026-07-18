@@ -40,25 +40,56 @@ const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const HEARTBEAT_MS = 15000;
 const NODE_TTL_MS = 45000;
 
+/** Client wire secret: hex(SHA-256(UTF-8(password))). Never accept plaintext password. */
+function clientPassHash(password) {
+  return crypto.createHash('sha256').update(String(password), 'utf8').digest('hex');
+}
+
+/** Server stored hash: SHA256(salt + ":" + passHash). */
+function hashPassHash(passHash, salt) {
+  return crypto.createHash('sha256').update(String(salt) + ':' + String(passHash)).digest('hex');
+}
+
+function isValidPassHash(h) {
+  return typeof h === 'string' && /^[0-9a-f]{64}$/i.test(h);
+}
+
+function isValidUser(user) {
+  return typeof user === 'string' && /^[A-Za-z0-9_.-]{3,32}$/.test(user);
+}
+
 function ensureData() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
   if (!fs.existsSync(USERS_FILE)) {
+    const salt = 'seed';
     const seed = {
       users: {
         demo: {
-          salt: 'seed',
-          hash: hashPassword('demo', 'seed'),
+          salt,
+          hash: hashPassHash(clientPassHash('demo'), salt),
           created: Date.now(),
         },
       },
     };
-    fs.writeFileSync(USERS_FILE, JSON.stringify(seed, null, 2));
-    console.log('[signaling] seeded user demo / demo');
+    saveUsers(seed);
+    console.log('[signaling] seeded user demo / demo (passHash protocol)');
+    return;
   }
-}
-
-function hashPassword(password, salt) {
-  return crypto.createHash('sha256').update(salt + ':' + password).digest('hex');
+  // Migrate legacy plaintext-era demo seed to passHash protocol.
+  try {
+    const db = loadUsers();
+    const demo = db.users && db.users.demo;
+    if (demo && demo.salt === 'seed') {
+      const expected = hashPassHash(clientPassHash('demo'), 'seed');
+      if (demo.hash !== expected) {
+        demo.hash = expected;
+        saveUsers(db);
+        console.log('[signaling] migrated demo user to passHash protocol');
+      }
+    }
+  } catch (e) {
+    console.log('[signaling] users.json migrate skipped:', e.message || e);
+  }
 }
 
 function loadUsers() {
@@ -66,7 +97,22 @@ function loadUsers() {
 }
 
 function saveUsers(db) {
-  fs.writeFileSync(USERS_FILE, JSON.stringify(db, null, 2));
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  const tmp = USERS_FILE + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(db, null, 2));
+  fs.renameSync(tmp, USERS_FILE);
+}
+
+/** Extract passHash from body; reject plaintext password field. */
+function readPassHash(body) {
+  if (body && Object.prototype.hasOwnProperty.call(body, 'password') && body.password !== undefined && body.password !== null && String(body.password).length > 0) {
+    return { error: 'plaintext password rejected; send passHash (SHA-256 hex)' };
+  }
+  const passHash = String(body.passHash || body.pass_hash || '').trim().toLowerCase();
+  if (!isValidPassHash(passHash)) {
+    return { error: 'passHash required (64 hex chars, SHA-256 of password)' };
+  }
+  return { passHash };
 }
 
 function json(res, code, obj) {
@@ -466,9 +512,13 @@ const server = http.createServer(async (req, res) => {
     try {
       const body = await readBody(req);
       const user = String(body.user || '').trim();
-      const password = String(body.password || '');
-      if (!user || password.length < 3) {
-        json(res, 400, { ok: false, error: 'user/password required (min 3)' });
+      if (!isValidUser(user)) {
+        json(res, 400, { ok: false, error: 'user required (3-32: A-Za-z0-9_.-)' });
+        return;
+      }
+      const ph = readPassHash(body);
+      if (ph.error) {
+        json(res, 400, { ok: false, error: ph.error });
         return;
       }
       const db = loadUsers();
@@ -477,7 +527,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const salt = crypto.randomBytes(8).toString('hex');
-      db.users[user] = { salt, hash: hashPassword(password, salt), created: Date.now() };
+      db.users[user] = { salt, hash: hashPassHash(ph.passHash, salt), created: Date.now() };
       saveUsers(db);
       json(res, 200, { ok: true });
     } catch (e) {
@@ -490,14 +540,22 @@ const server = http.createServer(async (req, res) => {
     try {
       const body = await readBody(req);
       const user = String(body.user || '').trim();
-      const password = String(body.password || '');
+      if (!isValidUser(user)) {
+        json(res, 400, { ok: false, error: 'user required (3-32: A-Za-z0-9_.-)' });
+        return;
+      }
+      const ph = readPassHash(body);
+      if (ph.error) {
+        json(res, 400, { ok: false, error: ph.error });
+        return;
+      }
       const deviceId = String(body.deviceId || crypto.randomBytes(8).toString('hex'));
       const deviceName = String(body.deviceName || 'PC');
       const platform = String(body.platform || 'unknown');
       const peerProto = Number(body.peerProto || body.peer_proto || 1) || 1;
       const db = loadUsers();
       const rec = db.users[user];
-      if (!rec || rec.hash !== hashPassword(password, rec.salt)) {
+      if (!rec || rec.hash !== hashPassHash(ph.passHash, rec.salt)) {
         json(res, 401, { ok: false, error: 'invalid credentials' });
         return;
       }
