@@ -30,11 +30,14 @@ controller_web/dist/
 
 # Signaling server runtime
 signaling_server/data/
+mimic_server/data/
 
 # CDN helper scratch on local (remote nginx conf backups stay on server)
 scripts/cdn/*.bak
 scripts/cdn/nginx.conf.remote.bak
 scripts/cdn/_probe_remote.ps1
+scripts/cdn/_probe_8443.ps1
+scripts/cdn/_release_*.log
 
 # === Python ===
 __pycache__/

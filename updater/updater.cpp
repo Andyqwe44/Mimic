@@ -331,13 +331,19 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
         char probe[MAX_PATH];
         snprintf(probe, MAX_PATH, "%s\\bin\\mimic_client.exe", installDir);
         if (GetFileAttributesA(probe) == INVALID_FILE_ATTRIBUTES) {
+            // Pre-rename installs still ship monitor_app.exe
+            snprintf(probe, MAX_PATH, "%s\\bin\\monitor_app.exe", installDir);
+        }
+        if (GetFileAttributesA(probe) == INVALID_FILE_ATTRIBUTES) {
             installDir[0] = '\0';
             HKEY hKey;
-            if (RegOpenKeyExA(HKEY_LOCAL_MACHINE,
-                "SOFTWARE\\GameAgentMonitor", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
-                DWORD size = sizeof(installDir);
-                RegQueryValueExA(hKey, "InstallPath", nullptr, nullptr, (LPBYTE)installDir, &size);
-                RegCloseKey(hKey);
+            const char* keys[] = { "SOFTWARE\\MimicClient", "SOFTWARE\\GameAgentMonitor" };
+            for (int ki = 0; ki < 2 && !installDir[0]; ki++) {
+                if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, keys[ki], 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+                    DWORD size = sizeof(installDir);
+                    RegQueryValueExA(hKey, "InstallPath", nullptr, nullptr, (LPBYTE)installDir, &size);
+                    RegCloseKey(hKey);
+                }
             }
         }
     }

@@ -24,7 +24,7 @@
 #include <cstring>
 #include <cstdio>
 
-#include "../monitor_app/dep/WebView2.h"
+#include "../mimic_client/dep/WebView2.h"
 
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "ole32.lib")

@@ -51,7 +51,7 @@ function fmtSize(b: number): string {
 function fileRole(path: string, t: (key: string) => string): { label: string; core: boolean } {
   const p = path.toLowerCase()
   const base = p.split('/').pop() || p
-  if (base === 'monitor_app.exe') return { label: t('update.file_roles.main_exe'), core: true }
+  if (base === 'mimic_client.exe' || base === 'monitor_app.exe') return { label: t('update.file_roles.main_exe'), core: true }
   if (base.startsWith('updater')) return { label: t('update.file_roles.updater'), core: true }
   if (base === 'version.json') return { label: t('update.file_roles.manifest'), core: true }
   if (base.startsWith('logger')) return { label: t('update.file_roles.logger'), core: false }

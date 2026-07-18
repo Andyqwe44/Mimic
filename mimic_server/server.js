@@ -23,6 +23,8 @@ const pkg = (() => {
 const SERVER_VER = String(pkg.version || '0.0.0');
 
 const BOOTSTRAP_URL = (process.env.MIMIC_BOOTSTRAP || 'http://47.107.43.5:8443').replace(/\/$/, '');
+/** Distinguishes “I am answering BOOTSTRAP_URL” when public EIP is not on a local NIC. */
+const INSTANCE_ID = crypto.randomBytes(8).toString('hex');
 
 const PORT = (() => {
   const i = process.argv.indexOf('--port');
@@ -347,6 +349,7 @@ const server = http.createServer(async (req, res) => {
       nodeCount: clusterNodes.size,
       selfUrl: selfUrl || null,
       bootstrap: BOOTSTRAP_URL,
+      instanceId: INSTANCE_ID,
     });
     return;
   }
@@ -681,18 +684,19 @@ async function joinCluster() {
     return;
   }
 
-  try {
-    await httpGetJson(`http://127.0.0.1:${PORT}/health`, 2000);
-  } catch {
-    /* ignore */
-  }
-
   let bootHealth = null;
   try {
     bootHealth = await httpGetJson(`${BOOTSTRAP_URL}/health`, 4000);
   } catch (e) {
     console.log(`[cluster] bootstrap unreachable (${e.message || e}) — becoming local bootstrap`);
     await becomeBootstrap(BOOTSTRAP_URL);
+    return;
+  }
+
+  const bootBody = bootHealth && bootHealth.body;
+  // Public EIP often missing from NICs: if BOOTSTRAP_URL /health is this process, we are registry.
+  if (bootBody && bootBody.instanceId === INSTANCE_ID) {
+    await becomeBootstrap(process.env.MIMIC_PUBLIC_URL || BOOTSTRAP_URL);
     return;
   }
 
@@ -717,7 +721,6 @@ async function joinCluster() {
     console.log(`[cluster] join error: ${e.message || e}`);
   }
 
-  const bootBody = bootHealth && bootHealth.body;
   if (bootBody && bootBody.ok) {
     console.log('[cluster] bootstrap up but join failed — running standalone until heartbeat retry');
   }

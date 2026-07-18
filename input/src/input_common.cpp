@@ -5,7 +5,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include "input_common.h"
 #include "input_methods.h"
-#include "../../monitor_app/src/json_helper.h"
+#include "../../mimic_client/src/json_helper.h"
 #include "../../logger/logger.h"
 #include <cstdlib>
 #include <cstring>
