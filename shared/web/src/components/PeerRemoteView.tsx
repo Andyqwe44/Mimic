@@ -177,7 +177,7 @@ export function PeerRemoteView({
       </div>
       <div
         className="bg-black flex items-center justify-center min-h-[160px] max-h-[280px]"
-        data-no-shell-swipe
+        data-no-page-swipe
       >
         <canvas
           ref={canvasRef}

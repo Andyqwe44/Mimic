@@ -22,6 +22,7 @@ export function ScreenshotPanel({
   onTogglePreview,
   pinned,
   onTogglePin,
+  showPin = true,
   hasContentRef,
   bare,
   onFps,
@@ -44,6 +45,8 @@ export function ScreenshotPanel({
   onTogglePreview: () => void
   pinned: boolean
   onTogglePin: () => void
+  /** Hide pin control when auto-layout pin is not used (unified shell). */
+  showPin?: boolean
   hasContentRef: React.MutableRefObject<boolean>
   bare?: boolean
   onFps?: (fps: number) => void
@@ -234,17 +237,19 @@ export function ScreenshotPanel({
               </button>
             </Tooltip>
           )}
-          <Tooltip text={pinned ? t('screenshot.unpin_tip') : t('screenshot.pin_tip')}>
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                onTogglePin()
-              }}
-              className={`p-1 rounded-md transition-colors ${pinned ? 'text-accent hover:bg-bg-tertiary' : 'text-text-secondary hover:text-text-primary hover:bg-bg-tertiary'}`}
-            >
-              <Pin className={`w-3.5 h-3.5 ${pinned ? 'fill-current' : ''}`} />
-            </button>
-          </Tooltip>
+          {showPin && (
+            <Tooltip text={pinned ? t('screenshot.unpin_tip') : t('screenshot.pin_tip')}>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onTogglePin()
+                }}
+                className={`p-1 rounded-md transition-colors ${pinned ? 'text-accent hover:bg-bg-tertiary' : 'text-text-secondary hover:text-text-primary hover:bg-bg-tertiary'}`}
+              >
+                <Pin className={`w-3.5 h-3.5 ${pinned ? 'fill-current' : ''}`} />
+              </button>
+            </Tooltip>
+          )}
           <ChevronDown
             className={`w-4 h-4 text-text-muted transition-transform duration-150 ${expanded ? 'rotate-180' : ''}`}
           />

@@ -9,6 +9,36 @@
     "ready": "就緒"
   },
 
+  "nav": {
+    "aria": "主導覽",
+    "monitor": "監視",
+    "monitor_tip": "遠端畫面與操作",
+    "control": "控制",
+    "control_tip": "連線、工作階段權限與對等裝置",
+    "log": "日誌",
+    "log_tip": "目前工作階段與歷史日誌",
+    "settings": "設定",
+    "settings_tip": "主題、語言、擷取與更新",
+    "devtools": "開發工具",
+    "devtools_tip": "測試目標 · 自檢 · 幀儲存 · 介面預覽",
+    "back_settings": "返回設定",
+    "back_settings_short": "返回"
+  },
+
+  "capsule": {
+    "disconnected": "未連線",
+    "connected": "已連線",
+    "stream_on": "畫面開",
+    "control_on": "控制開",
+    "error": "錯誤",
+    "stream_short_on": "畫面開",
+    "stream_short_off": "畫面關",
+    "control_short_on": "控制開",
+    "control_short_off": "控制關",
+    "tip_open_control": "開啟控制頁",
+    "tip_error": "查看日誌以了解錯誤"
+  },
+
   "topbar": {
     "monitor": "監視",
     "monitor_tip": "即時預覽與控制 — 遠端操作目標視窗",
@@ -156,6 +186,7 @@
   },
 
   "settings": {
+    "connection_moved": "連線與工作階段權限已移至「控制」頁，與手機／桌面導覽一致。",
     "capture": "擷取",
     "snapshot": "截圖",
     "snapshot_auto": "自動",
@@ -562,8 +593,6 @@
 
   "app": {
     "resize_expand": "向右拖曳展開面板",
-    "resize_drag": "拖曳調整面板寬度，向右拖到底可摺疊",
-    "shell_open_controls": "控制欄（左滑）",
-    "shell_back_workspace": "返回主區（右滑）"
+    "resize_drag": "拖曳調整面板寬度，向右拖到底可摺疊"
   }
 }

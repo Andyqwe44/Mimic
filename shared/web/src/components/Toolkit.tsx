@@ -93,7 +93,7 @@ export function Tooltip({
   return (
     <div
       ref={anchorRef}
-      className={`relative inline-flex ${className || ''}`}
+      className={`relative ${className?.includes('w-full') ? 'flex' : 'inline-flex'} ${className || ''}`}
       onMouseEnter={() => {
         timer.current = window.setTimeout(() => setShow(true), 300)
       }}

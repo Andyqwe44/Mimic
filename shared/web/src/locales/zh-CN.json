@@ -9,6 +9,36 @@
     "ready": "就绪"
   },
 
+  "nav": {
+    "aria": "主导航",
+    "monitor": "监视",
+    "monitor_tip": "远程画面与操作",
+    "control": "控制",
+    "control_tip": "连接、会话权限与对等设备",
+    "log": "日志",
+    "log_tip": "当前会话与历史日志",
+    "settings": "设置",
+    "settings_tip": "主题、语言、捕获与更新",
+    "devtools": "开发工具",
+    "devtools_tip": "测试目标 · 自检 · 帧保存 · 界面预览",
+    "back_settings": "返回设置",
+    "back_settings_short": "返回"
+  },
+
+  "capsule": {
+    "disconnected": "未连接",
+    "connected": "已连接",
+    "stream_on": "画面开",
+    "control_on": "控制开",
+    "error": "错误",
+    "stream_short_on": "画面开",
+    "stream_short_off": "画面关",
+    "control_short_on": "控制开",
+    "control_short_off": "控制关",
+    "tip_open_control": "打开控制页",
+    "tip_error": "查看日志了解错误"
+  },
+
   "topbar": {
     "monitor": "监视",
     "monitor_tip": "实时预览与控制 — 远程操作目标窗口",
@@ -156,6 +186,7 @@
   },
 
   "settings": {
+    "connection_moved": "连接与会话权限已移至「控制」页，与手机/桌面导航一致。",
     "capture": "捕获",
     "snapshot": "截图",
     "snapshot_auto": "自动",
@@ -562,8 +593,6 @@
 
   "app": {
     "resize_expand": "向右拖拽展开面板",
-    "resize_drag": "拖拽调整面板宽度，向右拖到底可折叠",
-    "shell_open_controls": "控制栏（左滑）",
-    "shell_back_workspace": "返回主区（右滑）"
+    "resize_drag": "拖拽调整面板宽度，向右拖到底可折叠"
   }
 }

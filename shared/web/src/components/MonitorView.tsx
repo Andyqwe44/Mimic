@@ -848,6 +848,7 @@ export function MonitorView({
       <div className="flex-1 overflow-hidden p-4 min-h-0">
         <div
           ref={containerRef}
+          data-no-page-swipe
           className={`w-full h-full rounded-xl bg-bg-secondary ring-1 ring-inset overflow-hidden flex items-center justify-center relative outline-none transition-shadow ${
             !isDesktop && previewing && mappingEnabled
               ? focused

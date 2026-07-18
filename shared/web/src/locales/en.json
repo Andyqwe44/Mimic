@@ -9,6 +9,36 @@
     "ready": "Ready"
   },
 
+  "nav": {
+    "aria": "Primary navigation",
+    "monitor": "Monitor",
+    "monitor_tip": "Remote view and actions",
+    "control": "Control",
+    "control_tip": "Connection, session gates, and peers",
+    "log": "Log",
+    "log_tip": "Current session and history",
+    "settings": "Settings",
+    "settings_tip": "Theme, language, capture, updates",
+    "devtools": "DevTools",
+    "devtools_tip": "Test Target, Self-Test, Frame Dump, UI demos",
+    "back_settings": "Back to Settings",
+    "back_settings_short": "Back"
+  },
+
+  "capsule": {
+    "disconnected": "Offline",
+    "connected": "Connected",
+    "stream_on": "Streaming",
+    "control_on": "Control on",
+    "error": "Error",
+    "stream_short_on": "Stream on",
+    "stream_short_off": "Stream off",
+    "control_short_on": "Control on",
+    "control_short_off": "Control off",
+    "tip_open_control": "Open Control page",
+    "tip_error": "Open Log for error details"
+  },
+
   "topbar": {
     "monitor": "Monitor",
     "monitor_tip": "Live preview & remote control — operate target window remotely",
@@ -156,6 +186,7 @@
   },
 
   "settings": {
+    "connection_moved": "Connection and session gates moved to the Control page — same nav on phone and desktop.",
     "capture": "Capture",
     "snapshot": "Snapshot",
     "snapshot_auto": "Auto",
@@ -562,8 +593,6 @@
 
   "app": {
     "resize_expand": "Drag right to expand the panel",
-    "resize_drag": "Drag to resize; drag all the way right to collapse",
-    "shell_open_controls": "Controls (swipe left)",
-    "shell_back_workspace": "Back to workspace (swipe right)"
+    "resize_drag": "Drag to resize; drag all the way right to collapse"
   }
 }

@@ -1,40 +1,33 @@
-// ═══ App — Game Agent Monitor root ═══
-// Orchestrates: tab routing, dual-pane / narrow shell layout, capture state machine,
-// theme, pin lock, window polling, and resize handling.
-// Narrow (<708px): workspace ↔ controls via swipe (touch or mouse drag). Wide: dual-pane.
+// ═══ App — Mimic Client root ═══
+// Unified IA: Monitor / Control / Log / Settings (side nav desktop, bottom nav phone).
+// Orchestrates: page routing, capture state machine, theme, window polling.
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { TopBar } from './components/TopBar'
+import { ArrowLeft } from 'lucide-react'
+import { AppShell } from './components/AppShell'
 import { BottomBar } from './components/BottomBar'
-import { Tooltip } from './components/Toolkit'
-import { ConnectionPanel } from './components/ConnectionPanel'
-import { ScreenshotPanel } from './components/ScreenshotPanel'
-import { StreamGatesPanel } from './components/StreamGatesPanel'
-import { PeerPanel } from './components/PeerPanel'
-import { PeerRemoteView } from './components/PeerRemoteView'
-import { LogPanel } from './components/LogPanel'
-import { SettingsView } from './components/SettingsView'
+import { ControlView } from './components/ControlView'
 import { DevToolsView } from './components/DevToolsView'
-import { MonitorView, type MonitorApi } from './components/MonitorView'
-import { SelfTestModal } from './components/SelfTestModal'
-import { UpdateModal, type UpdateInfo } from './components/UpdateModal'
+import { HeaderActions } from './components/HeaderActions'
 import { LoadingScreen } from './components/LoadingScreen'
+import { LogPanel } from './components/LogPanel'
+import { MonitorView, type MonitorApi } from './components/MonitorView'
+import { ScreenshotPanel } from './components/ScreenshotPanel'
+import { SelfTestModal } from './components/SelfTestModal'
+import { SettingsView } from './components/SettingsView'
+import { Tooltip } from './components/Toolkit'
+import { UpdateModal, type UpdateInfo } from './components/UpdateModal'
 import { hostCall, logMgr, addLog, applyTheme, onUpdateProgress, type UpdateProgressMsg } from './lib/bridge'
 import { hasBootSettings, readBootSettings } from './lib/bootSettings'
-import { runSelfTest, sleep, type SelfTestState } from './lib/selftest'
 import { cantCaptureMinimized } from './lib/constants'
-import { DESKTOP_TITLE, displayTargetTitle } from './lib/windowTitle'
-import { setSavedLocale } from './lib/i18n'
+import { H, TEXT } from './lib/design'
 import { THIN_CLIENT } from './lib/features'
+import { setSavedLocale } from './lib/i18n'
+import type { AppPage } from './lib/pages'
+import { runSelfTest, sleep, type SelfTestState } from './lib/selftest'
 import type { WindowInfo, Rect } from './lib/types'
-
-// ── Layout constants ──
-const MIN_LEFT_WIDTH = 360
-const DEFAULT_RIGHT_WIDTH = 324
-/** Below this width: single-pane shell (workspace ↔ controls). Above: dual-pane. */
-const H_COLLAPSE_THRESHOLD = MIN_LEFT_WIDTH + DEFAULT_RIGHT_WIDTH + 24 // 708
-const SHELL_SWIPE_PX = 56
-const SHELL_SWIPE_RATIO = 1.25 // |dx| must exceed |dy| * ratio
+import { DESKTOP_TITLE, displayTargetTitle } from './lib/windowTitle'
+import { useViewport } from './hooks/useViewport'
 
 // DELIBERATE test delay so the startup skeleton screen stays visible long enough
 // to observe during development. Real startup needs NO artificial wait — the
@@ -43,10 +36,10 @@ const SPLASH_TEST_MS = 0
 
 export default function App() {
   const { t, i18n } = useTranslation()
+  const { shellMode, isNarrow, isShort } = useViewport()
 
   // ═══ UI state ═══
-  const [tab, setTab] = useState<'Monitor' | 'Log' | 'Settings' | 'DevTools'>('Settings')
-  const [running, setRunning] = useState(false)
+  const [page, setPage] = useState<AppPage>('Control')
   // Initialised from the compile-time version (version.h via Vite) so the splash
   // shows it instantly; get_version overwrites it at runtime (they match).
   const [appVersion, setAppVersion] = useState(`v${__APP_VERSION__}`)
@@ -63,128 +56,8 @@ export default function App() {
   const [demoUpdateDownloading, setDemoUpdateDownloading] = useState(false)
   const [demoUpdateProgress, setDemoUpdateProgress] = useState<UpdateProgressMsg | null>(null)
   const [demoSelfTest, setDemoSelfTest] = useState<SelfTestState | null>(null)
-  const [rightWidth, setRightWidth] = useState(DEFAULT_RIGHT_WIDTH)
-  const [rightCollapsed, setRightCollapsed] = useState(false)
-  // Narrow window (= phone): one full-screen page at a time; wide = dual-pane.
-  const [narrowLayout, setNarrowLayout] = useState(
-    () => typeof window !== 'undefined' && window.innerWidth < H_COLLAPSE_THRESHOLD,
-  )
-  const [shellView, setShellView] = useState<'workspace' | 'controls'>('workspace')
-  const narrowLayoutRef = useRef(narrowLayout)
-  narrowLayoutRef.current = narrowLayout
-  const shellSwipeRef = useRef<{
-    pointerId: number
-    x: number
-    y: number
-    armed: boolean
-  } | null>(null)
-
-  // ── Right panel expanded/collapsed state + refs (used in layout callbacks) ──
-  const [connectionExpanded, setConnectionExpanded] = useState(true)
-  const [peerExpanded, setPeerExpanded] = useState(true)
-  const [gatesExpanded, setGatesExpanded] = useState(true)
-  const [screenshotExpanded, setScreenshotExpanded] = useState(false)
-  const [logExpanded, setLogExpanded] = useState(true)
-  const connectionExpandedRef = useRef(connectionExpanded)
-  connectionExpandedRef.current = connectionExpanded
-  const peerExpandedRef = useRef(peerExpanded)
-  peerExpandedRef.current = peerExpanded
-  const gatesExpandedRef = useRef(gatesExpanded)
-  gatesExpandedRef.current = gatesExpanded
-  const screenshotExpandedRef = useRef(screenshotExpanded)
-  screenshotExpandedRef.current = screenshotExpanded
-  const logExpandedRef = useRef(logExpanded)
-  logExpandedRef.current = logExpanded
-
-  // ── Pin lock — prevents auto-layout from changing pinned panels ──
-  // null = not pinned; true/false = locked to that expanded state
-  const connPinLocked = useRef<boolean | null>(null)
-  const peerPinLocked = useRef<boolean | null>(null)
-  const gatesPinLocked = useRef<boolean | null>(null)
-  const ssPinLocked = useRef<boolean | null>(null)
-  const logPinLocked = useRef<boolean | null>(null)
-  const [connectionPinned, setConnectionPinned] = useState(false)
-  const [peerPinned, setPeerPinned] = useState(false)
-  const [gatesPinned, setGatesPinned] = useState(false)
-  const [screenshotPinned, setScreenshotPinned] = useState(false)
-  const [logPinned, setLogPinned] = useState(false)
   const ssHasContentRef = useRef(false)   // tracks whether Screenshot canvas has rendered content
-
-  // ── Safe setters — check pin lock before modifying expanded state ──
-  // Return false when pinned (caller can detect rejection); true when state was set
-  const setConnExpanded = useCallback((v: boolean): boolean => {
-    if (connPinLocked.current !== null) return false
-    setConnectionExpanded(v)
-    return true
-  }, [])
-  const setPeerPanelExpanded = useCallback((v: boolean): boolean => {
-    if (peerPinLocked.current !== null) return false
-    setPeerExpanded(v)
-    return true
-  }, [])
-  const setGatesPanelExpanded = useCallback((v: boolean): boolean => {
-    if (gatesPinLocked.current !== null) return false
-    setGatesExpanded(v)
-    return true
-  }, [])
-  const setSsExpanded = useCallback((v: boolean): boolean => {
-    if (ssPinLocked.current !== null) return false
-    setScreenshotExpanded(v)
-    return true
-  }, [])
-  const setLogPanelExpanded = useCallback((v: boolean): boolean => {
-    if (logPinLocked.current !== null) return false
-    setLogExpanded(v)
-    return true
-  }, [])
-
-  // ── Pin toggles — record current expanded state as lock, or release lock ──
-  const toggleConnPin = useCallback(() => {
-    if (connPinLocked.current === null) {
-      connPinLocked.current = connectionExpandedRef.current
-      setConnectionPinned(true)
-    } else {
-      connPinLocked.current = null
-      setConnectionPinned(false)
-    }
-  }, [])
-  const togglePeerPin = useCallback(() => {
-    if (peerPinLocked.current === null) {
-      peerPinLocked.current = peerExpandedRef.current
-      setPeerPinned(true)
-    } else {
-      peerPinLocked.current = null
-      setPeerPinned(false)
-    }
-  }, [])
-  const toggleGatesPin = useCallback(() => {
-    if (gatesPinLocked.current === null) {
-      gatesPinLocked.current = gatesExpandedRef.current
-      setGatesPinned(true)
-    } else {
-      gatesPinLocked.current = null
-      setGatesPinned(false)
-    }
-  }, [])
-  const toggleSsPin = useCallback(() => {
-    if (ssPinLocked.current === null) {
-      ssPinLocked.current = screenshotExpandedRef.current
-      setScreenshotPinned(true)
-    } else {
-      ssPinLocked.current = null
-      setScreenshotPinned(false)
-    }
-  }, [])
-  const toggleLogPin = useCallback(() => {
-    if (logPinLocked.current === null) {
-      logPinLocked.current = logExpandedRef.current
-      setLogPinned(true)
-    } else {
-      logPinLocked.current = null
-      setLogPinned(false)
-    }
-  }, [])
-  const rightPanelRef = useRef<HTMLDivElement>(null)
+  const [sessionError, setSessionError] = useState(false)
 
   // ═══ Theme ═══
   // Boot snapshot from C++ (pre-paint) — avoids default-blue flash on startup.
@@ -219,51 +92,6 @@ export default function App() {
   useEffect(() => {
     applyTheme(resolvedDark)
   }, [resolvedDark])
-
-  // ═══ Right panel auto-layout ═══
-  // Measures collapsed/expanded heights, then auto-collapses/expands panels
-  // as the window resizes or the divider is dragged.
-  // H = measured heights: C/S/L = expanded, Cp/Sp/Lp = collapsed (header only)
-  const H = useRef({ C: 180, S: 300, L: 250, Cp: 44, Sp: 44, Lp: 44 })
-  const GAP = 60                         // gap between panels (p-3 = 12px × 2 + gap-3 = 12px ≈ 36px total; extra for safety)
-  const prevClientH = useRef(0)          // previous container height (detect grow vs shrink)
-  const guard = useRef({ C: 0, S: 0, L: 0 })  // debounce timestamps per panel
-
-  // ── Measure actual rendered heights of each panel ──
-  const measureLayout = useCallback(() => {
-    const el = rightPanelRef.current
-    if (!el) return
-    const kids = el.querySelectorAll(':scope > div')
-    if (kids.length < 3) return
-    const gh = (i: number) => (kids[i] as HTMLElement).offsetHeight
-    if (connectionExpandedRef.current) H.current.C = gh(0)
-    else H.current.Cp = gh(0)
-    if (screenshotExpandedRef.current) H.current.S = gh(1)
-    else H.current.Sp = gh(1)
-    if (logExpandedRef.current) H.current.L = gh(2)
-    else H.current.Lp = gh(2)
-    if (!connectionExpandedRef.current) {
-      const inner = kids[0].querySelector('[data-layout-measure]') as HTMLElement | null
-      if (inner) H.current.C = Math.max(H.current.C, gh(0) + inner.scrollHeight)
-    }
-    if (!screenshotExpandedRef.current) {
-      const inner = kids[1].querySelector('[data-layout-measure]') as HTMLElement | null
-      if (inner) H.current.S = Math.max(H.current.S, gh(1) + inner.scrollHeight)
-    }
-    if (!logExpandedRef.current) {
-      const inner = kids[2].querySelector('[data-layout-measure]') as HTMLElement | null
-      if (inner) H.current.L = Math.max(H.current.L, gh(2) + inner.scrollHeight)
-    }
-  }, [])
-
-  useEffect(() => {
-    const t = setTimeout(measureLayout, 200)
-    return () => clearTimeout(t)
-  }, [connectionExpanded, screenshotExpanded, logExpanded, measureLayout])
-
-  useEffect(() => {
-    measureLayout()
-  }, [])
 
   // Version + LogManager init
   useEffect(() => {
@@ -527,312 +355,7 @@ export default function App() {
   // Auto-save settings on change (debounced) — declared early, effect wired after all states below
   const saveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // ── Initial layout check — auto-collapse if panels overflow container ──
-  useEffect(() => {
-    const check = () => {
-      measureLayout()
-      if (narrowLayoutRef.current) return // narrow: scroll the rail instead of collapsing cards
-      const el = rightPanelRef.current
-      if (!el) return
-      const kids = el.querySelectorAll(':scope > div')
-      let kidsH = 0
-      for (let i = 0; i < 3; i++) kidsH += (kids[i] as HTMLElement).offsetHeight
-      const overflow = kidsH + GAP - el.clientHeight
-      if (overflow > 4) {
-        if (logExpandedRef.current && logPinLocked.current === null) {
-          addLog(`[Layout] init overflow ${overflow}px → auto-collapse log`)
-          setLogExpanded(false)
-          setTimeout(check, 250)
-        } else if (connectionExpandedRef.current && connPinLocked.current === null) {
-          addLog(`[Layout] init overflow ${overflow}px → auto-collapse connection`)
-          setConnectionExpanded(false)
-          setTimeout(check, 250)
-        } else if (
-          screenshotExpandedRef.current &&
-          ssPinLocked.current === null &&
-          !ssHasContentRef.current
-        ) {
-          addLog(`[Layout] init overflow ${overflow}px → auto-collapse screenshot`)
-          setScreenshotExpanded(false)
-          setTimeout(check, 250)
-        } else if (
-          screenshotExpandedRef.current &&
-          ssPinLocked.current === null &&
-          ssHasContentRef.current
-        ) {
-          addLog(
-            `[Layout] init overflow ${overflow}px → auto-collapse screenshot (has content)`,
-          )
-          setScreenshotExpanded(false)
-        }
-      }
-      prevClientH.current = el.clientHeight
-    }
-    const t = setTimeout(check, 400)
-    return () => clearTimeout(t)
-  }, [])
-
-  // ── Window resize → auto-collapse/expand panels ──
-  useEffect(() => {
-    const onResize = () => {
-      if (narrowLayoutRef.current) return
-      const el = rightPanelRef.current
-      if (!el) return
-      const ch = el.clientHeight
-      if (prevClientH.current === 0) {
-        prevClientH.current = ch
-        return
-      }
-      const kids = el.querySelectorAll(':scope > div')
-      let kidsH = 0
-      for (let i = 0; i < 3; i++) kidsH += (kids[i] as HTMLElement).offsetHeight
-      const overflow = kidsH + GAP - ch
-      const prev = prevClientH.current
-      const now = Date.now()
-      const h = H.current
-
-      if (ch < prev) {
-        if (overflow > 4) {
-          if (
-            logExpandedRef.current &&
-            logPinLocked.current === null &&
-            now - guard.current.L > 350
-          ) {
-            addLog(`[Layout] overflow ${overflow}px → auto-collapse log`)
-            setLogExpanded(false)
-            guard.current.L = now
-          } else if (
-            connectionExpandedRef.current &&
-            connPinLocked.current === null &&
-            now - guard.current.C > 350
-          ) {
-            addLog(`[Layout] overflow ${overflow}px → auto-collapse connection`)
-            setConnectionExpanded(false)
-            guard.current.C = now
-          } else if (
-            screenshotExpandedRef.current &&
-            ssPinLocked.current === null &&
-            !ssHasContentRef.current &&
-            now - guard.current.S > 350
-          ) {
-            addLog(`[Layout] overflow ${overflow}px → auto-collapse screenshot`)
-            setScreenshotExpanded(false)
-            guard.current.S = now
-          } else if (
-            screenshotExpandedRef.current &&
-            ssPinLocked.current === null &&
-            ssHasContentRef.current &&
-            now - guard.current.S > 350
-          ) {
-            addLog(
-              `[Layout] overflow ${overflow}px → auto-collapse screenshot (has content)`,
-            )
-            setScreenshotExpanded(false)
-            guard.current.S = now
-          }
-        }
-      } else if (ch > prev) {
-        if (
-          !screenshotExpandedRef.current &&
-          ssPinLocked.current === null &&
-          ssHasContentRef.current &&
-          now - guard.current.S > 350
-        ) {
-          const wouldNeed = kidsH - h.Sp + h.S + GAP
-          if (ch >= wouldNeed) {
-            addLog(
-              `[Layout] room for S (has content, need ${wouldNeed}px) → auto-expand screenshot`,
-            )
-            setScreenshotExpanded(true)
-            guard.current.S = now
-          }
-        } else if (
-          !connectionExpandedRef.current &&
-          connPinLocked.current === null &&
-          now - guard.current.C > 350
-        ) {
-          const wouldNeed = kidsH - h.Cp + h.C + GAP
-          if (ch >= wouldNeed) {
-            addLog(`[Layout] room for C (need ${wouldNeed}px) → auto-expand connection`)
-            setConnectionExpanded(true)
-            guard.current.C = now
-          }
-        } else if (
-          !screenshotExpandedRef.current &&
-          ssPinLocked.current === null &&
-          !ssHasContentRef.current &&
-          now - guard.current.S > 350
-        ) {
-          const wouldNeed = kidsH - h.Sp + h.S + GAP
-          if (ch >= wouldNeed) {
-            addLog(`[Layout] room for S (need ${wouldNeed}px) → auto-expand screenshot`)
-            setScreenshotExpanded(true)
-            guard.current.S = now
-          }
-        } else if (
-          !logExpandedRef.current &&
-          logPinLocked.current === null &&
-          now - guard.current.L > 350
-        ) {
-          const wouldNeed = kidsH - h.Lp + h.L + GAP
-          if (ch >= wouldNeed) {
-            addLog(`[Layout] room for L (need ${wouldNeed}px) → auto-expand log`)
-            setLogExpanded(true)
-            guard.current.L = now
-          }
-        }
-      }
-      prevClientH.current = ch
-    }
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
-  }, [])
-
-  // ── Drag-end overflow check — same logic as resize but called after divider drag ──
-  const checkVerticalLayout = useCallback(() => {
-    if (narrowLayoutRef.current) return
-    const el = rightPanelRef.current
-    if (!el) return
-    const kids = el.querySelectorAll(':scope > div')
-    if (kids.length < 3) return
-    let kidsH = 0
-    for (let i = 0; i < 3; i++) kidsH += (kids[i] as HTMLElement).offsetHeight
-    const ch = el.clientHeight
-    const h = H.current
-    const overflow = kidsH + GAP - ch
-
-    if (overflow > 4) {
-      if (logExpandedRef.current && logPinLocked.current === null) {
-        addLog(`[Layout] drag overflow ${overflow}px → auto-collapse log`)
-        setLogExpanded(false)
-      } else if (connectionExpandedRef.current && connPinLocked.current === null) {
-        addLog(`[Layout] drag overflow ${overflow}px → auto-collapse connection`)
-        setConnectionExpanded(false)
-      } else if (
-        screenshotExpandedRef.current &&
-        ssPinLocked.current === null &&
-        !ssHasContentRef.current
-      ) {
-        addLog(`[Layout] drag overflow ${overflow}px → auto-collapse screenshot`)
-        setScreenshotExpanded(false)
-      } else if (
-        screenshotExpandedRef.current &&
-        ssPinLocked.current === null &&
-        ssHasContentRef.current
-      ) {
-        addLog(
-          `[Layout] drag overflow ${overflow}px → auto-collapse screenshot (has content)`,
-        )
-        setScreenshotExpanded(false)
-      }
-    } else if (overflow < -4) {
-      if (
-        !screenshotExpandedRef.current &&
-        ssPinLocked.current === null &&
-        ssHasContentRef.current
-      ) {
-        const wouldNeed = kidsH - h.Sp + h.S + GAP
-        if (ch >= wouldNeed) {
-          addLog(
-            `[Layout] drag room for S (has content, need ${wouldNeed}px) → auto-expand screenshot`,
-          )
-          setScreenshotExpanded(true)
-        }
-      } else if (
-        !connectionExpandedRef.current &&
-        connPinLocked.current === null
-      ) {
-        const wouldNeed = kidsH - h.Cp + h.C + GAP
-        if (ch >= wouldNeed) {
-          addLog(
-            `[Layout] drag room for C (need ${wouldNeed}px) → auto-expand connection`,
-          )
-          setConnectionExpanded(true)
-        }
-      } else if (
-        !screenshotExpandedRef.current &&
-        ssPinLocked.current === null &&
-        !ssHasContentRef.current
-      ) {
-        const wouldNeed = kidsH - h.Sp + h.S + GAP
-        if (ch >= wouldNeed) {
-          addLog(`[Layout] drag room for S (need ${wouldNeed}px) → auto-expand screenshot`)
-          setScreenshotExpanded(true)
-        }
-      } else if (!logExpandedRef.current && logPinLocked.current === null) {
-        const wouldNeed = kidsH - h.Lp + h.L + GAP
-        if (ch >= wouldNeed) {
-          addLog(`[Layout] drag room for L (need ${wouldNeed}px) → auto-expand log`)
-          setLogExpanded(true)
-        }
-      }
-    }
-  }, [])
-
-  // ── Narrow shell ↔ dual-pane (width only; phone = narrow desktop) ──
-  const autoCollapsedByWidth = useRef(false)
-
-  useEffect(() => {
-    const onResize = () => {
-      const narrow = window.innerWidth < H_COLLAPSE_THRESHOLD
-      setNarrowLayout((prev) => {
-        if (narrow && !prev) {
-          setShellView('workspace')
-          addLog('[Layout] narrow shell → workspace ↔ controls (swipe)')
-        } else if (!narrow && prev) {
-          setShellView('workspace')
-          if (autoCollapsedByWidth.current) {
-            autoCollapsedByWidth.current = false
-            setRightCollapsed(false)
-          }
-          addLog('[Layout] wide shell → dual-pane')
-        }
-        return narrow
-      })
-    }
-    window.addEventListener('resize', onResize)
-    onResize()
-    return () => window.removeEventListener('resize', onResize)
-  }, [])
-
-  const goShellView = useCallback((view: 'workspace' | 'controls') => {
-    setShellView((prev) => {
-      if (prev === view) return prev
-      addLog(`[Layout] shell → ${view}`)
-      return view
-    })
-  }, [])
-
-  const onShellPointerDown = useCallback((e: React.PointerEvent) => {
-    if (!narrowLayout) return
-    if (e.pointerType === 'mouse' && e.button !== 0) return
-    const el = e.target as HTMLElement | null
-    if (el?.closest?.('[data-no-shell-swipe], canvas, input, textarea, select')) return
-    const pointerId = e.pointerId
-    const x0 = e.clientX
-    const y0 = e.clientY
-    shellSwipeRef.current = { pointerId, x: x0, y: y0, armed: true }
-
-    const finish = (ev: PointerEvent) => {
-      if (ev.pointerId !== pointerId) return
-      window.removeEventListener('pointerup', finish)
-      window.removeEventListener('pointercancel', finish)
-      const s = shellSwipeRef.current
-      if (!s?.armed || s.pointerId !== pointerId) return
-      shellSwipeRef.current = null
-      const dx = ev.clientX - s.x
-      const dy = ev.clientY - s.y
-      if (Math.abs(dx) < SHELL_SWIPE_PX) return
-      if (Math.abs(dx) < Math.abs(dy) * SHELL_SWIPE_RATIO) return
-      if (dx < 0) goShellView('controls')
-      else goShellView('workspace')
-    }
-    window.addEventListener('pointerup', finish)
-    window.addEventListener('pointercancel', finish)
-  }, [narrowLayout, goShellView])
-
   // ═══ Capture state ═══
-  const isResizing = useRef(false)
   // ── Selected target window ──
   const [selWindow, setSelWindow] = useState<WindowInfo>({
     title: DESKTOP_TITLE,
@@ -1047,7 +570,6 @@ export default function App() {
     } catch (_) {}
     opStateRef.current = 'idle'
     addLog('[Stream] gate closed')
-    setSsExpanded(false)
   }, [])
 
   // ── Take single snapshot ──
@@ -1071,7 +593,6 @@ export default function App() {
       opStateRef.current = 'idle'
       return
     }
-    if (!screenshotExpanded) setSsExpanded(true)
     const t0 = Date.now()
     snapshotStartRef.current = t0
     snapshotRef.current = true
@@ -1114,8 +635,9 @@ export default function App() {
       addLog('[Capture] stream already starting, ignoring')
       return
     }
-    if (!serverConnected) {
-      addLog('[Stream] blocked: not connected to controller_server')
+    const peerLinked = peerRole === 'controlled' && peerTransport !== 'none'
+    if (!serverConnected && !peerLinked) {
+      addLog('[Stream] blocked: no controller link (peer session or server)')
       return
     }
 
@@ -1137,43 +659,16 @@ export default function App() {
         hwnd,
         method: streamMethod,
       })
+      setSessionError(false)
     } catch (e) {
       previewingRef.current = false
       setPreviewing(false)
       opStateRef.current = 'idle'
+      setSessionError(true)
       addLog(`[Stream] start failed: ${e}`)
       return
     }
-    if (!screenshotExpanded) setSsExpanded(true)
-  }, [selWindow.hwnd, streamMethod, winState, renderMethod, screenshotExpanded, serverConnected])
-
-  const toggleServerConnect = useCallback(async () => {
-    if (serverConnected) {
-      try {
-        if (previewing) await stopStream()
-        await hostCall('disconnect_server')
-        setServerConnected(false)
-        addLog('[Server] disconnected')
-      } catch (e) {
-        addLog(`[Server] disconnect failed: ${e}`)
-      }
-      return
-    }
-    try {
-      const port = parseInt(serverPort, 10) || 9997
-      const res = await hostCall('connect_server', { host: serverHost.trim() || '127.0.0.1', port })
-      if (res?.ok === false) {
-        addLog(`[Server] connect failed: ${res?.error || 'unknown'}`)
-        setServerConnected(false)
-        return
-      }
-      setServerConnected(true)
-      addLog(`[Server] connected ${serverHost}:${port}`)
-    } catch (e) {
-      setServerConnected(false)
-      addLog(`[Server] connect failed: ${e}`)
-    }
-  }, [serverConnected, serverHost, serverPort, previewing, stopStream])
+  }, [selWindow.hwnd, streamMethod, winState, renderMethod, serverConnected, peerRole, peerTransport])
 
   // Poll server link status (link may drop without UI action).
   useEffect(() => {
@@ -1276,7 +771,7 @@ export default function App() {
       .then((r: any) => { if (r?.hwnd) return hostCall('launch_test_target') })
       .catch(() => {})
 
-    setTab((t) => (t === 'DevTools' ? 'Settings' : t))
+    setPage((pg) => (pg === 'DevTools' ? 'Settings' : pg))
 
     // ③ Re-detect from SSOT
     refreshAgentStatus().then(() => {
@@ -1328,7 +823,7 @@ export default function App() {
         // 2 — select it as the capture target (same state a user selection sets)
         if (opStateRef.current === 'streaming') await stopStream()
         setSelWindow({ title: 'GAM Test Target', category: 'window', hwnd })
-        setTab('Monitor')
+        setPage('Monitor')
         await sleep(250) // let React re-render → fresh capture closures + MonitorView mount
 
         // 3 — preview + mapping (reuse the real preview start + mapping toggle)
@@ -1395,40 +890,6 @@ export default function App() {
     }
   }, [])
 
-  // ── Resize divider drag handler ──
-  const handleResizeStart = useCallback(
-    (e: React.MouseEvent) => {
-      autoCollapsedByWidth.current = false
-      e.preventDefault()
-      isResizing.current = true
-      document.body.style.cursor = 'col-resize'
-      document.body.style.userSelect = 'none'
-      const onMove = (ev: MouseEvent) => {
-        const w = document.body.clientWidth - ev.clientX
-        if (w < 160) setRightCollapsed(true)
-        else {
-          setRightCollapsed(false)
-          setRightWidth(Math.max(324, Math.min(400, w)))
-        }
-      }
-      const onUp = () => {
-        isResizing.current = false
-        document.body.style.cursor = ''
-        document.body.style.userSelect = ''
-        window.removeEventListener('mousemove', onMove)
-        window.removeEventListener('mouseup', onUp)
-        addLog('[Layout] right panel resized')
-        requestAnimationFrame(() => {
-          measureLayout()
-          checkVerticalLayout()
-        })
-      }
-      window.addEventListener('mousemove', onMove)
-      window.addEventListener('mouseup', onUp)
-    },
-    [measureLayout, checkVerticalLayout],
-  )
-
   // ═══ Display = overlay ?? SSOT (企业级；关 Dev 清 overlay 后自动回到真相) ═══
   const displayAgentConnected = demoAgentOverride ?? agentConnectedReal
   const displayUpdateInfo = demoUpdateInfo ?? updateInfo
@@ -1437,133 +898,96 @@ export default function App() {
   const displaySelfTest = demoSelfTest ?? selfTest
   const displayHasUpdate = displayUpdateInfo?.status === 'update'
 
+  const pageTitle = t(`nav.${page === 'DevTools' ? 'devtools' : page.toLowerCase()}`)
+  const capsuleDevice = displayTargetTitle(selWindow.title, t)
+  const peerLinked = peerRole === 'controlled' && peerTransport !== 'none'
+  const sessionConnected = serverConnected || peerRole !== 'idle' || peerTransport !== 'none'
+
+  const onCapsule = () => {
+    if (sessionError) {
+      setPage('Log')
+      addLog('[Nav] capsule → log (session error)')
+    } else {
+      setPage('Control')
+      addLog('[Nav] capsule → control')
+    }
+  }
+
   // ═══ Render ═══
   return (
     <div className="relative h-full flex flex-col bg-bg-primary">
-      {/* Startup skeleton overlay — covers the UI (z-50) until initial init settles */}
       {(!appReady || previewSkeleton) && <LoadingScreen />}
-      {/* ── Top bar: tabs + Start/Stop + theme ── */}
-      <TopBar
-        tab={tab}
-        setTab={(t) => {
-          goShellView('workspace')
-          setTab(t)
-        }}
-        running={running}
-        onStart={() => setRunning(true)}
-        onStop={() => setRunning(false)}
-        dark={resolvedDark}
-        onToggleTheme={() => setTheme(resolvedDark ? 'light' : 'dark')}
-        devMode={devMode}
-        locale={locale}
-        setLocale={setLocale}
-        isAdmin={isAdmin}
-        onSwitchPermission={switchPermission}
-        narrowLayout={narrowLayout}
-        shellView={shellView}
-        onToggleShell={() => goShellView(shellView === 'workspace' ? 'controls' : 'workspace')}
-      />
-      {/* ── Main: wide = dual-pane; narrow = swipe workspace ↔ controls ── */}
-      <div
-        className={`flex-1 overflow-hidden ${narrowLayout ? '' : 'flex'}`}
-        onPointerDown={narrowLayout ? onShellPointerDown : undefined}
-      >
-        <div
-          className={
-            narrowLayout
-              ? 'flex h-full transition-transform duration-300 ease-out will-change-transform'
-              : 'contents'
+      <div className="flex-1 min-h-0">
+        <AppShell
+          page={page}
+          setPage={setPage}
+          shellMode={shellMode}
+          pageTitle={pageTitle}
+          device={capsuleDevice}
+          connected={sessionConnected}
+          streaming={previewing}
+          controlling={acceptControl}
+          sessionError={sessionError}
+          compactCapsule={isNarrow || shellMode === 'bottom'}
+          short={isShort}
+          onCapsule={onCapsule}
+          appVersion={appVersion}
+          headerTrailing={
+            <div className="flex items-center gap-1 shrink-0">
+              {page === 'DevTools' && (
+                <Tooltip text={t('nav.back_settings')}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPage('Settings')
+                      addLog('[Nav] DevTools → Settings')
+                    }}
+                    className={`inline-flex items-center gap-1 h-7 px-2 rounded-md ${TEXT.xs} font-medium
+                      text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors`}
+                  >
+                    <ArrowLeft className={H.iconSm} />
+                    {!isNarrow && <span>{t('nav.back_settings_short')}</span>}
+                  </button>
+                </Tooltip>
+              )}
+              {(shellMode !== 'bottom' || !isNarrow) && (
+                <HeaderActions
+                  dark={resolvedDark}
+                  onToggleTheme={() => setTheme(resolvedDark ? 'light' : 'dark')}
+                  locale={locale}
+                  setLocale={setLocale}
+                  isAdmin={isAdmin}
+                  onSwitchPermission={switchPermission}
+                  compact={isNarrow || isShort}
+                />
+              )}
+            </div>
           }
-          style={
-            narrowLayout
-              ? {
-                  width: '200%',
-                  transform: shellView === 'controls' ? 'translateX(-50%)' : 'translateX(0)',
-                }
-              : undefined
+          statusBar={
+            (page === 'Monitor' || page === 'Control') && shellMode !== 'bottom' ? (
+              <BottomBar
+                selWin={capsuleDevice}
+                snapMethod={snapMethod}
+                streamMethod={streamMethod}
+                previewing={previewing}
+                fps={streamFps}
+                targetDims={targetDims}
+                appVersion={appVersion}
+                agentConnected={displayAgentConnected}
+                hasUpdate={displayHasUpdate}
+                onCheckUpdate={checkForUpdate}
+              />
+            ) : undefined
           }
         >
-        {/* ── Left / workspace: tab content (Settings / Monitor / Log) ── */}
-        <div
-          className={
-            narrowLayout
-              ? 'flex h-full w-1/2 flex-col overflow-hidden border-r border-border'
-              : 'flex-1 flex flex-col overflow-hidden border-r border-border'
-          }
-          style={{ minWidth: narrowLayout ? 0 : MIN_LEFT_WIDTH }}
-        >
-          {/* Settings tab */}
-          {tab === 'Settings' && (
-            <SettingsView
-              snapMethod={snapMethod} setSnapMethod={setSnapMethod}
-              streamMethod={streamMethod} setStreamMethod={setStreamMethod}
-              renderMethod={renderMethod} setRenderMethod={setRenderMethod}
-              autoSnap={autoSnap} setAutoSnap={setAutoSnap}
-              autoStream={autoStream} setAutoStream={setAutoStream}
-              normalAccent={normalAccent} setNormalAccentState={setNormalAccentState}
-              normalSecondaryAccent={normalSecondaryAccent} setNormalSecondaryAccentState={setNormalSecondaryAccentState}
-              devAccent={devAccent} setDevAccentState={setDevAccentState}
-              devSecondaryAccent={devSecondaryAccent} setDevSecondaryAccentState={setDevSecondaryAccentState}
-              accent={accent} secondaryAccent={secondaryAccent}
-              locale={locale} setLocale={setLocale}
-              selWin={selWindow} winState={winState}
-              expectedCaptureState={expectedCaptureState}
-              setExpectedCaptureState={setExpectedCaptureState}
-              onSelect={(w: WindowInfo) => {
-                if (opStateRef.current === 'streaming') stopStream()
-                setSelWindow(w)
-              }}
-              onDisconnect={() => {
-                if (opStateRef.current === 'streaming') stopStream()
-                setSelWindow({
-                  title: DESKTOP_TITLE,
-                  category: 'desktop',
-                  hwnd: 0,
-                })
-                setExpectedCaptureState('desktop')
-                addLog('[Connection] disconnected, back to desktop')
-              }}
-              keepFiles={keepFiles} setKeepFiles={setKeepFiles}
-              appVersion={appVersion} theme={theme} setTheme={setTheme}
-              devMode={devMode} setDevMode={setDevModeSafe}
-              mouseMode={mouseMode} setMouseMode={setMouseMode}
-              keyMode={keyMode} setKeyMode={setKeyMode}
-              mappingHotkey={mappingHotkey} setMappingHotkey={setMappingHotkey}
-              selfTargetMode={selfTargetMode} setSelfTargetMode={setSelfTargetMode}
-              onCheckUpdate={checkForUpdate}
-              hasUpdate={displayHasUpdate}
-              isAdmin={isAdmin}
-              onSwitchPermission={switchPermission}
-              serverHost={serverHost}
-              serverPort={serverPort}
-              onServerHostChange={setServerHost}
-              onServerPortChange={setServerPort}
-              serverConnected={serverConnected}
-              onToggleServer={toggleServerConnect}
-            />
-          )}
-          {/* Dev tab */}
-          {tab === 'DevTools' && (
-            <DevToolsView
-              appVersion={appVersion}
-              saveCaptureFrames={saveCaptureFrames} setSaveCaptureFrames={setSaveCaptureFrames}
-              saveStreamFrames={saveStreamFrames} setSaveStreamFrames={setSaveStreamFrames}
-              frameDumpDir={frameDumpDir} setFrameDumpDir={setFrameDumpDir}
-              onRunSelfTest={runSelfTestFlow}
-              selfTestRunning={selfTest.phase === 'running'}
-              onPreviewSkeleton={previewSkeletonScreen}
-              onDevInjectUpdate={devInjectUpdate}
-              onDevInjectDownload={devInjectDownload}
-              onDevInjectSelfTest={devInjectSelfTest}
-              onDevInjectAgent={devInjectAgent}
-            />
-          )}
-          {/* Monitor tab */}
-          {tab === 'Monitor' && (
+          {/* Keep Monitor/Control mounted so peer listeners + preview handlers stay alive */}
+          <div className={page === 'Monitor' ? 'flex-1 flex flex-col min-h-0' : 'hidden'}>
             <MonitorView
-              selWin={selWindow} winState={winState}
+              selWin={selWindow}
+              winState={winState}
               capMethod={capMethod}
-              snapMethod={snapMethod} streamMethod={streamMethod}
+              snapMethod={snapMethod}
+              streamMethod={streamMethod}
               previewing={previewing}
               acceptControl={acceptControl}
               snapshotLatency={snapshotLatency}
@@ -1572,7 +996,8 @@ export default function App() {
               onToggleAcceptControl={toggleAcceptControl}
               mouseMode={mouseMode}
               keyMode={keyMode}
-              mappingEnabled={mappingEnabled} setMappingEnabled={setMappingEnabled}
+              mappingEnabled={mappingEnabled}
+              setMappingEnabled={setMappingEnabled}
               mappingHotkey={mappingHotkey}
               targetDims={targetDims}
               selfRect={selfRect}
@@ -1582,191 +1007,146 @@ export default function App() {
             >
               {!THIN_CLIENT && (
                 <ScreenshotPanel
-                  selWin={selWindow} screenRatio={screenRatio}
-                  snapMethod={snapMethod} streamMethod={streamMethod}
-                  renderMethod={renderMethod} winState={winState}
-                  expanded={true} onToggle={() => {}}
-                  previewing={previewing} previewingRef={previewingRef}
-                  snapshotRef={snapshotRef} snapshotStartRef={snapshotStartRef}
+                  selWin={selWindow}
+                  screenRatio={screenRatio}
+                  snapMethod={snapMethod}
+                  streamMethod={streamMethod}
+                  renderMethod={renderMethod}
+                  winState={winState}
+                  expanded={true}
+                  onToggle={() => {}}
+                  previewing={previewing}
+                  previewingRef={previewingRef}
+                  snapshotRef={snapshotRef}
+                  snapshotStartRef={snapshotStartRef}
                   capMethod={capMethod}
                   onTakeSnapshot={takeSnapshot}
                   onTogglePreview={togglePreview}
-                  pinned={false} onTogglePin={() => {}}
+                  pinned={false}
+                  onTogglePin={() => {}}
+                  showPin={false}
                   hasContentRef={ssHasContentRef}
                   bare
                   onFps={setStreamFps}
-                  onDims={(w, h) => setTargetDims({w, h})}
+                  onDims={(w, h) => setTargetDims({ w, h })}
                 />
               )}
             </MonitorView>
-          )}
-          {/* Log tab */}
-          {tab === 'Log' && <LogPanel keepFiles={keepFiles} />}
-          {/* ── Bottom status strip ── */}
-          <BottomBar
-            selWin={displayTargetTitle(selWindow.title, t)}
-            snapMethod={snapMethod} streamMethod={streamMethod}
-            previewing={previewing} fps={streamFps}
-            targetDims={targetDims}
-            appVersion={appVersion}
-            agentConnected={displayAgentConnected}
-            hasUpdate={displayHasUpdate}
-            onCheckUpdate={checkForUpdate}
-          />
-        </div>
-        {/* ── Resize divider (wide shell only) ── */}
-        {!narrowLayout && (
-          <Tooltip
-            text={
-              rightCollapsed ? t('app.resize_expand') : t('app.resize_drag')
-            }
-          >
-            <div
-              onMouseDown={handleResizeStart}
-              className={`${rightCollapsed ? 'w-4' : 'w-1'} hover:bg-accent/50 cursor-col-resize flex items-center justify-center group shrink-0 transition-all select-none bg-transparent`}
-            >
-              <div className="w-[2px] h-8 rounded-full transition-colors bg-border group-hover:bg-accent" />
-            </div>
-          </Tooltip>
-        )}
-        {/* ── Right / controls: Connection → Peer → Gates/Screenshot → Log ── */}
-        {(narrowLayout || !rightCollapsed) && (
-          <div
-            ref={rightPanelRef}
-            className={
-              narrowLayout
-                ? 'flex h-full w-1/2 flex-col p-3 gap-3 overflow-y-auto min-h-0'
-                : 'flex flex-col p-3 gap-3 overflow-hidden min-h-0'
-            }
-            style={
-              narrowLayout
-                ? undefined
-                : { width: rightWidth, minWidth: 324, maxWidth: 400 }
-            }
-          >
-            {/* Connection panel */}
-            <div className="shrink-0">
-              <ConnectionPanel
-                onSelect={(w: WindowInfo) => {
-                  if (opStateRef.current === 'streaming') stopStream()
-                  setSelWindow(w)
-                }}
-                onDisconnect={() => {
-                  if (opStateRef.current === 'streaming') stopStream()
-                  setSelWindow({
-                    title: DESKTOP_TITLE,
-                    category: 'desktop',
-                    hwnd: 0,
-                  })
-                  setExpectedCaptureState('desktop')
-                  addLog('[Connection] disconnected, back to desktop')
-                }}
-                snapMethod={snapMethod} setSnapMethod={setSnapMethod}
-                streamMethod={streamMethod} setStreamMethod={setStreamMethod}
-                selWin={selWindow} winState={winState}
-                expectedCaptureState={expectedCaptureState}
-                setExpectedCaptureState={setExpectedCaptureState}
-                expanded={connectionExpanded}
-                onToggle={() => setConnExpanded(!connectionExpandedRef.current)}
-                pinned={connectionPinned} onTogglePin={toggleConnPin}
-              />
-            </div>
-            <div className="shrink-0 min-w-0">
-              <PeerPanel
-                expanded={peerExpanded}
-                onToggle={() => setPeerPanelExpanded(!peerExpandedRef.current)}
-                pinned={peerPinned}
-                onTogglePin={togglePeerPin}
-                controlMode={peerControlMode}
-                onControlMode={setPeerControlMode}
-                onRole={setPeerRole}
-                onTransport={(m) => {
-                  setPeerTransport(m)
-                }}
-                onRemoteWindows={(wins) => {
-                  setRemotePeerWindows(wins)
-                  addLog(`[Peer] remote windows: ${wins.length}`)
-                }}
-              />
-              <PeerRemoteView
-                active={peerRole === 'controller' && peerTransport !== 'none'}
-                humanControl={peerControlMode === 'human'}
-              />
-              {peerControlMode === 'ai' && peerTransport !== 'none' && (
-                <div className="mt-2 text-[11px] text-amber-500 bg-amber-500/10 rounded-lg px-2 py-1.5">
-                  {t('peer.ai_mode_hint')}
-                </div>
-              )}
-              {remotePeerWindows.length > 0 && (
-                <div className="mt-2 rounded-xl bg-bg-secondary ring-1 ring-inset ring-border p-2 space-y-1 max-h-40 overflow-y-auto min-w-0">
-                  <div className="text-[11px] font-medium text-text-secondary px-1">{t('peer.remote_windows')}</div>
-                  {remotePeerWindows.map((w) => (
-                    <button
-                      key={w.hwnd}
-                      type="button"
-                      className="w-full text-left text-xs px-2 py-1 rounded-md hover:bg-bg-hover truncate"
-                      onClick={() => {
-                        hostCall('peer_set_target', { hwnd: w.hwnd, title: w.title })
-                          .then(() => addLog(`[Peer] set_target ${w.title}`))
-                          .catch((e) => addLog(`[Peer] set_target failed: ${e}`))
-                      }}
-                    >
-                      {w.title || `(hwnd ${w.hwnd})`}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            {/* Thin client: gates instead of local screenshot preview */}
-            <div className="shrink-0 overflow-hidden min-w-0">
-              {THIN_CLIENT ? (
-                <StreamGatesPanel
-                  streamOn={previewing}
-                  controlOn={acceptControl}
-                  onToggleStream={togglePreview}
-                  onToggleControl={toggleAcceptControl}
-                  targetTitle={displayTargetTitle(selWindow.title, t)}
-                  linkReady={serverConnected || (peerRole === 'controlled' && peerTransport !== 'none')}
-                  expanded={gatesExpanded}
-                  onToggle={() => setGatesPanelExpanded(!gatesExpandedRef.current)}
-                  pinned={gatesPinned}
-                  onTogglePin={toggleGatesPin}
-                />
-              ) : (
-                <ScreenshotPanel
-                  selWin={selWindow} screenRatio={screenRatio}
-                  snapMethod={snapMethod} streamMethod={streamMethod}
-                  renderMethod={renderMethod} winState={winState}
-                  expanded={screenshotExpanded}
-                  onToggle={() => setSsExpanded(!screenshotExpandedRef.current)}
-                  previewing={previewing} previewingRef={previewingRef}
-                  snapshotRef={snapshotRef} snapshotStartRef={snapshotStartRef}
-                  capMethod={capMethod}
-                  onTakeSnapshot={takeSnapshot}
-                  onTogglePreview={togglePreview}
-                  pinned={screenshotPinned} onTogglePin={toggleSsPin}
-                  hasContentRef={ssHasContentRef}
-                  onFps={setStreamFps}
-                  onDims={(w, h) => setTargetDims({w, h})}
-                />
-              )}
-            </div>
-            {/* Log panel (compact mode in sidebar) */}
-            <div className="shrink-0">
-              <LogPanel
-                compact expanded={logExpanded}
-                onToggle={() => setLogPanelExpanded(!logExpandedRef.current)}
-                pinned={logPinned} onTogglePin={toggleLogPin}
-              />
-            </div>
-            {/* Flexible spacer to absorb leftover vertical space (wide rail only) */}
-            {!narrowLayout && <div className="flex-1" />}
           </div>
-        )}
-        </div>
+          <div className={page === 'Control' ? 'flex-1 flex flex-col min-h-0' : 'hidden'}>
+            <ControlView
+              selWin={selWindow}
+              setSelWin={(w) => {
+                if (opStateRef.current === 'streaming') stopStream()
+                setSelWindow(w)
+              }}
+              winState={winState}
+              expectedCaptureState={expectedCaptureState}
+              setExpectedCaptureState={setExpectedCaptureState}
+              snapMethod={snapMethod}
+              setSnapMethod={setSnapMethod}
+              streamMethod={streamMethod}
+              setStreamMethod={setStreamMethod}
+              renderMethod={renderMethod}
+              screenRatio={screenRatio}
+              previewing={previewing}
+              acceptControl={acceptControl}
+              onTogglePreview={togglePreview}
+              onToggleAcceptControl={toggleAcceptControl}
+              takeSnapshot={takeSnapshot}
+              previewingRef={previewingRef}
+              snapshotRef={snapshotRef}
+              snapshotStartRef={snapshotStartRef}
+              capMethod={capMethod}
+              ssHasContentRef={ssHasContentRef}
+              onFps={setStreamFps}
+              onDims={(w, h) => setTargetDims({ w, h })}
+              serverConnected={serverConnected}
+              peerControlMode={peerControlMode}
+              setPeerControlMode={setPeerControlMode}
+              peerRole={peerRole}
+              setPeerRole={setPeerRole}
+              peerTransport={peerTransport}
+              setPeerTransport={setPeerTransport}
+              remotePeerWindows={remotePeerWindows}
+              setRemotePeerWindows={setRemotePeerWindows}
+              linkReady={peerLinked}
+            />
+          </div>
+          {page === 'Log' && (
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <LogPanel keepFiles={keepFiles} />
+            </div>
+          )}
+          {page === 'Settings' && (
+            <SettingsView
+              snapMethod={snapMethod}
+              setSnapMethod={setSnapMethod}
+              streamMethod={streamMethod}
+              setStreamMethod={setStreamMethod}
+              renderMethod={renderMethod}
+              setRenderMethod={setRenderMethod}
+              autoSnap={autoSnap}
+              setAutoSnap={setAutoSnap}
+              autoStream={autoStream}
+              setAutoStream={setAutoStream}
+              normalAccent={normalAccent}
+              setNormalAccentState={setNormalAccentState}
+              normalSecondaryAccent={normalSecondaryAccent}
+              setNormalSecondaryAccentState={setNormalSecondaryAccentState}
+              devAccent={devAccent}
+              setDevAccentState={setDevAccentState}
+              devSecondaryAccent={devSecondaryAccent}
+              setDevSecondaryAccentState={setDevSecondaryAccentState}
+              accent={accent}
+              secondaryAccent={secondaryAccent}
+              locale={locale}
+              setLocale={setLocale}
+              selWin={selWindow}
+              winState={winState}
+              keepFiles={keepFiles}
+              setKeepFiles={setKeepFiles}
+              appVersion={appVersion}
+              theme={theme}
+              setTheme={setTheme}
+              devMode={devMode}
+              setDevMode={setDevModeSafe}
+              mouseMode={mouseMode}
+              setMouseMode={setMouseMode}
+              keyMode={keyMode}
+              setKeyMode={setKeyMode}
+              mappingHotkey={mappingHotkey}
+              setMappingHotkey={setMappingHotkey}
+              selfTargetMode={selfTargetMode}
+              setSelfTargetMode={setSelfTargetMode}
+              onCheckUpdate={checkForUpdate}
+              hasUpdate={displayHasUpdate}
+              isAdmin={isAdmin}
+              onSwitchPermission={switchPermission}
+              onOpenDevTools={() => setPage('DevTools')}
+            />
+          )}
+          {page === 'DevTools' && (
+            <DevToolsView
+              appVersion={appVersion}
+              saveCaptureFrames={saveCaptureFrames}
+              setSaveCaptureFrames={setSaveCaptureFrames}
+              saveStreamFrames={saveStreamFrames}
+              setSaveStreamFrames={setSaveStreamFrames}
+              frameDumpDir={frameDumpDir}
+              setFrameDumpDir={setFrameDumpDir}
+              onRunSelfTest={runSelfTestFlow}
+              selfTestRunning={selfTest.phase === 'running'}
+              onPreviewSkeleton={previewSkeletonScreen}
+              onDevInjectUpdate={devInjectUpdate}
+              onDevInjectDownload={devInjectDownload}
+              onDevInjectSelfTest={devInjectSelfTest}
+              onDevInjectAgent={devInjectAgent}
+            />
+          )}
+        </AppShell>
       </div>
 
-      {/* ── Self-Test report overlay ── */}
       <SelfTestModal
         state={displaySelfTest}
         onClose={() => {
@@ -1779,7 +1159,6 @@ export default function App() {
         }}
       />
 
-      {/* ── Update modal: real SSOT or Dev overlay (no backend for demos) ── */}
       {displayUpdateInfo && (
         <UpdateModal
           info={displayUpdateInfo}

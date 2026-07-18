@@ -56,14 +56,14 @@ export function btnAutoSize(label: string): string {
 
 // ── Modal widths / heights ──
 export const MODAL_W = {
-  /** UpdateModal, TargetPickerModal */
-  picker: 'w-[520px]',
+  /** UpdateModal, TargetPickerModal — shrink on phone */
+  picker: 'w-[min(520px,92vw)]',
   /** SelfTestModal */
-  test: 'w-[540px]',
+  test: 'w-[min(540px,92vw)]',
 } as const
 
 /** Shared modal height — fixed across all UpdateModal statuses (no jump). */
-export const MODAL_H = 'h-[min(560px,85vh)] max-h-[min(560px,85vh)]' as const
+export const MODAL_H = 'h-[min(560px,85vh)] max-h-[min(560px,85vh)] max-[479px]:h-[min(100dvh,100%)] max-[479px]:max-h-[100dvh]' as const
 
 // ── Spacing (gap-*, p-*, px-*, py-*) ──
 export const GAP = {
@@ -114,6 +114,32 @@ export const RADIUS = {
   lg: 'rounded-lg',     // cards, modals, larger buttons
   xl: 'rounded-xl',     // outer card shells
   full: 'rounded-full', // badges, progress bars
+} as const
+
+// ── Responsive shell (viewport-only; PC narrow = phone) ──
+export const BP = {
+  /** Side nav (icon+label) */
+  desktop: 960,
+  /** Side icon nav → bottom nav */
+  tablet: 600,
+  /** Ultra-narrow density */
+  narrow: 360,
+  /** Short viewport → compress header / sheet modals */
+  short: 480,
+} as const
+
+export const NAV = {
+  sideWide: 'w-20',       // 80px — desktop side rail
+  sideCompact: 'w-14',    // 56px — tablet icon rail
+  bottomH: 'h-14',        // 56px — bottom tab bar
+  touchMin: 'min-h-11',   // 44px touch target
+} as const
+
+export const SHELL_PAD = {
+  page: 'p-4 max-[359px]:p-2',
+  pageY: 'py-4 max-[359px]:py-2',
+  safeBottom: 'pb-[env(safe-area-inset-bottom,0px)]',
+  safeTop: 'pt-[env(safe-area-inset-top,0px)]',
 } as const
 
 // ── Misc ──

@@ -1,7 +1,7 @@
 {
   "name": "mimic-android",
   "private": true,
-  "version": "0.1.3",
+  "version": "0.1.4",
   "mimicReleaseNote": "skeleton zip until first signed APK",
   "description": "Mimic Android shell — Capacitor WebView hosting shared/web",
   "scripts": {

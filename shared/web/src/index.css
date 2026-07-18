@@ -62,15 +62,25 @@
 }
 
 * { box-sizing: border-box; }
-html, body, #root { height: 100%; margin: 0; padding: 0; }
+html, body, #root {
+  height: 100%;
+  height: 100dvh;
+  margin: 0;
+  padding: 0;
+}
 body {
   font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Roboto', 'Oxygen', 'Ubuntu', sans-serif;
   background-color: var(--color-bg-primary); color: var(--color-text-primary);
   -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
 }
-/* Always reserve scrollbar space — no layout shift when content overflows */
+/* Reserve scrollbar space on desktop — on phone it looks like a left shift */
 .overflow-y-auto, .overflow-y-scroll, .overflow-auto, .overflow-scroll {
   scrollbar-gutter: stable;
+}
+@media (max-width: 599px) {
+  .overflow-y-auto, .overflow-y-scroll, .overflow-auto, .overflow-scroll {
+    scrollbar-gutter: auto;
+  }
 }
 
 /* ── Skeleton screen shimmer (startup placeholder) ── */
