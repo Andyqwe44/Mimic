@@ -124,6 +124,19 @@ class ScreenEncoder(
         }
     }
 
+    /** Ask MediaCodec for the next output to be a sync/IDR frame. */
+    fun requestKeyframe() {
+        val c = codec ?: return
+        try {
+            val params = android.os.Bundle()
+            params.putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0)
+            c.setParameters(params)
+            Log.i(tag, "requested sync frame")
+        } catch (e: Exception) {
+            Log.w(tag, "requestKeyframe failed", e)
+        }
+    }
+
     fun stop() {
         running = false
         try { virtualDisplay?.release() } catch (_: Exception) {}

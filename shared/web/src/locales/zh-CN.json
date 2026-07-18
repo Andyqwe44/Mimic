@@ -12,9 +12,9 @@
   "nav": {
     "aria": "主导航",
     "monitor": "监视",
-    "monitor_tip": "远程画面与操作",
-    "control": "控制",
-    "control_tip": "连接、会话权限与对等设备",
+    "monitor_tip": "远端画面与操作台",
+    "peers": "对等",
+    "peers_tip": "登录、设备列表与会话",
     "log": "日志",
     "log_tip": "当前会话与历史日志",
     "settings": "设置",
@@ -37,8 +37,21 @@
     "stream_short_off": "画面关",
     "control_short_on": "控制开",
     "control_short_off": "控制关",
-    "tip_open_control": "打开控制页",
+    "tip_open_control": "打开对等页",
     "tip_error": "查看日志了解错误"
+  },
+
+  "session": {
+    "panic_title": "会话急停",
+    "panic_hint": "对方正在控制本机。可暂停画面、锁定输入或挂断。",
+    "pause_stream": "暂停画面",
+    "resume_stream": "恢复画面",
+    "pause_stream_tip": "停止向控制端发送画面",
+    "resume_stream_tip": "继续发送画面",
+    "lock_input": "锁定输入",
+    "unlock_input": "允许输入",
+    "lock_input_tip": "拒绝远程键鼠",
+    "unlock_input_tip": "允许远程键鼠"
   },
 
   "topbar": {
@@ -122,9 +135,10 @@
     "devices": "本账号设备",
     "no_devices": "暂无其他在线设备",
     "control": "控制",
+    "request_control": "请求控制",
     "invite_from": "来自 {name} 的邀请",
     "accept": "接受",
-    "accept_tip": "允许对方控制本机",
+    "accept_tip": "接受会话并允许对方画面与控制（目标由对方选择）",
     "reject": "拒绝",
     "reject_tip": "拒绝邀请",
     "hangup": "挂断",
@@ -142,7 +156,23 @@
     "wait_lan": "等待局域网链路…",
     "no_remote_targets": "暂无远程目标 — 请稍候或刷新",
     "busy": "账号忙碌 — 已有控制会话进行中",
-    "ai_mode_hint": "AI 控制模式 — 动作来自本地模型；目标窗口仍由对端强制校验。"
+    "ai_mode_hint": "AI 控制模式 — 动作来自本地模型；目标窗口仍由对端强制校验。",
+    "remote_view": "远端画面",
+    "remote_workspace": "远程操作台",
+    "controller_picks_target": "在此选择被控端的窗口或桌面（非本机窗口）",
+    "controlled_title": "本机被控中",
+    "controlled_body": "控制端正在选择目标并查看画面。可用下方急停暂停画面、锁定输入或挂断。",
+    "monitor_idle_title": "尚无远程会话",
+    "monitor_idle_body": "请到「对等」页登录，并向同账号设备请求控制，或等待对方邀请。",
+    "waiting_frames": "等待画面…",
+    "waiting_keyframe": "等待关键帧（{reason}）…",
+    "webcodecs_unavailable": "WebCodecs 不可用",
+    "decoder_error": "解码错误：{msg}",
+    "decode_error": "解码失败：{msg}",
+    "live": "直播中",
+    "idle": "空闲",
+    "ai_mode_short": "AI 模式",
+    "encode_soft": "软件编码 {w}×{h}（画质受限）"
   },
 
   "screenshot": {

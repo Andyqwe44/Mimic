@@ -30,6 +30,7 @@ export function PeerPanel({
   onRole,
   controlMode,
   onControlMode,
+  onSessionStart,
 }: {
   expanded: boolean
   onToggle: () => void
@@ -40,6 +41,8 @@ export function PeerPanel({
   onRole?: (role: string) => void
   controlMode: 'human' | 'ai'
   onControlMode: (m: 'human' | 'ai') => void
+  /** Fired when a peer session becomes active (navigate to Monitor). */
+  onSessionStart?: () => void
 }) {
   const { t } = useTranslation()
   // Default = public Mimic signaling (Aliyun). Override anytime in the field.
@@ -178,7 +181,8 @@ export function PeerPanel({
       } else if (d.type === 'session_start') {
         setIncoming(null)
         setStatus(t('peer.session_started'))
-        refreshStatus()
+        // Role must be synced before Monitor workspace switches layout.
+        void refreshStatus().then(() => onSessionStart?.())
       } else if (d.type === 'session_end') {
         setRole('idle')
         onRole?.('idle')
@@ -229,7 +233,7 @@ export function PeerPanel({
         setRole('idle')
       }
     })
-  }, [onRemoteWindows, onTransport, onRole, refreshStatus, t])
+  }, [onRemoteWindows, onTransport, onRole, onSessionStart, refreshStatus, t])
 
   useEffect(() => {
     pollRef.current = window.setInterval(() => { refreshStatus() }, 3000) as unknown as number
@@ -295,7 +299,11 @@ export function PeerPanel({
 
   const accept = async () => {
     if (!incoming) return
+    // Accept = authorize remote control for this session (stream starts on set_target).
     await hostCall('peer_accept', { fromDeviceId: incoming.fromDeviceId })
+    try {
+      await hostCall('set_control_gate', { on: true })
+    } catch { /* host may not expose gates yet */ }
     setIncoming(null)
   }
 
@@ -465,7 +473,7 @@ export function PeerPanel({
                   <button type="button"
                     className="text-[11px] px-2 py-1 rounded-md bg-accent text-white shrink-0"
                     onClick={() => invite(d.deviceId)}>
-                    {t('peer.control')}
+                    {t('peer.request_control')}
                   </button>
                 )}
               </div>

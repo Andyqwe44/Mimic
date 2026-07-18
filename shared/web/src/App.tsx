@@ -1,5 +1,5 @@
 // ═══ App — Mimic Client root ═══
-// Unified IA: Monitor / Control / Log / Settings (side nav desktop, bottom nav phone).
+// Unified IA: Monitor / Peers / Log / Settings (side nav desktop, bottom nav phone).
 // Orchestrates: page routing, capture state machine, theme, window polling.
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -18,7 +18,7 @@ import { SelfTestModal } from './components/SelfTestModal'
 import { SettingsView } from './components/SettingsView'
 import { Tooltip } from './components/Toolkit'
 import { UpdateModal, type UpdateInfo } from './components/UpdateModal'
-import { hostCall, logMgr, addLog, applyTheme, onUpdateProgress, type UpdateProgressMsg } from './lib/bridge'
+import { hostCall, logMgr, addLog, applyTheme, onUpdateProgress, onNativePush, type UpdateProgressMsg } from './lib/bridge'
 import { hasBootSettings, readBootSettings } from './lib/bootSettings'
 import { cantCaptureMinimized } from './lib/constants'
 import { H, TEXT } from './lib/design'
@@ -43,7 +43,7 @@ export default function App() {
   const boot = readBootSettings()
 
   // ═══ UI state ═══
-  const [page, setPage] = useState<AppPage>('Control')
+  const [page, setPage] = useState<AppPage>('Peers')
   const [navExpanded, setNavExpanded] = useState(
     () => (typeof boot.navExpanded === 'boolean' ? boot.navExpanded : true),
   )
@@ -389,7 +389,6 @@ export default function App() {
   const [renderMethod, setRenderMethod] = useState(
     () => (typeof boot.renderMethod === 'string' && boot.renderMethod ? boot.renderMethod : 'shared'),
   )
-  const [expectedCaptureState, setExpectedCaptureState] = useState('desktop')
 
   // ── General settings ──
   const [keepFiles, setKeepFiles] = useState(() => (typeof boot.keepFiles === 'number' && boot.keepFiles > 0 ? boot.keepFiles : 5))
@@ -454,6 +453,7 @@ export default function App() {
   const [peerTransport, setPeerTransport] = useState('none')
   const [peerRole, setPeerRole] = useState('idle')
   const [remotePeerWindows, setRemotePeerWindows] = useState<Array<{ title: string; hwnd: number; id?: string }>>([])
+  const [encodeHint, setEncodeHint] = useState('')
   const snapshotRef = useRef(false)            // true while waiting for snapshot frame
   const snapshotStartRef = useRef(0)           // Date.now() when snapshot was triggered
   const [capMethod, setCapMethod] = useState('')        // actual method used (from C++ response)
@@ -726,11 +726,45 @@ export default function App() {
         hwnd: selWindow.hwnd ?? 0,
       })
       setAcceptControl(next)
-      addLog(`[Control] accept_control ${next ? 'ON' : 'OFF'}`)
+      addLog(`[Session] accept_control ${next ? 'ON' : 'OFF'}`)
     } catch (e) {
-      addLog(`[Control] set_control_gate failed: ${e}`)
+      addLog(`[Session] set_control_gate failed: ${e}`)
     }
   }, [acceptControl, selWindow.hwnd])
+
+  // Sync gates / encode path / Android projection from native pushes
+  useEffect(() => {
+    return onNativePush((d: Record<string, unknown>) => {
+      if (!d || typeof d !== 'object') return
+      if (d.type === 'gates') {
+        if (typeof d.allow_stream === 'boolean') {
+          setPreviewing(d.allow_stream)
+          previewingRef.current = d.allow_stream
+          opStateRef.current = d.allow_stream ? 'streaming' : 'idle'
+        }
+        if (typeof d.accept_control === 'boolean') setAcceptControl(d.accept_control)
+      } else if (d.type === 'h264_encode') {
+        const path = String(d.path || '')
+        if (path === 'software') {
+          setEncodeHint(t('peer.encode_soft', { w: d.w, h: d.h }))
+          addLog(`[Encode] SOFTWARE fallback ${d.w}x${d.h}`)
+        } else if (path === 'hardware') {
+          setEncodeHint('')
+          addLog(`[Encode] HARDWARE ${d.w}x${d.h}`)
+        }
+      } else if (d.type === 'projection_result') {
+        const ok = !!d.ok
+        addLog(`[Cap] MediaProjection ${ok ? 'granted' : 'denied'}${d.started ? ' · encoder started' : ''}`)
+        if (ok && d.started) {
+          setPreviewing(true)
+          previewingRef.current = true
+          opStateRef.current = 'streaming'
+        }
+      } else if (d.type === 'session_end') {
+        setEncodeHint('')
+      }
+    })
+  }, [t])
 
   // ═══ Self-Test orchestration ═══
   // One-click calibration: reuses the real user-facing callbacks (select →
@@ -920,7 +954,6 @@ export default function App() {
 
   const pageTitle = t(`nav.${page === 'DevTools' ? 'devtools' : page.toLowerCase()}`)
   const capsuleDevice = displayTargetTitle(selWindow.title, t)
-  const peerLinked = peerRole === 'controlled' && peerTransport !== 'none'
   const sessionConnected = serverConnected || peerRole !== 'idle' || peerTransport !== 'none'
 
   const onCapsule = () => {
@@ -928,10 +961,15 @@ export default function App() {
       setPage('Log')
       addLog('[Nav] capsule → log (session error)')
     } else {
-      setPage('Control')
-      addLog('[Nav] capsule → control')
+      setPage('Peers')
+      addLog('[Nav] capsule → peers')
     }
   }
+
+  const onPeerSessionStart = useCallback(() => {
+    setPage('Monitor')
+    addLog('[Nav] session → Monitor')
+  }, [])
 
   // ═══ Render ═══
   return (
@@ -988,7 +1026,7 @@ export default function App() {
             </div>
           }
           statusBar={
-            (page === 'Monitor' || page === 'Control') && shellMode !== 'bottom' ? (
+            (page === 'Monitor' || page === 'Peers') && shellMode !== 'bottom' ? (
               <BottomBar
                 selWin={capsuleDevice}
                 snapMethod={snapMethod}
@@ -1029,6 +1067,13 @@ export default function App() {
                   screenRect={screenRect}
                   selfTargetMode={selfTargetMode}
                   apiRef={monitorApiRef}
+                  peerRole={peerRole}
+                  peerTransport={peerTransport}
+                  peerControlMode={peerControlMode}
+                  setPeerControlMode={setPeerControlMode}
+                  remotePeerWindows={remotePeerWindows}
+                  setRemotePeerWindows={setRemotePeerWindows}
+                  encodeHint={encodeHint}
                 >
                   {!THIN_CLIENT && (
                     <ScreenshotPanel
@@ -1062,42 +1107,12 @@ export default function App() {
             const controlPane = (
               <div className="flex-1 flex flex-col min-h-0 h-full">
                 <ControlView
-                  selWin={selWindow}
-                  setSelWin={(w) => {
-                    if (opStateRef.current === 'streaming') stopStream()
-                    setSelWindow(w)
-                  }}
-                  winState={winState}
-                  expectedCaptureState={expectedCaptureState}
-                  setExpectedCaptureState={setExpectedCaptureState}
-                  snapMethod={snapMethod}
-                  setSnapMethod={setSnapMethod}
-                  streamMethod={streamMethod}
-                  setStreamMethod={setStreamMethod}
-                  renderMethod={renderMethod}
-                  screenRatio={screenRatio}
-                  previewing={previewing}
-                  acceptControl={acceptControl}
-                  onTogglePreview={togglePreview}
-                  onToggleAcceptControl={toggleAcceptControl}
-                  takeSnapshot={takeSnapshot}
-                  previewingRef={previewingRef}
-                  snapshotRef={snapshotRef}
-                  snapshotStartRef={snapshotStartRef}
-                  capMethod={capMethod}
-                  ssHasContentRef={ssHasContentRef}
-                  onFps={setStreamFps}
-                  onDims={(w, h) => setTargetDims({ w, h })}
-                  serverConnected={serverConnected}
                   peerControlMode={peerControlMode}
                   setPeerControlMode={setPeerControlMode}
-                  peerRole={peerRole}
                   setPeerRole={setPeerRole}
-                  peerTransport={peerTransport}
                   setPeerTransport={setPeerTransport}
-                  remotePeerWindows={remotePeerWindows}
                   setRemotePeerWindows={setRemotePeerWindows}
-                  linkReady={peerLinked}
+                  onSessionStart={onPeerSessionStart}
                 />
               </div>
             )
@@ -1191,13 +1206,13 @@ export default function App() {
               )
             }
 
-            // Desktop: keep Monitor/Control mounted; Log/Settings/DevTools on demand.
+            // Desktop: keep Monitor/Peers mounted; Log/Settings/DevTools on demand.
             return (
               <>
                 <div className={page === 'Monitor' ? 'flex-1 flex flex-col min-h-0' : 'hidden'}>
                   {monitorPane}
                 </div>
-                <div className={page === 'Control' ? 'flex-1 flex flex-col min-h-0' : 'hidden'}>
+                <div className={page === 'Peers' ? 'flex-1 flex flex-col min-h-0' : 'hidden'}>
                   {controlPane}
                 </div>
                 {page === 'Log' && logPane}

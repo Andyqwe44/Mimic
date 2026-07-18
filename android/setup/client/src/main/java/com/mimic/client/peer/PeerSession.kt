@@ -66,6 +66,8 @@ class PeerSession(
     var onListTargets: (() -> JSONObject)? = null
     /** Controlled side: apply remote set_target (id / hwnd / display). */
     var onSetTarget: ((JSONObject) -> JSONObject)? = null
+    /** Controlled side: force next encoder output to be an IDR/sync frame. */
+    var onRequestKeyframe: (() -> Unit)? = null
 
     fun statusJson(): JSONObject = JSONObject()
         .put("ok", true)
@@ -383,7 +385,10 @@ class PeerSession(
                     )
                 }
             }
-            "need_key" -> { /* encoder keyframe request — next I-frame interval */ }
+            "need_key" -> {
+                onRequestKeyframe?.invoke()
+                    ?: Log.w(tag, "need_key: no encoder keyframe handler")
+            }
             else -> push(JSONObject().put("type", "peer_msg").put("payload", json))
         }
     }

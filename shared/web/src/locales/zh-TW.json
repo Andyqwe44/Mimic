@@ -12,9 +12,9 @@
   "nav": {
     "aria": "主導覽",
     "monitor": "監視",
-    "monitor_tip": "遠端畫面與操作",
-    "control": "控制",
-    "control_tip": "連線、工作階段權限與對等裝置",
+    "monitor_tip": "遠端畫面與操作台",
+    "peers": "對等",
+    "peers_tip": "登入、裝置列表與工作階段",
     "log": "日誌",
     "log_tip": "目前工作階段與歷史日誌",
     "settings": "設定",
@@ -37,8 +37,21 @@
     "stream_short_off": "畫面關",
     "control_short_on": "控制開",
     "control_short_off": "控制關",
-    "tip_open_control": "開啟控制頁",
+    "tip_open_control": "開啟對等頁",
     "tip_error": "查看日誌以了解錯誤"
+  },
+
+  "session": {
+    "panic_title": "工作階段急停",
+    "panic_hint": "對方正在控制本機。可暫停畫面、鎖定輸入或掛斷。",
+    "pause_stream": "暫停畫面",
+    "resume_stream": "恢復畫面",
+    "pause_stream_tip": "停止向控制端傳送畫面",
+    "resume_stream_tip": "繼續傳送畫面",
+    "lock_input": "鎖定輸入",
+    "unlock_input": "允許輸入",
+    "lock_input_tip": "拒絕遠端鍵鼠",
+    "unlock_input_tip": "允許遠端鍵鼠"
   },
 
   "topbar": {
@@ -122,9 +135,10 @@
     "devices": "本帳號裝置",
     "no_devices": "暫無其他線上裝置",
     "control": "控制",
+    "request_control": "請求控制",
     "invite_from": "來自 {name} 的邀請",
     "accept": "接受",
-    "accept_tip": "允許對方控制本機",
+    "accept_tip": "接受工作階段並允許對方畫面與控制（目標由對方選擇）",
     "reject": "拒絕",
     "reject_tip": "拒絕邀請",
     "hangup": "掛斷",
@@ -142,7 +156,23 @@
     "wait_lan": "等待區域網路連線…",
     "no_remote_targets": "尚無遠端目標 — 請稍候或重新整理",
     "busy": "帳號忙碌 — 已有控制工作階段進行中",
-    "ai_mode_hint": "AI 控制模式 — 動作來自本機模型；目標視窗仍由對端強制校驗。"
+    "ai_mode_hint": "AI 控制模式 — 動作來自本機模型；目標視窗仍由對端強制校驗。",
+    "remote_view": "遠端畫面",
+    "remote_workspace": "遠端操作台",
+    "controller_picks_target": "在此選擇被控端的視窗或桌面（非本機視窗）",
+    "controlled_title": "本機被控中",
+    "controlled_body": "控制端正在選擇目標並查看畫面。可用下方急停暫停畫面、鎖定輸入或掛斷。",
+    "monitor_idle_title": "尚無遠端工作階段",
+    "monitor_idle_body": "請到「對等」頁登入，並向同帳號裝置請求控制，或等待對方邀請。",
+    "waiting_frames": "等待畫面…",
+    "waiting_keyframe": "等待關鍵幀（{reason}）…",
+    "webcodecs_unavailable": "WebCodecs 不可用",
+    "decoder_error": "解碼錯誤：{msg}",
+    "decode_error": "解碼失敗：{msg}",
+    "live": "直播中",
+    "idle": "閒置",
+    "ai_mode_short": "AI 模式",
+    "encode_soft": "軟體編碼 {w}×{h}（畫質受限）"
   },
 
   "screenshot": {

@@ -10,12 +10,14 @@
 // (no SetFocus / no target activate — must not steal the user's foreground).
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Camera, Play, Square, Power } from 'lucide-react'
+import { Camera, Play, Square, Power, Bot, User, RefreshCw } from 'lucide-react'
 import { ActionBtn, Tooltip } from './Toolkit'
+import { PeerRemoteView } from './PeerRemoteView'
+import { SessionPanicBar } from './SessionPanicBar'
 import { STATE_LABEL, codeToName, resolveInputMethods } from '../lib/constants'
 import { THIN_CLIENT } from '../lib/features'
 import { addLog, hostCall } from '../lib/bridge'
-import { SHELL_PAD } from '../lib/design'
+import { RADIUS, RING, SHELL_PAD, TEXT } from '../lib/design'
 import type { WindowInfo, Rect } from '../lib/types'
 
 // ── Types ──
@@ -98,7 +100,7 @@ export function MonitorView({
   snapshotLatency: _snapshotLatency,
   onTakeSnapshot,
   onTogglePreview,
-  onToggleAcceptControl: _onToggleAcceptControl,
+  onToggleAcceptControl,
   children,
   inputMethod: _inputMethod,
   mouseMode: _mouseMode,
@@ -111,6 +113,13 @@ export function MonitorView({
   screenRect,
   selfTargetMode,
   apiRef,
+  peerRole = 'idle',
+  peerTransport = 'none',
+  peerControlMode = 'human',
+  setPeerControlMode,
+  remotePeerWindows = [],
+  setRemotePeerWindows: _setRemotePeerWindows,
+  encodeHint,
 }: {
   selWin: WindowInfo
   winState: string
@@ -135,6 +144,13 @@ export function MonitorView({
   screenRect?: Rect | null
   selfTargetMode?: 'warn' | 'exclude'
   apiRef?: React.MutableRefObject<MonitorApi | null>
+  peerRole?: string
+  peerTransport?: string
+  peerControlMode?: 'human' | 'ai'
+  setPeerControlMode?: (m: 'human' | 'ai') => void
+  remotePeerWindows?: Array<{ title: string; hwnd: number; id?: string }>
+  setRemotePeerWindows?: (w: Array<{ title: string; hwnd: number; id?: string }>) => void
+  encodeHint?: string
 }) {
   const { t } = useTranslation()
   const isDesktop = selWin.hwnd === 0
@@ -741,6 +757,164 @@ export function MonitorView({
     },
     [flushImeDock],
   )
+
+  // ── Thin client: peer workspace (remote view / controlled panic) ──
+  const [remoteTargetId, setRemoteTargetId] = useState('')
+  const isController = peerRole === 'controller'
+  const isControlled = peerRole === 'controlled'
+  const lanReady = peerTransport !== 'none'
+
+  const pickRemoteTarget = useCallback((w: { title: string; hwnd: number; id?: string }) => {
+    const id = w.id || undefined
+    setRemoteTargetId(id || String(w.hwnd))
+    hostCall('peer_set_target', { hwnd: w.hwnd, title: w.title, id })
+      .then((res: { ok?: boolean; error?: string }) => {
+        if (res?.ok === false) {
+          addLog(`[Peer] set_target failed: ${res.error || 'unknown'}`)
+          return
+        }
+        addLog(`[Peer] set_target ${w.title}${id ? ` (${id})` : ''}`)
+      })
+      .catch((e) => addLog(`[Peer] set_target failed: ${e}`))
+  }, [])
+
+  const hangupSession = useCallback(() => {
+    hostCall('peer_hangup')
+      .then(() => addLog('[Peer] hangup'))
+      .catch((e) => addLog(`[Peer] hangup failed: ${e}`))
+  }, [])
+
+  if (THIN_CLIENT) {
+    return (
+      <div className="flex-1 flex flex-col min-h-0 h-full">
+        {isController && (
+          <>
+            <div className="flex items-center h-11 px-3 bg-bg-secondary border-b border-border shrink-0 gap-2">
+              <span className={`${TEXT.sm} font-medium text-text-primary truncate`}>
+                {t('peer.remote_workspace')}
+              </span>
+              <div className="flex gap-1 ml-auto shrink-0">
+                <Tooltip text={t('peer.human_tip')}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPeerControlMode?.('human')
+                      hostCall('peer_set_control_mode', { mode: 'human' })
+                    }}
+                    className={`h-7 w-7 rounded-md flex items-center justify-center ${
+                      peerControlMode === 'human' ? 'bg-accent-soft-mid text-accent' : 'text-text-muted hover:bg-bg-hover'
+                    }`}
+                  >
+                    <User className="w-3.5 h-3.5" />
+                  </button>
+                </Tooltip>
+                <Tooltip text={t('peer.ai_tip')}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPeerControlMode?.('ai')
+                      hostCall('peer_set_control_mode', { mode: 'ai' })
+                    }}
+                    className={`h-7 w-7 rounded-md flex items-center justify-center ${
+                      peerControlMode === 'ai' ? 'bg-accent-soft-mid text-accent' : 'text-text-muted hover:bg-bg-hover'
+                    }`}
+                  >
+                    <Bot className="w-3.5 h-3.5" />
+                  </button>
+                </Tooltip>
+              </div>
+            </div>
+            <div className={`flex-1 flex flex-col min-h-0 ${SHELL_PAD.page} gap-2`}>
+              <PeerRemoteView
+                active={lanReady}
+                humanControl={peerControlMode === 'human'}
+                fill
+                encodeHint={encodeHint}
+              />
+              {peerControlMode === 'ai' && lanReady && (
+                <div className={`${TEXT.smallMono} text-amber-500 bg-warn-soft ${RADIUS.lg} px-2 py-1.5`}>
+                  {t('peer.ai_mode_hint')}
+                </div>
+              )}
+              <div className={`${RADIUS.xl} bg-bg-secondary ${RING} p-2 space-y-1 max-h-40 overflow-y-auto shrink-0`}>
+                <div className={`${TEXT.smallMono} font-medium text-text-secondary px-1 flex items-center justify-between gap-2`}>
+                  <span>{t('peer.remote_targets')}</span>
+                  {lanReady && (
+                    <button
+                      type="button"
+                      className={`${TEXT.xs} text-accent shrink-0 inline-flex items-center gap-1`}
+                      onClick={() => {
+                        hostCall('peer_request_windows')
+                          .then(() => addLog('[Peer] refresh remote targets'))
+                          .catch((e) => addLog(`[Peer] request_windows failed: ${e}`))
+                      }}
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                      {t('peer.refresh_targets')}
+                    </button>
+                  )}
+                </div>
+                {!lanReady && (
+                  <div className={`${TEXT.xs} text-text-muted px-1`}>{t('peer.wait_lan')}</div>
+                )}
+                {lanReady && remotePeerWindows.length === 0 && (
+                  <div className={`${TEXT.xs} text-text-muted px-1`}>{t('peer.no_remote_targets')}</div>
+                )}
+                {remotePeerWindows.map((w) => {
+                  const key = w.id || String(w.hwnd)
+                  const selected = remoteTargetId === key
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      className={`w-full text-left ${TEXT.xs} px-2 py-2 min-h-11 ${RADIUS.md} truncate ${
+                        selected ? 'bg-accent-soft text-accent' : 'hover:bg-bg-hover'
+                      }`}
+                      onClick={() => pickRemoteTarget(w)}
+                    >
+                      {w.title || w.id || `(hwnd ${w.hwnd})`}
+                    </button>
+                  )
+                })}
+                <p className={`${TEXT.tiny} text-text-muted px-1 pt-0.5`}>
+                  {t('peer.controller_picks_target')}
+                </p>
+              </div>
+            </div>
+          </>
+        )}
+
+        {isControlled && (
+          <div className={`flex-1 flex flex-col min-h-0 ${SHELL_PAD.page} gap-3 justify-center`}>
+            <div className="text-center space-y-2 max-w-md mx-auto">
+              <div className={`${TEXT.sm} text-text-primary`}>{t('peer.controlled_title')}</div>
+              <div className={`${TEXT.xs} text-text-muted leading-relaxed`}>
+                {t('peer.controlled_body')}
+              </div>
+            </div>
+            <SessionPanicBar
+              streamOn={previewing}
+              controlOn={acceptControl}
+              onToggleStream={onTogglePreview}
+              onToggleControl={() => onToggleAcceptControl?.()}
+              onHangup={hangupSession}
+            />
+          </div>
+        )}
+
+        {!isController && !isControlled && (
+          <div className={`flex-1 flex items-center justify-center ${SHELL_PAD.page}`}>
+            <div className="text-center space-y-2 max-w-md">
+              <div className={`${TEXT.sm} text-text-muted`}>{t('peer.monitor_idle_title')}</div>
+              <div className={`${TEXT.xs} text-text-tertiary leading-relaxed`}>
+                {t('peer.monitor_idle_body')}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div ref={stageRef} className="flex-1 flex flex-col min-h-0">

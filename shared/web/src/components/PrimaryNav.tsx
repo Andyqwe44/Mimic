@@ -1,6 +1,6 @@
 // PrimaryNav — side rail (desktop) or bottom bar (phone). Same IA.
 import { useLayoutEffect, type ReactNode, type RefObject } from 'react'
-import { Monitor, SlidersHorizontal, FileText, Settings } from 'lucide-react'
+import { Monitor, Users, FileText, Settings } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Tooltip } from './Toolkit'
 import { H, NAV, RADIUS, SHELL_PAD, TEXT } from '../lib/design'
@@ -11,7 +11,7 @@ import { writeNavProgress } from './PagePager'
 
 const ICONS: Record<string, ReactNode> = {
   Monitor: <Monitor className={H.icon} />,
-  Control: <SlidersHorizontal className={H.icon} />,
+  Peers: <Users className={H.icon} />,
   Log: <FileText className={H.icon} />,
   Settings: <Settings className={H.icon} />,
 }

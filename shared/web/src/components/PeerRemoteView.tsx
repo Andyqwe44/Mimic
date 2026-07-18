@@ -1,5 +1,6 @@
 // Peer remote view — WebCodecs H.264 decode + human pointer/keyboard → peer_send_control
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { hostCall } from '../lib/bridge'
 
 function annexbHasIdr(u8: Uint8Array) {
@@ -25,10 +26,17 @@ type PeerH264Detail = {
 export function PeerRemoteView({
   active,
   humanControl,
+  fill = false,
+  encodeHint,
 }: {
   active: boolean
   humanControl: boolean
+  /** Fill parent height (Monitor workspace). */
+  fill?: boolean
+  /** Optional encoder path hint from controlled side (e.g. SOFTWARE). */
+  encodeHint?: string
 }) {
+  const { t } = useTranslation()
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const decoderRef = useRef<VideoDecoder | null>(null)
   const needKeyRef = useRef(true)
@@ -36,9 +44,20 @@ export function PeerRemoteView({
   const buttonDownRef = useRef(false)
   const framesRef = useRef(0)
   const lastFpsTsRef = useRef(performance.now())
+  const dropCountRef = useRef(0)
+  const lastKeyReqRef = useRef(0)
   const [fps, setFps] = useState(0)
   const [dims, setDims] = useState('')
-  const [status, setStatus] = useState('Waiting for frames…')
+  const [status, setStatus] = useState(t('peer.waiting_frames'))
+
+  const requestKeyframe = (reason: string) => {
+    const now = performance.now()
+    if (now - lastKeyReqRef.current < 250) return
+    lastKeyReqRef.current = now
+    needKeyRef.current = true
+    hostCall('peer_request_keyframe').catch(() => {})
+    setStatus(t('peer.waiting_keyframe', { reason }))
+  }
 
   const closeDecoder = () => {
     try { decoderRef.current?.close() } catch { /* */ }
@@ -56,7 +75,7 @@ export function PeerRemoteView({
     setDims(`${w}×${h}`)
     needKeyRef.current = true
     if (typeof VideoDecoder === 'undefined') {
-      setStatus('WebCodecs unavailable')
+      setStatus(t('peer.webcodecs_unavailable'))
       return
     }
     const ctx = canvas.getContext('2d')
@@ -73,8 +92,8 @@ export function PeerRemoteView({
         }
       },
       error: (e) => {
-        needKeyRef.current = true
-        setStatus('Decoder: ' + e.message)
+        requestKeyframe('error')
+        setStatus(t('peer.decoder_error', { msg: e.message }))
       },
     })
     decoderRef.current.configure({
@@ -87,8 +106,9 @@ export function PeerRemoteView({
   useEffect(() => {
     if (!active) {
       closeDecoder()
-      setStatus('Idle')
+      setStatus(t('peer.idle'))
       setFps(0)
+      dropCountRef.current = 0
       return
     }
     const onFrame = (ev: Event) => {
@@ -104,10 +124,18 @@ export function PeerRemoteView({
       if (!decoder || decoder.state === 'closed') return
       const key = ((flags & 1) !== 0) || annexbHasIdr(annexb)
       if (needKeyRef.current && !key) {
-        hostCall('peer_request_keyframe').catch(() => {})
+        requestKeyframe('sync')
         return
       }
-      if (decoder.decodeQueueSize > 0) return
+      // Backpressure: always decode keyframes; drop deltas only when queue is busy.
+      if (!key && decoder.decodeQueueSize > 1) {
+        dropCountRef.current++
+        if (dropCountRef.current >= 3) {
+          dropCountRef.current = 0
+          requestKeyframe('drop')
+        }
+        return
+      }
       try {
         decoder.decode(new EncodedVideoChunk({
           type: key ? 'key' : 'delta',
@@ -116,11 +144,14 @@ export function PeerRemoteView({
         }))
         if (key) {
           needKeyRef.current = false
-          setStatus('Live')
+          dropCountRef.current = 0
+          setStatus(t('peer.live'))
         }
       } catch (e: unknown) {
-        needKeyRef.current = true
-        setStatus('decode: ' + (e instanceof Error ? e.message : String(e)))
+        requestKeyframe('decode')
+        setStatus(t('peer.decode_error', {
+          msg: e instanceof Error ? e.message : String(e),
+        }))
       }
     }
     window.addEventListener('peer-h264', onFrame)
@@ -128,7 +159,7 @@ export function PeerRemoteView({
       window.removeEventListener('peer-h264', onFrame)
       closeDecoder()
     }
-  }, [active])
+  }, [active, t])
 
   useEffect(() => {
     if (!active || !humanControl) return
@@ -168,22 +199,27 @@ export function PeerRemoteView({
   if (!active) return null
 
   return (
-    <div className="mt-2 rounded-xl bg-bg-secondary ring-1 ring-inset ring-border overflow-hidden">
-      <div className="h-7 px-2 flex items-center gap-2 text-[11px] text-text-tertiary border-b border-border">
-        <span className="font-medium text-text-secondary">Remote</span>
+    <div className={`${fill ? 'flex-1 flex flex-col min-h-0' : 'mt-2'} rounded-xl bg-bg-secondary ring-1 ring-inset ring-border overflow-hidden`}>
+      <div className="h-7 px-2 flex items-center gap-2 text-[11px] text-text-tertiary border-b border-border shrink-0">
+        <span className="font-medium text-text-secondary">{t('peer.remote_view')}</span>
         <span className="tabular-nums">{dims}</span>
         <span className="tabular-nums">{fps} fps</span>
-        <span className="ml-auto truncate">{status}{!humanControl ? ' · AI mode' : ''}</span>
+        {encodeHint && (
+          <span className="text-amber-500 truncate">{encodeHint}</span>
+        )}
+        <span className="ml-auto truncate">
+          {status}{!humanControl ? ` · ${t('peer.ai_mode_short')}` : ''}
+        </span>
       </div>
       <div
-        className="bg-black flex items-center justify-center min-h-[160px] max-h-[280px]"
+        className={`bg-black flex items-center justify-center ${fill ? 'flex-1 min-h-0' : 'min-h-[160px] max-h-[280px]'}`}
         data-no-page-swipe
       >
         <canvas
           ref={canvasRef}
           width={640}
           height={360}
-          className={`max-w-full max-h-[280px] ${humanControl ? 'cursor-crosshair' : 'cursor-default'} touch-none`}
+          className={`${fill ? 'max-w-full max-h-full object-contain' : 'max-w-full max-h-[280px]'} ${humanControl ? 'cursor-crosshair' : 'cursor-default'} touch-none`}
           onContextMenu={(e) => e.preventDefault()}
           onPointerDown={(e) => {
             if (!humanControl) return

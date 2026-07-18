@@ -90,6 +90,10 @@ class CaptureController(private val context: Context) {
         return JSONObject().put("ok", true)
     }
 
+    fun requestKeyframe() {
+        encoder?.requestKeyframe()
+    }
+
     private fun stopInternal() {
         streaming = false
         try { encoder?.stop() } catch (_: Exception) {}

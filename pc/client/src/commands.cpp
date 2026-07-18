@@ -650,15 +650,44 @@ static constexpr int kRemoteEncodeMinIntervalMsSw = 50;   // ~20fps soft
 static constexpr int kRemoteEncodeMaxWHw = 1920;
 static constexpr int kRemoteEncodeMaxWSw = 1280;
 
-static void scale_bgra_nn(const uint8_t* src, int sw, int sh,
-                          uint8_t* dst, int dw, int dh) {
+/** Bilinear BGRA scale — softer than nearest-neighbor for soft-encode fallback. */
+static void scale_bgra_bilinear(const uint8_t* src, int sw, int sh,
+                                uint8_t* dst, int dw, int dh) {
+    if (sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0) return;
     for (int y = 0; y < dh; ++y) {
-        int sy = (int)((int64_t)y * sh / dh);
-        const uint8_t* srow = src + (size_t)sy * sw * 4;
+        float fy = ((float)y + 0.5f) * (float)sh / (float)dh - 0.5f;
+        int y0 = (int)fy;
+        if (y0 < 0) y0 = 0;
+        if (y0 >= sh - 1) y0 = sh - 2;
+        if (y0 < 0) y0 = 0;
+        int y1 = y0 + 1;
+        if (y1 >= sh) y1 = sh - 1;
+        float wy = fy - (float)y0;
+        if (wy < 0) wy = 0;
+        if (wy > 1) wy = 1;
+        const uint8_t* row0 = src + (size_t)y0 * sw * 4;
+        const uint8_t* row1 = src + (size_t)y1 * sw * 4;
         uint8_t* drow = dst + (size_t)y * dw * 4;
         for (int x = 0; x < dw; ++x) {
-            int sx = (int)((int64_t)x * sw / dw);
-            memcpy(drow + x * 4, srow + sx * 4, 4);
+            float fx = ((float)x + 0.5f) * (float)sw / (float)dw - 0.5f;
+            int x0 = (int)fx;
+            if (x0 < 0) x0 = 0;
+            if (x0 >= sw - 1) x0 = sw - 2;
+            if (x0 < 0) x0 = 0;
+            int x1 = x0 + 1;
+            if (x1 >= sw) x1 = sw - 1;
+            float wx = fx - (float)x0;
+            if (wx < 0) wx = 0;
+            if (wx > 1) wx = 1;
+            for (int c = 0; c < 4; ++c) {
+                float v00 = row0[x0 * 4 + c];
+                float v10 = row0[x1 * 4 + c];
+                float v01 = row1[x0 * 4 + c];
+                float v11 = row1[x1 * 4 + c];
+                float v0 = v00 + (v10 - v00) * wx;
+                float v1 = v01 + (v11 - v01) * wx;
+                drow[x * 4 + c] = (uint8_t)(v0 + (v1 - v0) * wy + 0.5f);
+            }
         }
     }
 }
@@ -722,7 +751,7 @@ static void on_wgc_gpu_frame(void* /*ctx*/, void* d3d_device, void* d3d_tex, int
                 int sw = (w > kRemoteEncodeMaxWSw) ? kRemoteEncodeMaxWSw : (w & ~1);
                 int sh = ((int)((int64_t)h * sw / w)) & ~1;
                 if (sh < 16) sh = 16;
-                if (!g_h264.init(sw, sh, 20, 2500)) {
+                if (!g_h264.init(sw, sh, 24, 4000)) {
                     s_h264_give_up = true;
                     LOG_WARN("cmd", "H.264 soft re-init %dx%d failed", sw, sh);
                     return;
@@ -730,6 +759,13 @@ static void on_wgc_gpu_frame(void* /*ctx*/, void* d3d_device, void* d3d_tex, int
                 s_enc_w = sw; s_enc_h = sh;
                 g_h264_need_key.store(true);
                 LOG_WARN("cmd", "H.264 SOFTWARE scaled %dx%d (1080p soft too slow)", sw, sh);
+                peer_ui_enqueue(
+                    "{\"type\":\"h264_encode\",\"path\":\"software\",\"w\":" +
+                    std::to_string(sw) + ",\"h\":" + std::to_string(sh) + "}");
+            } else {
+                peer_ui_enqueue(
+                    "{\"type\":\"h264_encode\",\"path\":\"hardware\",\"w\":" +
+                    std::to_string(ew) + ",\"h\":" + std::to_string(eh) + "}");
             }
         } else {
             s_h264_give_up = true;
@@ -793,7 +829,7 @@ static void on_wgc_gpu_frame(void* /*ctx*/, void* d3d_device, void* d3d_tex, int
         int pw = w, ph = h;
         if (tw != w || th != h) {
             s_bgra_scaled.resize((size_t)tw * th * 4);
-            scale_bgra_nn(s_bgra_full.data(), w, h, s_bgra_scaled.data(), tw, th);
+            scale_bgra_bilinear(s_bgra_full.data(), w, h, s_bgra_scaled.data(), tw, th);
             px = s_bgra_scaled.data();
             pw = tw; ph = th;
         }

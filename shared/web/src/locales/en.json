@@ -12,9 +12,9 @@
   "nav": {
     "aria": "Primary navigation",
     "monitor": "Monitor",
-    "monitor_tip": "Remote view and actions",
-    "control": "Control",
-    "control_tip": "Connection, session gates, and peers",
+    "monitor_tip": "Remote view and controls",
+    "peers": "Peers",
+    "peers_tip": "Login, devices, and sessions",
     "log": "Log",
     "log_tip": "Current session and history",
     "settings": "Settings",
@@ -37,8 +37,21 @@
     "stream_short_off": "Stream off",
     "control_short_on": "Control on",
     "control_short_off": "Control off",
-    "tip_open_control": "Open Control page",
+    "tip_open_control": "Open Peers page",
     "tip_error": "Open Log for error details"
+  },
+
+  "session": {
+    "panic_title": "Session emergency",
+    "panic_hint": "You are being controlled. Pause video, lock input, or hang up.",
+    "pause_stream": "Pause video",
+    "resume_stream": "Resume video",
+    "pause_stream_tip": "Stop sending video to the controller",
+    "resume_stream_tip": "Resume sending video",
+    "lock_input": "Lock input",
+    "unlock_input": "Allow input",
+    "lock_input_tip": "Reject remote keyboard/mouse",
+    "unlock_input_tip": "Allow remote keyboard/mouse"
   },
 
   "topbar": {
@@ -122,9 +135,10 @@
     "devices": "Devices on this account",
     "no_devices": "No other devices online",
     "control": "Control",
+    "request_control": "Request control",
     "invite_from": "Invite from {name}",
     "accept": "Accept",
-    "accept_tip": "Allow remote control",
+    "accept_tip": "Accept session and allow video + control (controller picks the target)",
     "reject": "Reject",
     "reject_tip": "Reject invite",
     "hangup": "Hang up",
@@ -142,7 +156,23 @@
     "wait_lan": "Waiting for LAN link…",
     "no_remote_targets": "No remote targets yet — wait or refresh",
     "busy": "Account busy — another control session is active",
-    "ai_mode_hint": "AI control mode — actions from local model; target still enforced on peer."
+    "ai_mode_hint": "AI control mode — actions from local model; target still enforced on peer.",
+    "remote_view": "Remote view",
+    "remote_workspace": "Remote console",
+    "controller_picks_target": "Pick a window or desktop on the controlled device (not this device)",
+    "controlled_title": "This device is controlled",
+    "controlled_body": "The controller picks the target and watches the stream. Use emergency controls below to pause video, lock input, or hang up.",
+    "monitor_idle_title": "No remote session",
+    "monitor_idle_body": "Go to Peers to log in and request control, or wait for an invite.",
+    "waiting_frames": "Waiting for frames…",
+    "waiting_keyframe": "Waiting for keyframe ({reason})…",
+    "webcodecs_unavailable": "WebCodecs unavailable",
+    "decoder_error": "Decoder error: {msg}",
+    "decode_error": "Decode failed: {msg}",
+    "live": "Live",
+    "idle": "Idle",
+    "ai_mode_short": "AI mode",
+    "encode_soft": "Software encode {w}×{h} (quality limited)"
   },
 
   "screenshot": {

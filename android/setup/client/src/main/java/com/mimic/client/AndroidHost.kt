@@ -48,6 +48,8 @@ class AndroidHost(
     @Volatile private var allowStream = false
     @Volatile private var acceptControl = false
     @Volatile private var activeTargetId: String = "display:0"
+    /** After MediaProjection consent, start capture if stream gate / set_target requested it. */
+    @Volatile private var pendingStartAfterConsent = false
     private val caps = CapabilityManager(context)
     private val capture = CaptureController(context)
     private val input = InputController(context)
@@ -63,6 +65,7 @@ class AndroidHost(
         }
         peer.onListTargets = { listTargets() }
         peer.onSetTarget = { json -> applyRemoteSetTarget(json) }
+        peer.onRequestKeyframe = { capture.requestKeyframe() }
     }
 
     /**
@@ -109,6 +112,7 @@ class AndroidHost(
         }
 
         if (!capture.hasProjectionConsent()) {
+            pendingStartAfterConsent = true
             main.post { requestProjection?.invoke() }
             return JSONObject()
                 .put("ok", true)
@@ -117,9 +121,16 @@ class AndroidHost(
                 .put("peer_proto", 2)
         }
 
+        return startCaptureForActiveTarget(tid)
+    }
+
+    /** Start encoder for [tid] when consent exists (parity with PC cmd_set_stream_gate). */
+    private fun startCaptureForActiveTarget(tid: String = activeTargetId): JSONObject {
         val startArgs = JSONObject().put("target_id", tid).put("id", tid)
         val started = capture.start(startArgs, caps.active)
         return if (started.optBoolean("ok", false)) {
+            pendingStartAfterConsent = false
+            appendLog("cap", "encoder started target=$tid")
             started.put("id", tid).put("peer_proto", 2)
         } else {
             JSONObject()
@@ -133,12 +144,22 @@ class AndroidHost(
         capture.setProjectionResult(resultCode, data)
         val ok = resultCode != 0 && data != null
         appendLog("cap", if (ok) "MediaProjection granted" else "MediaProjection denied")
+        var startedOk = false
+        var startError = ""
+        if (ok && (pendingStartAfterConsent || allowStream) && !capture.streaming) {
+            val started = startCaptureForActiveTarget(activeTargetId)
+            startedOk = started.optBoolean("ok", false)
+            if (!startedOk) startError = started.optString("error", "capture start failed")
+            else appendLog("cap", "auto-start after projection consent")
+        }
+        if (!ok) pendingStartAfterConsent = false
         main.post {
-            pushToJs(
-                JSONObject()
-                    .put("type", "projection_result")
-                    .put("ok", ok),
-            )
+            val msg = JSONObject()
+                .put("type", "projection_result")
+                .put("ok", ok)
+                .put("started", startedOk)
+            if (startError.isNotBlank()) msg.put("error", startError)
+            pushToJs(msg)
         }
     }
 
@@ -212,10 +233,32 @@ class AndroidHost(
             "set_stream_gate" -> {
                 allowStream = args.optBoolean("on", args.optBoolean("enabled", args.optInt("on", 0) != 0))
                 appendLog("gate", "allow_stream=$allowStream")
-                if (allowStream && !capture.hasProjectionConsent()) {
-                    appendLog("gate", "MediaProjection consent not yet granted")
+                if (!allowStream) {
+                    pendingStartAfterConsent = false
+                    capture.stop()
+                    return@dispatch jsonOk().put("allow_stream", false)
                 }
-                jsonOk().put("allow_stream", allowStream)
+                if (!capture.hasProjectionConsent()) {
+                    pendingStartAfterConsent = true
+                    appendLog("gate", "MediaProjection consent not yet granted")
+                    main.post { requestProjection?.invoke() }
+                    return@dispatch JSONObject()
+                        .put("ok", true)
+                        .put("allow_stream", true)
+                        .put("pending_consent", true)
+                        .put("need_consent", true)
+                }
+                if (capture.streaming) {
+                    return@dispatch jsonOk().put("allow_stream", true).put("streaming", true)
+                }
+                val started = startCaptureForActiveTarget(activeTargetId)
+                if (!started.optBoolean("ok", false)) {
+                    return@dispatch JSONObject()
+                        .put("ok", false)
+                        .put("error", started.optString("error", "capture start failed"))
+                        .put("allow_stream", true)
+                }
+                jsonOk().put("allow_stream", true).put("streaming", true)
             }
             "set_control_gate" -> {
                 acceptControl = args.optBoolean("on", args.optBoolean("enabled", args.optInt("on", 0) != 0))
