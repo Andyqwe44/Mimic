@@ -79,7 +79,8 @@ Set-Content -Path (Join-Path $outRoot 'INSTALL.txt') -Value $install -Encoding u
 $vj | Add-Member -NotePropertyName 'has_apk' -NotePropertyValue $hasApk -Force
 $vj.apk = $apkName
 $vj.app = $Version
-($vj | ConvertTo-Json -Depth 6) | Set-Content (Join-Path $outRoot 'version.json') -Encoding utf8
+$utf8NoBom = New-Object System.Text.UTF8Encoding $false
+[IO.File]::WriteAllText((Join-Path $outRoot 'version.json'), (($vj | ConvertTo-Json -Depth 6) + "`n"), $utf8NoBom)
 
 if (Test-Path $zip) { Remove-Item $zip -Force }
 Compress-Archive -Path "$outRoot\*" -DestinationPath $zip -Force
