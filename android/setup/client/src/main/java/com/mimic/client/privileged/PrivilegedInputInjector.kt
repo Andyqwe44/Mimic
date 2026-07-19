@@ -22,7 +22,13 @@ object PrivilegedInputInjector {
         val x = (action.optDouble("x_norm", action.optDouble("x", 0.5)).coerceIn(0.0, 1.0) * screenW).toFloat()
         val y = (action.optDouble("y_norm", action.optDouble("y", 0.5)).coerceIn(0.0, 1.0) * screenH).toFloat()
         return when (type) {
-            "mousedown", "click", "tap" -> {
+            "mousedown" -> {
+                downTime = SystemClock.uptimeMillis()
+                val ok = injectTouch(MotionEvent.ACTION_DOWN, x, y, displayId)
+                JSONObject().put("ok", ok).put("type", type)
+                    .apply { if (!ok) put("error", "inject failed") }
+            }
+            "click", "tap" -> {
                 downTime = SystemClock.uptimeMillis()
                 val ok = injectTouch(MotionEvent.ACTION_DOWN, x, y, displayId) &&
                     injectTouch(MotionEvent.ACTION_UP, x, y, displayId)
@@ -31,6 +37,7 @@ object PrivilegedInputInjector {
             }
             "mouseup" -> {
                 val ok = injectTouch(MotionEvent.ACTION_UP, x, y, displayId)
+                downTime = 0L
                 JSONObject().put("ok", ok).put("type", type)
             }
             "move", "drag" -> {

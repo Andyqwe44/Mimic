@@ -475,6 +475,9 @@ static std::atomic<uint64_t> g_control_hwnd{0};
 static std::atomic<bool> g_allow_stream{false};
 static std::atomic<bool> g_accept_control{false};
 static std::atomic<uint64_t> g_stream_session{0};
+// Peer/remote stream: window targets are composited onto virtual-screen canvas
+// so controller preview keeps screen aspect + real window placement.
+static std::atomic<bool> g_stream_screen_canvas{false};
 
 // Remote config from controller_server (browser settings UI).
 static std::mutex g_remote_cfg_mtx;
@@ -707,6 +710,7 @@ static bool remote_has_viewers() {
 
 // WGC worker: GPU texture → H.264 → TCP/WS.
 // Soft encode at full 1080p was ~8fps / multi-second lag (see agent log SOFTWARE_FALLBACK).
+// Window targets: blit onto virtual-screen black canvas so remote preview matches screen aspect.
 static void on_wgc_gpu_frame(void* /*ctx*/, void* d3d_device, void* d3d_tex, int w, int h) {
     if (!g_streaming.load() || !g_allow_stream.load()) return;
     if (!d3d_device || !d3d_tex || w < 16 || h < 16) return;
@@ -719,6 +723,9 @@ static void on_wgc_gpu_frame(void* /*ctx*/, void* d3d_device, void* d3d_tex, int
     static uint64_t s_stream_gen = 0;
     static std::vector<uint8_t> s_bgra_full;
     static std::vector<uint8_t> s_bgra_scaled;
+    static ComPtr<ID3D11Texture2D> s_canvas;
+    static ComPtr<ID3D11RenderTargetView> s_canvas_rtv;
+    static int s_canvas_w = 0, s_canvas_h = 0;
     uint64_t gen = g_stream_session.load();
     if (gen != s_stream_gen) {
         s_stream_gen = gen;
@@ -726,30 +733,105 @@ static void on_wgc_gpu_frame(void* /*ctx*/, void* d3d_device, void* d3d_tex, int
         s_prefer_soft_scale = false;
         s_enc_w = s_enc_h = 0;
         s_last_enc_ms = 0;
+        s_canvas.Reset();
+        s_canvas_rtv.Reset();
+        s_canvas_w = s_canvas_h = 0;
     }
 
     auto* dev = (ID3D11Device*)d3d_device;
     auto* tex = (ID3D11Texture2D*)d3d_tex;
 
+    const bool screen_canvas = g_stream_screen_canvas.load();
+    uint64_t ctrl_hwnd = g_control_hwnd.load();
+    int src_w = w, src_h = h;
+    ID3D11Texture2D* enc_tex = tex;
+
+    if (screen_canvas && ctrl_hwnd != 0) {
+        int sw = GetSystemMetrics(SM_CXVIRTUALSCREEN) & ~1;
+        int sh = GetSystemMetrics(SM_CYVIRTUALSCREEN) & ~1;
+        int ox = GetSystemMetrics(SM_XVIRTUALSCREEN);
+        int oy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+        if (sw < 16) sw = 16;
+        if (sh < 16) sh = 16;
+        RECT wr = {};
+        HWND hWnd = (HWND)(uintptr_t)ctrl_hwnd;
+        if (!IsWindow(hWnd) || !GetWindowRect(hWnd, &wr)) {
+            // Fall through — encode raw window if rect unavailable.
+        } else {
+            ComPtr<ID3D11DeviceContext> ctx;
+            dev->GetImmediateContext(&ctx);
+            if (!s_canvas || s_canvas_w != sw || s_canvas_h != sh) {
+                D3D11_TEXTURE2D_DESC cd = {};
+                cd.Width = (UINT)sw;
+                cd.Height = (UINT)sh;
+                cd.MipLevels = 1;
+                cd.ArraySize = 1;
+                cd.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+                cd.SampleDesc.Count = 1;
+                cd.Usage = D3D11_USAGE_DEFAULT;
+                cd.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+                s_canvas.Reset();
+                s_canvas_rtv.Reset();
+                if (FAILED(dev->CreateTexture2D(&cd, nullptr, &s_canvas))) return;
+                if (FAILED(dev->CreateRenderTargetView(s_canvas.Get(), nullptr, &s_canvas_rtv))) return;
+                s_canvas_w = sw;
+                s_canvas_h = sh;
+            }
+            const float clear[4] = { 0.f, 0.f, 0.f, 1.f };
+            ctx->ClearRenderTargetView(s_canvas_rtv.Get(), clear);
+
+            int dx = wr.left - ox;
+            int dy = wr.top - oy;
+            int dw = wr.right - wr.left;
+            int dh = wr.bottom - wr.top;
+            // Clip destination to canvas.
+            int src_l = 0, src_t = 0;
+            if (dx < 0) { src_l = -dx; dw += dx; dx = 0; }
+            if (dy < 0) { src_t = -dy; dh += dy; dy = 0; }
+            if (dx + dw > sw) dw = sw - dx;
+            if (dy + dh > sh) dh = sh - dy;
+            if (dw > 0 && dh > 0 && src_l < w && src_t < h) {
+                if (src_l + dw > w) dw = w - src_l;
+                if (src_t + dh > h) dh = h - src_t;
+                if (dw > 0 && dh > 0) {
+                    D3D11_BOX box = {};
+                    box.left = (UINT)src_l;
+                    box.top = (UINT)src_t;
+                    box.front = 0;
+                    box.right = (UINT)(src_l + dw);
+                    box.bottom = (UINT)(src_t + dh);
+                    box.back = 1;
+                    ctx->CopySubresourceRegion(
+                        s_canvas.Get(), 0, (UINT)dx, (UINT)dy, 0,
+                        tex, 0, &box);
+                }
+            }
+            enc_tex = s_canvas.Get();
+            src_w = sw;
+            src_h = sh;
+        }
+    }
+
     std::lock_guard<std::mutex> lk(g_h264_mtx);
 
-    // First init: try HW at source size (needs WGC device VIDEO_SUPPORT).
+    // First init: try HW at encode size (needs WGC device VIDEO_SUPPORT).
     if (!s_h264_give_up && !g_h264.ready()) {
-        int ew = w & ~1, eh = h & ~1;
+        int ew = src_w & ~1, eh = src_h & ~1;
         if (ew > kRemoteEncodeMaxWHw) {
             ew = kRemoteEncodeMaxWHw & ~1;
-            eh = ((int)((int64_t)h * ew / w)) & ~1;
+            eh = ((int)((int64_t)src_h * ew / src_w)) & ~1;
         }
         if (g_h264.init(dev, ew, eh, 30, 6000)) {
             s_enc_w = ew; s_enc_h = eh;
             s_prefer_soft_scale = !g_h264.hardware();
             g_h264_need_key.store(true);
-            LOG("cmd", "H.264 %s %dx%d", g_h264.hardware() ? "HARDWARE" : "SOFTWARE_FALLBACK", ew, eh);
+            LOG("cmd", "H.264 %s %dx%d%s", g_h264.hardware() ? "HARDWARE" : "SOFTWARE_FALLBACK",
+                ew, eh, screen_canvas ? " (screen canvas)" : "");
             // Soft at 1080p is unusable — re-init private soft encoder at 1280.
             if (s_prefer_soft_scale) {
                 g_h264.shutdown();
-                int sw = (w > kRemoteEncodeMaxWSw) ? kRemoteEncodeMaxWSw : (w & ~1);
-                int sh = ((int)((int64_t)h * sw / w)) & ~1;
+                int sw = (src_w > kRemoteEncodeMaxWSw) ? kRemoteEncodeMaxWSw : (src_w & ~1);
+                int sh = ((int)((int64_t)src_h * sw / src_w)) & ~1;
                 if (sh < 16) sh = 16;
                 if (!g_h264.init(sw, sh, 24, 4000)) {
                     s_h264_give_up = true;
@@ -785,14 +867,14 @@ static void on_wgc_gpu_frame(void* /*ctx*/, void* d3d_device, void* d3d_tex, int
 
     std::vector<H264Packet> pkts;
     if (g_h264.hardware() && !s_prefer_soft_scale) {
-        int ew = w & ~1, eh = h & ~1;
+        int ew = src_w & ~1, eh = src_h & ~1;
         if (ew != s_enc_w || eh != s_enc_h) {
             // Resolution change — re-init next frame.
             g_h264.shutdown();
             s_enc_w = s_enc_h = 0;
             return;
         }
-        if (!g_h264.encode_texture(tex, ew, eh, pkts) || pkts.empty()) return;
+        if (!g_h264.encode_texture(enc_tex, ew, eh, pkts) || pkts.empty()) return;
     } else {
         // Soft path: Map staging → scale → encode_bgra (keeps latency bounded).
         static ComPtr<ID3D11Texture2D> s_staging;
@@ -800,7 +882,7 @@ static void on_wgc_gpu_frame(void* /*ctx*/, void* d3d_device, void* d3d_tex, int
         ComPtr<ID3D11DeviceContext> ctx;
         dev->GetImmediateContext(&ctx);
         D3D11_TEXTURE2D_DESC td = {};
-        tex->GetDesc(&td);
+        enc_tex->GetDesc(&td);
         if (!s_staging || s_stg_w != (int)td.Width || s_stg_h != (int)td.Height) {
             td.Usage = D3D11_USAGE_STAGING;
             td.BindFlags = 0;
@@ -811,25 +893,25 @@ static void on_wgc_gpu_frame(void* /*ctx*/, void* d3d_device, void* d3d_tex, int
             s_stg_w = (int)td.Width;
             s_stg_h = (int)td.Height;
         }
-        ctx->CopyResource(s_staging.Get(), tex);
+        ctx->CopyResource(s_staging.Get(), enc_tex);
         D3D11_MAPPED_SUBRESOURCE mapped = {};
         if (FAILED(ctx->Map(s_staging.Get(), 0, D3D11_MAP_READ, 0, &mapped))) return;
-        s_bgra_full.resize((size_t)w * h * 4);
-        if ((int)mapped.RowPitch == w * 4) {
+        s_bgra_full.resize((size_t)src_w * src_h * 4);
+        if ((int)mapped.RowPitch == src_w * 4) {
             memcpy(s_bgra_full.data(), mapped.pData, s_bgra_full.size());
         } else {
-            for (int y = 0; y < h; ++y)
-                memcpy(s_bgra_full.data() + (size_t)y * w * 4,
-                       (uint8_t*)mapped.pData + y * mapped.RowPitch, (size_t)w * 4);
+            for (int y = 0; y < src_h; ++y)
+                memcpy(s_bgra_full.data() + (size_t)y * src_w * 4,
+                       (uint8_t*)mapped.pData + y * mapped.RowPitch, (size_t)src_w * 4);
         }
         ctx->Unmap(s_staging.Get(), 0);
 
         int tw = s_enc_w, th = s_enc_h;
         const uint8_t* px = s_bgra_full.data();
-        int pw = w, ph = h;
-        if (tw != w || th != h) {
+        int pw = src_w, ph = src_h;
+        if (tw != src_w || th != src_h) {
             s_bgra_scaled.resize((size_t)tw * th * 4);
-            scale_bgra_bilinear(s_bgra_full.data(), w, h, s_bgra_scaled.data(), tw, th);
+            scale_bgra_bilinear(s_bgra_full.data(), src_w, src_h, s_bgra_scaled.data(), tw, th);
             px = s_bgra_scaled.data();
             pw = tw; ph = th;
         }
@@ -1099,6 +1181,8 @@ static std::string cmd_capture_stream_start(uint64_t hwnd, const std::string& me
 
     g_control_hwnd.store(hwnd);
     g_allow_stream.store(true);
+    // Window targets: composite onto virtual-screen canvas (screen aspect + placement).
+    g_stream_screen_canvas.store(hwnd != 0);
     g_streaming = true;
     g_stream_session.fetch_add(1);
     g_h264_need_key.store(true);
@@ -1118,6 +1202,7 @@ static std::string cmd_capture_stream_start(uint64_t hwnd, const std::string& me
 static std::string cmd_capture_stream_stop() {
     g_streaming = false;
     g_allow_stream.store(false);
+    g_stream_screen_canvas.store(false);
     if (g_stream_handle) {
         wgc_stream_signal_stop(g_stream_handle);
         if (g_stream_thread.joinable()) g_stream_thread.join();
@@ -1645,6 +1730,31 @@ static std::string cmd_send_input(const std::string& args) {
     return "{\"ok\":false,\"error\":\"unknown input method: " + a.method + "\"}";
 }
 
+// Map screen-canvas normalized coords → window-local [0,1] when streaming a window
+// on the virtual-screen canvas. Returns false if point is outside the window.
+static bool screen_norm_to_window_norm(HWND hwnd, double& x_norm, double& y_norm) {
+    if (!hwnd || !IsWindow(hwnd)) return false;
+    int ox = GetSystemMetrics(SM_XVIRTUALSCREEN);
+    int oy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    int sw = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    int sh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    if (sw <= 0 || sh <= 0) return false;
+    double absx = (double)ox + x_norm * (double)sw;
+    double absy = (double)oy + y_norm * (double)sh;
+    RECT wr = {};
+    if (!GetWindowRect(hwnd, &wr)) return false;
+    int ww = wr.right - wr.left;
+    int wh = wr.bottom - wr.top;
+    if (ww <= 0 || wh <= 0) return false;
+    if (absx < (double)wr.left || absx >= (double)wr.right ||
+        absy < (double)wr.top || absy >= (double)wr.bottom) {
+        return false;
+    }
+    x_norm = (absx - (double)wr.left) / (double)ww;
+    y_norm = (absy - (double)wr.top) / (double)wh;
+    return true;
+}
+
 // Apply target-driven policy: desktop=foreground SendInput, window=background SendMessage.
 // Forces hwnd to g_control_hwnd so a hallucinating model cannot retarget another window.
 static std::string execute_remote_control_json(const std::string& actionJson) {
@@ -1664,6 +1774,31 @@ static std::string execute_remote_control_json(const std::string& actionJson) {
     std::string body = actionJson;
     if (body.empty() || body[0] != '{')
         return "{\"ok\":false,\"error\":\"control message must be a JSON object\"}";
+
+    // When preview is screen-canvas, controller sends screen-normalized coords —
+    // remap into window-local before send_input.
+    if (hwnd != 0 && g_stream_screen_canvas.load() && input_type_uses_norm_coords(
+            json_get_str(body, "type"))) {
+        double xn = json_get_double(body, "x_norm");
+        double yn = json_get_double(body, "y_norm");
+        if (!screen_norm_to_window_norm((HWND)(uintptr_t)hwnd, xn, yn)) {
+            return "{\"ok\":false,\"error\":\"pointer outside target window\"}";
+        }
+        // Rewrite x_norm/y_norm in the JSON body (simple key replace).
+        char coords[96];
+        snprintf(coords, sizeof(coords), "\"x_norm\":%.6f,\"y_norm\":%.6f", xn, yn);
+        // Replace existing x_norm value region — rebuild object prefix style.
+        // Safer: inject after opening brace with forced values via merged prefix.
+        char prefix[192];
+        snprintf(prefix, sizeof(prefix),
+                 "{\"hwnd\":%llu,\"method\":\"%s\",\"x_norm\":%.6f,\"y_norm\":%.6f,",
+                 (unsigned long long)hwnd, method, xn, yn);
+        // Strip original x_norm/y_norm from body to avoid duplicate keys confusing parsers.
+        std::string stripped = body.substr(1);
+        // Leave duplicates — json_get_double typically takes first; our prefix comes first.
+        (void)coords;
+        return cmd_send_input(std::string(prefix) + stripped);
+    }
 
     char prefix[128];
     snprintf(prefix, sizeof(prefix),

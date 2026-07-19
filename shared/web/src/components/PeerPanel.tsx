@@ -60,6 +60,7 @@ export function PeerPanel({
   const [deviceName, setDeviceName] = useState(defaultDeviceName)
   const [credsReady, setCredsReady] = useState(false)
   const [online, setOnline] = useState(false)
+  const [reconnecting, setReconnecting] = useState(false)
   const [role, setRole] = useState('idle')
   const [devices, setDevices] = useState<Device[]>([])
   const [myId, setMyId] = useState('')
@@ -74,6 +75,8 @@ export function PeerPanel({
   const pollRef = useRef(0)
   const probeRef = useRef(0)
   const saveCredsRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Stable push handler — avoid re-subscribe churn duplicating addLog.
+  const pushHandlerRef = useRef<(d: Record<string, unknown>) => void>(() => {})
 
   // Load persisted signaling credentials (local prefs only; wire still uses passHash).
   useEffect(() => {
@@ -112,7 +115,10 @@ export function PeerPanel({
   const refreshStatus = useCallback(async () => {
     try {
       const st = await hostCall('peer_status')
-      setOnline(!!st?.online)
+      // Keep device-list UI while logged in / reconnecting (socket may be down).
+      const stillIn = !!(st?.logged_in || st?.online || st?.reconnecting)
+      setOnline(stillIn)
+      setReconnecting(!!st?.reconnecting && !st?.online)
       const r = st?.role || 'idle'
       setRole(r)
       onRole?.(r)
@@ -165,7 +171,7 @@ export function PeerPanel({
   }, [url, t])
 
   useEffect(() => {
-    return onNativePush((d: Record<string, unknown>) => {
+    pushHandlerRef.current = (d: Record<string, unknown>) => {
       if (!d || typeof d !== 'object') return
       if (d.type === 'devices' && Array.isArray(d.devices)) {
         setDevices(d.devices as Device[])
@@ -238,20 +244,30 @@ export function PeerPanel({
         addLog(`[Peer] ${d.error}`)
       } else if (d.type === 'peer_offline') {
         setOnline(false)
+        setReconnecting(false)
         setRole('idle')
         setStatus(t('peer.offline'))
         addLog('[Peer] offline')
       } else if (d.type === 'peer_reconnecting') {
-        // Keep "logged in" UI; signaling is retrying in background.
+        // Keep logged-in UI; signaling is retrying in background.
+        setOnline(true)
+        setReconnecting(true)
         setStatus(t('peer.reconnecting'))
         addLog(`[Peer] reconnecting: ${d.reason || ''}`)
       } else if (d.type === 'peer_online') {
         setOnline(true)
+        setReconnecting(false)
         setStatus(t('peer.online'))
         if (d.reconnected) addLog('[Peer] reconnected')
       }
-    })
+    }
   }, [onRemoteWindows, onTransport, onRole, onSessionStart, refreshStatus, t])
+
+  useEffect(() => {
+    return onNativePush((d: Record<string, unknown>) => {
+      pushHandlerRef.current(d)
+    })
+  }, [])
 
   useEffect(() => {
     pollRef.current = window.setInterval(() => { refreshStatus() }, 3000) as unknown as number
@@ -281,6 +297,7 @@ export function PeerPanel({
         return
       }
       setOnline(true)
+      setReconnecting(false)
       setMyId(res.deviceId || '')
       setStatus(t('peer.online'))
       addLog(`[Peer] logged in as ${user}`)
@@ -301,6 +318,7 @@ export function PeerPanel({
   const logout = async () => {
     await hostCall('peer_logout')
     setOnline(false)
+    setReconnecting(false)
     setDevices([])
     setRole('idle')
     onRole?.('idle')
@@ -346,7 +364,9 @@ export function PeerPanel({
 
   const headerBadges: Array<{ text: string; tone?: RailBadgeTone }> = []
   if (online) {
-    if (role === 'controller') headerBadges.push({ text: t('peer.role_controller'), tone: 'accent' })
+    if (reconnecting) {
+      headerBadges.push({ text: t('peer.reconnecting'), tone: 'warn' })
+    } else if (role === 'controller') headerBadges.push({ text: t('peer.role_controller'), tone: 'accent' })
     else if (role === 'controlled') headerBadges.push({ text: t('peer.role_controlled'), tone: 'accent' })
     else if (role === 'outgoing') headerBadges.push({ text: t('peer.role_outgoing'), tone: 'warn' })
     else if (role === 'ringing') headerBadges.push({ text: t('peer.role_ringing'), tone: 'warn' })

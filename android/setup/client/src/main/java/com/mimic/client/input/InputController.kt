@@ -15,14 +15,17 @@ class InputController(
     @Volatile var vdDisplayActive: Boolean = false
 
     fun inject(action: JSONObject, backend: CapabilityBackend): JSONObject {
-        // App sandbox session always uses privileged inject bound to VD displayId.
-        if (vdDisplayActive || backend == CapabilityBackend.SHIZUKU || backend == CapabilityBackend.ROOT) {
+        // Only app sandbox (active VD) uses privileged inject — not merely "Shizuku connected".
+        if (vdDisplayActive) {
             if (!caps.shizuku.isConnected()) {
                 return JSONObject()
                     .put("ok", false)
                     .put("error", "android: privileged inject requires Shizuku session")
             }
             return caps.shizuku.inject(action)
+        }
+        if (backend == CapabilityBackend.ROOT && caps.shizuku.isConnected()) {
+            // Future root path may inject on default display; for now fall through to a11y.
         }
         val svc = MimicAccessibilityService.get()
             ?: return JSONObject()

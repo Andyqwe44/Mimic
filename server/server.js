@@ -641,8 +641,13 @@ wss.on('connection', (ws, req) => {
     ws.close(4001, 'unauthorized');
     return;
   }
+  const prevWs = sess.ws;
   sess.ws = ws;
   sess.lastSeen = Date.now();
+  // Close previous socket without treating it as logout (close handler checks sess.ws).
+  if (prevWs && prevWs !== ws) {
+    try { prevWs.close(4000, 'replaced'); } catch { /* */ }
+  }
   ws.isAlive = true;
   ws.on('pong', () => { ws.isAlive = true; });
   console.log(`[signaling] online ${sess.user}/${sess.deviceName} (${sess.deviceId})`);
@@ -779,7 +784,13 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('close', () => {
+    // Stale socket after token rebind — do NOT delete session or end peer call.
+    if (sess.ws !== ws) {
+      console.log(`[signaling] stale close ignored ${sess.user}/${sess.deviceName}`);
+      return;
+    }
     console.log(`[signaling] offline ${sess.user}/${sess.deviceName}`);
+    sess.ws = null;
     const cur = activeSessions.get(sess.user);
     if (cur && (cur.controllerId === sess.deviceId || cur.controlledId === sess.deviceId)) {
       activeSessions.delete(sess.user);
@@ -788,7 +799,17 @@ wss.on('connection', (ws, req) => {
       const other = findByDevice(sess.user, otherId);
       send(other, { type: 'session_end', reason: 'peer_disconnect', session: cur });
     }
-    if (sessions.get(token) === sess) sessions.delete(token);
+    // Keep token briefly so the same device can re-open /ws?token=... without re-login.
+    const graceMs = 90_000;
+    const tok = token;
+    setTimeout(() => {
+      const curSess = sessions.get(tok);
+      if (curSess === sess && curSess.ws == null) {
+        sessions.delete(tok);
+        console.log(`[signaling] token expired ${sess.user}/${sess.deviceName}`);
+        broadcastDevices(sess.user);
+      }
+    }, graceMs);
     broadcastDevices(sess.user);
   });
 });

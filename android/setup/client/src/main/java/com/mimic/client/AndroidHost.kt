@@ -172,6 +172,7 @@ class AndroidHost(
         if (tid.isBlank()) {
             return JSONObject().put("ok", false).put("error", "missing target id")
         }
+        val prevTarget = activeTargetId
         activeTargetId = tid
         appendLog("peer", "set_target id=$tid")
 
@@ -200,9 +201,12 @@ class AndroidHost(
             val started = capture.start(startArgs, caps.active)
             if (!started.optBoolean("ok", false)) {
                 input.vdDisplayActive = false
-                appendLog("peer", "app sandbox failed: ${started.optString("error")}")
+                // Roll back so a pending MediaProjection consent still starts display:*.
+                activeTargetId = if (prevTarget.startsWith("display:")) prevTarget else "display:0"
+                appendLog("peer", "app sandbox failed: ${started.optString("error")} → rollback=$activeTargetId")
                 return started.put("id", tid).put("peer_proto", 2)
             }
+            pendingStartAfterConsent = false
             appendLog("peer", "app sandbox ok displayId=${started.optInt("displayId", -1)}")
             return started.put("id", tid).put("peer_proto", 2)
         }
@@ -233,6 +237,10 @@ class AndroidHost(
         return if (started.optBoolean("ok", false)) {
             pendingStartAfterConsent = false
             appendLog("cap", "encoder started target=$tid")
+            // Kick an IDR ASAP — static screens may not emit frames until dirty.
+            main.postDelayed({
+                try { capture.requestKeyframe() } catch (_: Exception) {}
+            }, 200L)
             // display:* — send Mimic to background so capture shows the phone's current UI,
             // not Mimic itself sitting on top after the consent dialog.
             if (tid.startsWith("display:")) {
@@ -260,11 +268,22 @@ class AndroidHost(
         appendLog("cap", if (ok) "MediaProjection granted" else "MediaProjection denied")
         var startedOk = false
         var startError = ""
-        if (ok && (pendingStartAfterConsent || allowStream) && !capture.streaming) {
-            val started = startCaptureForActiveTarget(activeTargetId)
+        // Only MediaProjection path uses this consent — never auto-start app:* here.
+        val tid = activeTargetId
+        if (ok && tid.startsWith("display:") &&
+            (pendingStartAfterConsent || allowStream) && !capture.streaming
+        ) {
+            val started = startCaptureForActiveTarget(tid)
             startedOk = started.optBoolean("ok", false)
-            if (!startedOk) startError = started.optString("error", "capture start failed")
-            else appendLog("cap", "auto-start after projection consent")
+            if (!startedOk) {
+                startError = started.optString("error", "capture start failed")
+                appendLog("cap", "auto-start failed: $startError")
+            } else {
+                appendLog("cap", "auto-start after projection consent target=$tid")
+            }
+        } else if (ok && tid.startsWith("app:")) {
+            startError = "consent for display but activeTargetId=$tid"
+            appendLog("cap", startError)
         }
         if (!ok) pendingStartAfterConsent = false
         main.post {
@@ -272,6 +291,7 @@ class AndroidHost(
                 .put("type", "projection_result")
                 .put("ok", ok)
                 .put("started", startedOk)
+                .put("target_id", tid)
             if (startError.isNotBlank()) msg.put("error", startError)
             pushToJs(msg)
         }
@@ -565,10 +585,18 @@ class AndroidHost(
             "set_control_gate" -> {
                 acceptControl = args.optBoolean("on", args.optBoolean("enabled", args.optInt("on", 0) != 0))
                 appendLog("gate", "accept_control=$acceptControl")
-                if (acceptControl && !MimicAccessibilityService.isEnabled()) {
+                val a11y = MimicAccessibilityService.isEnabled()
+                if (acceptControl && !a11y && !input.vdDisplayActive) {
                     appendLog("gate", "AccessibilityService not enabled")
+                    main.post {
+                        pushToJs(
+                            JSONObject()
+                                .put("type", "peer_error")
+                                .put("error", "android: enable AccessibilityService for Main display control"),
+                        )
+                    }
                 }
-                jsonOk().put("accept_control", acceptControl)
+                jsonOk().put("accept_control", acceptControl).put("a11y_enabled", a11y)
             }
             "set_exclude_self" -> jsonOk() // N/A on Android for now
             "get_agent_status" -> JSONObject().put("connected", false)
@@ -591,7 +619,16 @@ class AndroidHost(
                 else {
                     val tid = args.optString("target_id", args.optString("id", activeTargetId))
                     if (tid.isNotBlank()) activeTargetId = tid
-                    if (!capture.hasProjectionConsent()) {
+                    if (activeTargetId.startsWith("app:")) {
+                        input.vdDisplayActive = true
+                        val startArgs = JSONObject(args.toString())
+                            .put("target_id", activeTargetId)
+                            .put("id", activeTargetId)
+                            .put("method", "virtualdisplay")
+                            .put("virtualDisplay", true)
+                        capture.start(startArgs, caps.active)
+                    } else if (!capture.hasProjectionConsent()) {
+                        pendingStartAfterConsent = true
                         main.post { requestProjection?.invoke() }
                         JSONObject()
                             .put("ok", false)

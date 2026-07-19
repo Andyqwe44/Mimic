@@ -218,7 +218,7 @@ export function PeerRemoteView({
       } catch { /* */ }
       return
     }
-    // Follow content aspect — do NOT force landscape; phone portrait stays portrait.
+    // Landscape remote (PC) on portrait phone: CSS rotate — do not lock OS orientation.
     const tmr = window.setTimeout(() => requestKeyframe('expand'), 80)
     return () => {
       window.clearTimeout(tmr)
@@ -243,6 +243,12 @@ export function PeerRemoteView({
 
   // Single tree: expand only changes CSS — canvas must NOT remount (was black after expand/exit).
   const portraitVideo = videoAspect > 0 && videoAspect < 1
+  const landscapeVideo = videoAspect >= 1
+  // Fake-landscape: rotate CW when expanded landscape content on a portrait viewport.
+  const viewportPortrait =
+    typeof window !== 'undefined' && window.innerHeight > window.innerWidth
+  const rotated = expanded && landscapeVideo && viewportPortrait
+  // Mini preview: fixed shell follows remote frame aspect (PC window stream is screen canvas).
   const maxPreviewH = portraitVideo ? 'min(58vh, 640px)' : 'min(36vh, 420px)'
 
   const shellClass = expanded
@@ -252,7 +258,6 @@ export function PeerRemoteView({
   const shellStyle: CSSProperties | undefined = expanded
     ? undefined
     : {
-        // Match remote frame aspect (phone portrait / PC landscape / rotated phone).
         aspectRatio: `${videoAspect}`,
         width: '100%',
         maxHeight: maxPreviewH,
@@ -267,6 +272,18 @@ export function PeerRemoteView({
   const stageClass = expanded
     ? 'relative bg-black flex items-center justify-center overflow-hidden flex-1 min-h-0 w-full'
     : 'relative bg-black flex items-center justify-center overflow-hidden flex-1 min-h-0 w-full'
+
+  const rotatedStageStyle: CSSProperties | undefined = rotated
+    ? {
+        position: 'absolute',
+        width: '100dvh',
+        height: '100dvw',
+        top: '50%',
+        left: '50%',
+        transform: 'translate(-50%, -50%) rotate(90deg)',
+        transformOrigin: 'center center',
+      }
+    : undefined
 
   return (
     <div className={shellClass} style={shellStyle}>
@@ -304,31 +321,37 @@ export function PeerRemoteView({
         </div>
       )}
       <div className="flex flex-col bg-black" style={planeStyle}>
-        <div className="h-7 px-2 flex items-center gap-2 text-[11px] text-text-tertiary border-b border-border shrink-0">
+        {!rotated && (
+          <div className="h-7 px-2 flex items-center gap-2 text-[11px] text-text-tertiary border-b border-border shrink-0">
             <span className="font-medium text-text-secondary">
               {source === 'local' ? t('peer.local_preview') : t('peer.remote_view')}
             </span>
-          <span className="tabular-nums">{dims}</span>
-          <span className="tabular-nums">{fps} fps</span>
-          {encodeHint && (
-            <span className="text-amber-500 truncate">{encodeHint}</span>
-          )}
-          <span className="ml-auto truncate min-w-0">
-            {status}{!humanControl ? ` · ${t('peer.ai_mode_short')}` : ''}
-          </span>
-          {!expanded && (
-            <Tooltip text={t('peer.expand_view')}>
-              <button
-                type="button"
-                className="h-6 w-6 rounded flex items-center justify-center shrink-0 hover:bg-bg-hover text-text-secondary"
-                onClick={() => setExpanded(true)}
-              >
-                <Expand className="w-3.5 h-3.5" />
-              </button>
-            </Tooltip>
-          )}
-        </div>
-        <div className={stageClass} data-no-page-swipe={humanControl ? true : undefined}>
+            <span className="tabular-nums">{dims}</span>
+            <span className="tabular-nums">{fps} fps</span>
+            {encodeHint && (
+              <span className="text-amber-500 truncate">{encodeHint}</span>
+            )}
+            <span className="ml-auto truncate min-w-0">
+              {status}{!humanControl ? ` · ${t('peer.ai_mode_short')}` : ''}
+            </span>
+            {!expanded && (
+              <Tooltip text={t('peer.expand_view')}>
+                <button
+                  type="button"
+                  className="h-6 w-6 rounded flex items-center justify-center shrink-0 hover:bg-bg-hover text-text-secondary"
+                  onClick={() => setExpanded(true)}
+                >
+                  <Expand className="w-3.5 h-3.5" />
+                </button>
+              </Tooltip>
+            )}
+          </div>
+        )}
+        <div
+          className={stageClass}
+          style={rotatedStageStyle}
+          data-no-page-swipe={humanControl ? true : undefined}
+        >
           <canvas
             ref={canvasRef}
             width={640}
@@ -345,7 +368,7 @@ export function PeerRemoteView({
             <VirtualMouseOverlay
               enabled
               videoAspect={videoAspect}
-              rotated={false}
+              rotated={rotated}
               showPanel={expanded}
               onAction={send}
             />
@@ -358,7 +381,7 @@ export function PeerRemoteView({
             />
           )}
         </div>
-        {expanded && (
+        {expanded && !rotated && (
           <div className={`${TEXT.tiny} text-center text-text-muted py-1 shrink-0`}>
             {t('peer.expand_hint')}
           </div>

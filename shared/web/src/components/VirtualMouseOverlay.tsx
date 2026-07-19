@@ -7,6 +7,14 @@ import { TEXT, VMOUSE, RADIUS } from '../lib/design'
 /** How many remote-screen widths one full stage-width finger drag covers. */
 const SENSITIVITY = 1.15
 
+/**
+ * Panel offset so the hotspot (triangle tip) sits further down-right of the panel
+ * origin — fingertip / visual click point lands on remote coords.
+ * Larger positive % → panel body shifts further down-right of the tip.
+ */
+const HOTSPOT_PANEL_TX = '-6%'
+const HOTSPOT_PANEL_TY = '-4%'
+
 /** Map viewport finger delta into element-local axes when parent uses rotate(90deg) CW. */
 function mapDelta(dSx: number, dSy: number, W: number, H: number, rotated: boolean) {
   if (rotated) {
@@ -123,12 +131,12 @@ export function VirtualMouseOverlay({
     draggingRef.current = false
   }
 
-  /** Physical press — one wire event. */
-  const pressButton = (button: MouseButton, el: HTMLElement, pointerId: number) => {
+  /** Physical press — one wire event; also starts drag so hold+move works with same finger. */
+  const pressButton = (button: MouseButton, el: HTMLElement, e: ReactPointerEvent) => {
     const down = button === 'left' ? leftDownRef : rightDownRef
     if (down.current) return
     down.current = true
-    el.setPointerCapture(pointerId)
+    beginDrag(e.clientX, e.clientY, el, e.pointerId)
     const { x, y } = posRef.current
     onAction({ type: 'mousedown', button, x_norm: x, y_norm: y })
   }
@@ -147,15 +155,22 @@ export function VirtualMouseOverlay({
       e.stopPropagation()
       e.preventDefault()
       if (e.button !== 0) return
-      pressButton(button, e.currentTarget, e.pointerId)
+      pressButton(button, e.currentTarget, e)
+    },
+    onPointerMove: (e: ReactPointerEvent<HTMLButtonElement>) => {
+      e.stopPropagation()
+      if (!draggingRef.current) return
+      applyDelta(e.clientX, e.clientY)
     },
     onPointerUp: (e: ReactPointerEvent<HTMLButtonElement>) => {
       e.stopPropagation()
       e.preventDefault()
+      endDrag()
       releaseButton(button)
     },
     onPointerCancel: (e: ReactPointerEvent<HTMLButtonElement>) => {
       e.stopPropagation()
+      endDrag()
       releaseButton(button)
     },
     // Swallow click — we already emitted down/up atoms.
@@ -183,18 +198,29 @@ export function VirtualMouseOverlay({
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
       >
-        {/* Single mouse widget — hotspot = remote cursor; body drag = move */}
+        {/* Single mouse widget — triangle tip = remote cursor; body drag = move */}
         <div
           data-vmouse-ui
           className={`absolute ${VMOUSE.panel} ${RADIUS.xl} bg-bg-secondary/95 ring-1 ring-inset ring-border shadow-lg select-none pointer-events-auto touch-none`}
           style={{
             left: `${pos.x * 100}%`,
             top: `${pos.y * 100}%`,
-            transform: 'translate(-12%, -8%)',
+            transform: `translate(${HOTSPOT_PANEL_TX}, ${HOTSPOT_PANEL_TY})`,
           }}
         >
+          {/* Precise hotspot: small accent triangle, tip at remote (x_norm, y_norm). */}
           <div
-            className="absolute -top-1 -left-1 w-2.5 h-2.5 rounded-full bg-accent ring-2 ring-bg-primary pointer-events-none"
+            className="absolute pointer-events-none"
+            style={{
+              left: 0,
+              top: 0,
+              width: 0,
+              height: 0,
+              borderLeft: '4px solid transparent',
+              borderRight: '4px solid transparent',
+              borderTop: '7px solid var(--color-accent, #3b82f6)',
+              transform: 'translate(-50%, -2px)',
+            }}
             aria-hidden
           />
           <div
