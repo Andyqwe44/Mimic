@@ -57,6 +57,8 @@ export default function App() {
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
   const [updateDownloading, setUpdateDownloading] = useState(false)
   const [updateProgress, setUpdateProgress] = useState<UpdateProgressMsg | null>(null)
+  /** Silent background check — drives header/settings bubbles without opening modal. */
+  const [updateAvailableLatest, setUpdateAvailableLatest] = useState<string | null>(null)
   // ── Dev UI overlays — never written into SSOT (企业级：display = overlay ?? real) ──
   const [demoAgentOverride, setDemoAgentOverride] = useState<boolean | null>(null)
   const [demoUpdateInfo, setDemoUpdateInfo] = useState<UpdateInfo | null>(null)
@@ -108,6 +110,27 @@ export default function App() {
       })
       .catch(() => {})
   }, [])
+
+  // Silent update probe after splash — badge/bubble only, no modal.
+  useEffect(() => {
+    if (!appReady) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const info = await hostCall('check_update')
+        if (cancelled) return
+        if (info?.has_update && info.latest) {
+          setUpdateAvailableLatest(String(info.latest).replace(/^v/, ''))
+          addLog(`[update] silent: v${info.latest} available`)
+        } else if (info?.ok !== false && !info?.needs_full_installer) {
+          setUpdateAvailableLatest(null)
+        }
+      } catch {
+        /* network — ignore silent failures */
+      }
+    })()
+    return () => { cancelled = true }
+  }, [appReady])
 
   // Reveal the host window once React has painted its first frame, then drop the
   // startup splash after a brief beat. The window starts HIDDEN on the C++ side to
@@ -215,6 +238,7 @@ export default function App() {
           mode: info.mode || 'incremental',
           staging_state: info.staging_state || undefined,
         } as any)
+        if (info.latest) setUpdateAvailableLatest(String(info.latest).replace(/^v/, ''))
         const fileCount = info.diff?.length || 0
         addLog(`[update] v${info.latest} available (${fileCount} files, ${info.mode || 'incremental'})`)
       } else if (info?.needs_full_installer) {
@@ -232,6 +256,7 @@ export default function App() {
         addLog(`[update] check failed: ${info?.error || 'unknown'}`)
       } else {
         // 已是最新 — 也弹窗 (醒目) 而非只 log
+        setUpdateAvailableLatest(null)
         setUpdateInfo({
           status: 'latest', current: info?.current || cur, latest: info?.current || cur,
           name: '', body: '', url: '',
@@ -957,7 +982,12 @@ export default function App() {
   const displayUpdateDownloading = demoUpdateInfo ? demoUpdateDownloading : updateDownloading
   const displayUpdateProgress = demoUpdateInfo ? demoUpdateProgress : updateProgress
   const displaySelfTest = demoSelfTest ?? selfTest
-  const displayHasUpdate = displayUpdateInfo?.status === 'update'
+  const displayHasUpdate =
+    !!updateAvailableLatest || displayUpdateInfo?.status === 'update'
+  const displayUpdateLatest =
+    updateAvailableLatest
+    || (displayUpdateInfo?.status === 'update' ? String(displayUpdateInfo.latest || '').replace(/^v/, '') : '')
+    || undefined
 
   const pageTitle = t(`nav.${page === 'DevTools' ? 'devtools' : page.toLowerCase()}`)
   const capsuleDevice = displayTargetTitle(selWindow.title, t)
@@ -1029,6 +1059,7 @@ export default function App() {
                 compact={isNarrow || isShort || shellMode === 'bottom'}
                 onCheckUpdate={checkForUpdate}
                 hasUpdate={displayHasUpdate}
+                updateLatest={displayUpdateLatest}
               />
             </div>
           }
@@ -1172,6 +1203,7 @@ export default function App() {
                   setSelfTargetMode={setSelfTargetMode}
                   onCheckUpdate={checkForUpdate}
                   hasUpdate={displayHasUpdate}
+                  updateLatest={displayUpdateLatest}
                   isAdmin={isAdmin}
                   onSwitchPermission={switchPermission}
                   onOpenDevTools={() => setPage('DevTools')}

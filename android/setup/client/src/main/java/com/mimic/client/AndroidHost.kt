@@ -66,6 +66,15 @@ class AndroidHost(
 
     init {
         rotateLogIfNeeded()
+        caps.onStatusChanged = {
+            main.post {
+                pushToJs(
+                    JSONObject()
+                        .put("type", "capability_status")
+                        .put("status", caps.statusJson()),
+                )
+            }
+        }
         MimicAccessibilityService.ourPackage = context.packageName
         MimicAccessibilityService.relaunchConfined = { pkg, act ->
             appendLog("confine", "re-launch $pkg (left confined app)")

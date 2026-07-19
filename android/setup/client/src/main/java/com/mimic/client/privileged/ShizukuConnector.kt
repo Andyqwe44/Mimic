@@ -30,12 +30,14 @@ class ShizukuConnector(private val context: Context) {
     @Volatile private var bound = false
     private var connection: ServiceConnection? = null
     private val observing = AtomicBoolean(false)
+    private val connecting = AtomicBoolean(false)
 
     /** Invoked on main thread when binder appears or permission is granted. */
     @Volatile var onReady: (() -> Unit)? = null
 
     private val binderReceived = Shizuku.OnBinderReceivedListener {
         Log.i(tag, "binder received")
+        // Must not bind/await on main — CapabilityManager schedules async restore.
         mainHandler.post { onReady?.invoke() }
     }
 
@@ -92,6 +94,32 @@ class ShizukuConnector(private val context: Context) {
     fun isConnected(): Boolean = remote != null && bound
 
     fun connect(timeoutMs: Long = 8000L): JSONObject {
+        if (isConnected()) {
+            return JSONObject().put("ok", true).put("backend", "shizuku").put("state", "connected")
+        }
+        if (!connecting.compareAndSet(false, true)) {
+            // Another thread is binding — wait briefly for it.
+            val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs)
+            while (System.nanoTime() < deadline) {
+                if (isConnected()) {
+                    return JSONObject().put("ok", true).put("backend", "shizuku").put("state", "connected")
+                }
+                try { Thread.sleep(50) } catch (_: InterruptedException) { break }
+            }
+            return if (isConnected()) {
+                JSONObject().put("ok", true).put("backend", "shizuku").put("state", "connected")
+            } else {
+                JSONObject().put("ok", false).put("error", "android: Shizuku connect already in progress")
+            }
+        }
+        try {
+            return connectLocked(timeoutMs)
+        } finally {
+            connecting.set(false)
+        }
+    }
+
+    private fun connectLocked(timeoutMs: Long): JSONObject {
         if (isConnected()) {
             return JSONObject().put("ok", true).put("backend", "shizuku").put("state", "connected")
         }

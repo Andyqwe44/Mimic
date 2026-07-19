@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Shield, RefreshCw, ExternalLink } from 'lucide-react'
-import { hostCall, addLog } from '../lib/bridge'
+import { hostCall, addLog, onNativePush } from '../lib/bridge'
 import { isAndroidHost } from '../lib/platform'
 import { ActionBtn, Tooltip } from './Toolkit'
 import { RailCard, type RailBadgeTone } from './RailCard'
@@ -11,6 +11,8 @@ import { TEXT, RADIUS } from '../lib/design'
 type CapStatus = {
   ok?: boolean
   backend?: string
+  preferred?: string
+  restoring?: boolean
   available?: string[]
   shizuku?: { available?: boolean; granted?: boolean; state?: string; detail?: string }
   root?: { available?: boolean; granted?: boolean; state?: string; detail?: string }
@@ -44,21 +46,38 @@ export function ShizukuConnectCard({
     if (!isAndroidHost()) return
     void refresh()
     const id = window.setInterval(() => { void refresh() }, 4000)
-    return () => clearInterval(id)
+    const off = onNativePush((msg: { type?: string; status?: CapStatus }) => {
+      if (msg?.type === 'capability_status' && msg.status) {
+        setSt(msg.status)
+      }
+    })
+    return () => {
+      clearInterval(id)
+      off()
+    }
   }, [refresh])
 
   if (!isAndroidHost()) return null
 
   const sh = st?.shizuku
   const backend = st?.backend || 'normal'
+  const preferred = st?.preferred || 'normal'
   const shState = (sh?.state || 'unavailable').toLowerCase()
   const connected = backend === 'shizuku' && (sh?.granted || shState === 'connected')
+  const restoring = !!st?.restoring || shState === 'connecting'
 
   let badgeTone: RailBadgeTone = 'muted'
   let badgeText = t('peer.shizuku_badge_off')
   if (connected) {
     badgeTone = 'success'
     badgeText = t('peer.shizuku_badge_on')
+  } else if (restoring || (preferred === 'shizuku' && !connected)) {
+    badgeTone = 'warn'
+    badgeText = restoring
+      ? t('peer.shizuku_badge_restoring')
+      : (shState === 'available' || sh?.available
+        ? t('peer.shizuku_badge_need_auth')
+        : t('peer.shizuku_badge_off'))
   } else if (shState === 'available' || sh?.available) {
     badgeTone = 'warn'
     badgeText = t('peer.shizuku_badge_need_auth')

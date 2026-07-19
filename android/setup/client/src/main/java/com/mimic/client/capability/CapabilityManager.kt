@@ -1,16 +1,19 @@
 package com.mimic.client.capability
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
 import com.mimic.client.privileged.ShizukuConnector
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Explicit privilege backend selector (铁律 5 — no silent fallback).
- * normal always available; shizuku when Shizuku app is present + permission.
- *
- * Preferred backend is persisted (SharedPreferences) so a prior Shizuku choice
- * survives process death — MAA-Meow-style: remember + auto-reconnect on ready.
+ * Preferred backend is persisted; restore runs **off the main thread** so
+ * Shizuku UserService bind cannot freeze Activity / WebView startup.
  */
 class CapabilityManager(private val context: Context) {
     @Volatile var active: CapabilityBackend = CapabilityBackend.NORMAL
@@ -19,6 +22,12 @@ class CapabilityManager(private val context: Context) {
     val shizuku = ShizukuConnector(context)
 
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private val restoreExec = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "mimic-cap-restore").apply { isDaemon = true }
+    }
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val restoring = AtomicBoolean(false)
+    private val tag = "MimicCap"
 
     private val statuses = mutableMapOf(
         CapabilityBackend.NORMAL to BackendStatus(CapabilityBackend.NORMAL, BackendState.Connected, "default"),
@@ -26,15 +35,18 @@ class CapabilityManager(private val context: Context) {
         CapabilityBackend.ROOT to BackendStatus(CapabilityBackend.ROOT, BackendState.Unavailable, "not implemented yet"),
     )
 
+    /** Optional: push status to Web UI when restore finishes. */
+    @Volatile var onStatusChanged: (() -> Unit)? = null
+
     init {
         shizuku.onReady = {
-            // Shizuku binder / permission became ready — restore preferred if needed.
-            maybeRestorePreferred()
-            refreshShizukuStatus()
+            // Never bind on the main thread — schedule async restore only.
+            scheduleRestorePreferred("binder/permission ready")
         }
         shizuku.startObserving()
         refreshShizukuStatus()
-        maybeRestorePreferred()
+        // Cold start: if user preferred Shizuku, reconnect in background (non-blocking).
+        scheduleRestorePreferred("init")
     }
 
     fun preferredBackend(): CapabilityBackend {
@@ -47,27 +59,54 @@ class CapabilityManager(private val context: Context) {
         prefs.edit().putString(KEY_BACKEND, backend.id).apply()
     }
 
-    /** Cold-start / binder-up: if user preferred Shizuku, reconnect UserService. */
-    fun maybeRestorePreferred() {
+    fun scheduleRestorePreferred(reason: String) {
+        if (preferredBackend() != CapabilityBackend.SHIZUKU) return
+        if (active == CapabilityBackend.SHIZUKU && shizuku.isConnected()) return
+        if (!restoring.compareAndSet(false, true)) {
+            Log.i(tag, "restore already in flight ($reason)")
+            return
+        }
+        Log.i(tag, "schedule restore ($reason)")
+        restoreExec.execute {
+            try {
+                restorePreferredBlocking()
+            } finally {
+                restoring.set(false)
+                mainHandler.post { onStatusChanged?.invoke() }
+            }
+        }
+    }
+
+    /** Runs only on restoreExec — may block up to connect timeout. */
+    private fun restorePreferredBlocking() {
         if (preferredBackend() != CapabilityBackend.SHIZUKU) return
         if (active == CapabilityBackend.SHIZUKU && shizuku.isConnected()) return
         refreshShizukuStatus()
-        val st = statuses[CapabilityBackend.SHIZUKU]!!
-        if (st.state == BackendState.Unavailable) return
-        if (!shizuku.permissionGranted()) {
-            // Permission may still be granted at system level after app restart;
-            // if not, leave Available so UI can prompt — do not clear preference.
+        if (!shizuku.pingAvailable()) {
+            Log.i(tag, "restore skip: shizuku not running")
             return
         }
-        val conn = shizuku.connect()
+        if (!shizuku.permissionGranted()) {
+            Log.i(tag, "restore skip: permission not granted (preference kept)")
+            return
+        }
+        mark(CapabilityBackend.SHIZUKU, BackendState.Connecting, "restoring")
+        val conn = shizuku.connect(timeoutMs = 6_000L)
         if (conn.optBoolean("ok", false)) {
             active = CapabilityBackend.SHIZUKU
+            persistPreferred(CapabilityBackend.SHIZUKU)
             refreshShizukuStatus()
+            Log.i(tag, "restore ok — backend=shizuku")
+        } else {
+            refreshShizukuStatus()
+            Log.w(tag, "restore failed: ${conn.optString("error")}")
         }
     }
 
     fun refreshShizukuStatus() {
         val st = when {
+            restoring.get() && preferredBackend() == CapabilityBackend.SHIZUKU ->
+                BackendStatus(CapabilityBackend.SHIZUKU, BackendState.Connecting, "restoring")
             !shizuku.pingAvailable() ->
                 BackendStatus(CapabilityBackend.SHIZUKU, BackendState.Unavailable, "shizuku not running")
             !shizuku.permissionGranted() ->
@@ -84,7 +123,9 @@ class CapabilityManager(private val context: Context) {
         refreshShizukuStatus()
         val available = JSONArray()
         for ((backend, st) in statuses) {
-            if (st.state == BackendState.Connected || st.state == BackendState.Available) {
+            if (st.state == BackendState.Connected || st.state == BackendState.Available ||
+                st.state == BackendState.Connecting
+            ) {
                 available.put(backend.id)
             }
         }
@@ -100,6 +141,7 @@ class CapabilityManager(private val context: Context) {
             .put("ok", true)
             .put("backend", active.id)
             .put("preferred", preferredBackend().id)
+            .put("restoring", restoring.get())
             .put("available", available)
             .put("shizuku", one(CapabilityBackend.SHIZUKU))
             .put("root", one(CapabilityBackend.ROOT))
@@ -118,6 +160,8 @@ class CapabilityManager(private val context: Context) {
                 .put("backend", active.id)
         }
         if (backend == CapabilityBackend.SHIZUKU) {
+            // Remember intent immediately so cold start restores even if this bind fails.
+            persistPreferred(CapabilityBackend.SHIZUKU)
             if (st.state == BackendState.Unavailable) {
                 return JSONObject()
                     .put("ok", false)
@@ -127,15 +171,10 @@ class CapabilityManager(private val context: Context) {
             val conn = shizuku.connect()
             if (!conn.optBoolean("ok", false)) {
                 refreshShizukuStatus()
-                // Still remember preference so next binder/permission grant auto-restores.
-                if (conn.optBoolean("need_permission", false)) {
-                    persistPreferred(CapabilityBackend.SHIZUKU)
-                }
                 return conn.put("backend", active.id)
             }
             refreshShizukuStatus()
             active = CapabilityBackend.SHIZUKU
-            persistPreferred(CapabilityBackend.SHIZUKU)
             return JSONObject().put("ok", true).put("backend", active.id)
         }
         // NORMAL
@@ -155,10 +194,10 @@ class CapabilityManager(private val context: Context) {
             persistPreferred(CapabilityBackend.SHIZUKU)
             return JSONObject().put("ok", true).put("backend", "shizuku")
         }
+        persistPreferred(CapabilityBackend.SHIZUKU)
         val conn = shizuku.connect()
         if (conn.optBoolean("ok", false)) {
             active = CapabilityBackend.SHIZUKU
-            persistPreferred(CapabilityBackend.SHIZUKU)
             refreshShizukuStatus()
         }
         return conn

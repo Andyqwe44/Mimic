@@ -14,7 +14,7 @@ import {
 } from '../lib/constants'
 import { THIN_CLIENT } from '../lib/features'
 import { isAndroidHost } from '../lib/platform'
-import { SHELL_PAD } from '../lib/design'
+import { SHELL_PAD, TEXT } from '../lib/design'
 import type { WindowInfo } from '../lib/types'
 
 // ── Darken hex color by percentage (0–100) for hover state ──
@@ -203,6 +203,7 @@ export function SettingsView({
   locale, setLocale,
   onCheckUpdate,
   hasUpdate,
+  updateLatest,
   isAdmin,
   onSwitchPermission,
   onOpenDevTools,
@@ -229,6 +230,7 @@ export function SettingsView({
   locale: string; setLocale: (l: string) => void
   onCheckUpdate?: () => void
   hasUpdate?: boolean
+  updateLatest?: string
   isAdmin?: boolean
   onSwitchPermission?: (toAdmin: boolean) => void
   onOpenDevTools?: () => void
@@ -1064,16 +1066,28 @@ export function SettingsView({
               <span className="text-sm text-text-primary truncate">{t('settings.game_agent_monitor')}</span>
               <span className="text-xs text-text-muted shrink-0">{t('settings.version', { version: appVersion })}</span>
             </div>
-            <ActionBtn
-              icon={hasUpdate
-                ? <RefreshCw className="w-3.5 h-3.5 text-accent" />
-                : <RefreshCw className="w-3.5 h-3.5" />}
-              label={hasUpdate ? t('settings.check_update_latest') : t('settings.check_update')}
-              title={hasUpdate ? t('settings.check_update_latest_tip') : t('settings.check_update_tip')}
-              variant={hasUpdate ? 'primary' : 'outline'}
-              onClick={onCheckUpdate || (() => addLog('[Action] check update'))}
-              className="shrink-0"
-            />
+            <div className="flex flex-col items-end shrink-0 gap-1">
+              <ActionBtn
+                icon={hasUpdate
+                  ? <RefreshCw className="w-3.5 h-3.5 text-accent" />
+                  : <RefreshCw className="w-3.5 h-3.5" />}
+                label={hasUpdate ? t('settings.check_update_latest') : t('settings.check_update')}
+                title={hasUpdate ? t('settings.check_update_latest_tip') : t('settings.check_update_tip')}
+                variant={hasUpdate ? 'primary' : 'outline'}
+                onClick={onCheckUpdate || (() => addLog('[Action] check update'))}
+                className="shrink-0"
+              />
+              {hasUpdate && (
+                <button
+                  type="button"
+                  onClick={onCheckUpdate || (() => {})}
+                  className={`px-2 py-0.5 rounded-md bg-accent text-white ${TEXT.tiny} font-medium
+                    shadow-sm max-w-[14rem] truncate cursor-pointer`}
+                >
+                  {t('settings.update_bubble', { version: updateLatest || '?' })}
+                </button>
+              )}
+            </div>
           </div>
           <div className="border-t border-border pt-2 flex items-center justify-between">
             <div className="text-xs text-text-muted min-w-0">

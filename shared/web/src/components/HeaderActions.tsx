@@ -29,6 +29,7 @@ export function HeaderActions({
   compact,
   onCheckUpdate,
   hasUpdate,
+  updateLatest,
 }: {
   dark: boolean
   onToggleTheme: () => void
@@ -42,6 +43,8 @@ export function HeaderActions({
   /** Always-reachable update entry (escape hatch if Settings scroll/layout fails). */
   onCheckUpdate?: () => void
   hasUpdate?: boolean
+  /** Remote version string when hasUpdate (no leading v). */
+  updateLatest?: string
 }) {
   const { t } = useTranslation()
   const [langOpen, setLangOpen] = useState(false)
@@ -128,25 +131,41 @@ export function HeaderActions({
       <ThemeBtn dark={dark} onToggle={onToggleTheme} />
 
       {onCheckUpdate && (
-        <Tooltip text={hasUpdate ? t('settings.check_update_latest_tip') : t('settings.check_update_tip')}>
-          <button
-            type="button"
-            onClick={() => {
-              onCheckUpdate()
-              addLog('[Update] header check')
-            }}
-            className={`${ICON_CELL} relative`}
-            aria-label={hasUpdate ? t('settings.check_update_latest') : t('settings.check_update')}
-          >
-            <RefreshCw className={`${H.icon} ${hasUpdate ? 'text-accent' : ''}`} />
-            {hasUpdate && (
-              <span
-                aria-hidden
-                className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-accent"
-              />
-            )}
-          </button>
-        </Tooltip>
+        <div className="relative flex flex-col items-center">
+          <Tooltip text={hasUpdate ? t('settings.check_update_latest_tip') : t('settings.check_update_tip')}>
+            <button
+              type="button"
+              onClick={() => {
+                onCheckUpdate()
+                addLog('[Update] header check')
+              }}
+              className={`${ICON_CELL} relative`}
+              aria-label={hasUpdate ? t('settings.check_update_latest') : t('settings.check_update')}
+            >
+              <RefreshCw className={`${H.icon} ${hasUpdate ? 'text-accent' : ''}`} />
+              {hasUpdate && (
+                <span
+                  aria-hidden
+                  className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-accent"
+                />
+              )}
+            </button>
+          </Tooltip>
+          {hasUpdate && (
+            <button
+              type="button"
+              onClick={() => {
+                onCheckUpdate()
+                addLog('[Update] header bubble')
+              }}
+              className={`absolute top-full mt-0.5 z-40 max-w-[11rem] px-1.5 py-0.5 ${RADIUS.md}
+                bg-accent text-white ${TEXT.tiny} font-medium leading-snug text-center
+                shadow-md whitespace-nowrap truncate cursor-pointer`}
+            >
+              {t('settings.update_bubble', { version: updateLatest || '?' })}
+            </button>
+          )}
+        </div>
       )}
     </div>
   )
