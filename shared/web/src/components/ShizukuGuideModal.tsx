@@ -1,5 +1,7 @@
 // Shizuku setup guide — secondary modal (MAA-Meow-style steps).
+// Must portal to body: PagePager uses transform, which breaks position:fixed.
 import type { ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { X, Shield, Download, Smartphone, KeyRound, Link2, ExternalLink, BookOpen } from 'lucide-react'
 import { hostCall, addLog } from '../lib/bridge'
@@ -61,11 +63,12 @@ export function ShizukuGuideModal({
     }
   }
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-[70] flex items-center justify-center bg-scrim backdrop-blur-sm p-3"
       onClick={onClose}
       role="presentation"
+      data-no-page-swipe
     >
       <div
         className={`${MODAL_W.picker} max-h-[min(560px,88vh)] bg-bg-secondary ${RADIUS.xl} ${RING} shadow-2xl flex flex-col overflow-hidden`}
@@ -148,6 +151,7 @@ export function ShizukuGuideModal({
           />
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

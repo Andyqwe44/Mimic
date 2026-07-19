@@ -149,6 +149,15 @@ class PrivilegedVdEncoder(
                 outIndex == MediaCodec.INFO_TRY_AGAIN_LATER -> continue
                 outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                     val fmt = c.outputFormat
+                    val sps = fmt.getByteBuffer("csd-0")
+                    val pps = fmt.getByteBuffer("csd-1")
+                    val profile = try { fmt.getInteger(MediaFormat.KEY_PROFILE) } catch (_: Exception) { -1 }
+                    val level = try { fmt.getInteger(MediaFormat.KEY_LEVEL) } catch (_: Exception) { -1 }
+                    Log.i(
+                        tag,
+                        "outputFormat profile=$profile level=$level " +
+                            "sps=${sps?.remaining() ?: 0}B pps=${pps?.remaining() ?: 0}B req=Baseline/L4",
+                    )
                     val parts = ArrayList<Byte>()
                     fun addAnnex(buf: java.nio.ByteBuffer?) {
                         if (buf == null) return
@@ -157,9 +166,10 @@ class PrivilegedVdEncoder(
                         parts.add(0); parts.add(0); parts.add(0); parts.add(1)
                         for (b in arr) parts.add(b)
                     }
-                    addAnnex(fmt.getByteBuffer("csd-0"))
-                    addAnnex(fmt.getByteBuffer("csd-1"))
+                    addAnnex(sps)
+                    addAnnex(pps)
                     spsPps = parts.toByteArray()
+                    Log.i(tag, "spsPps annexB=${spsPps.size}B")
                 }
                 outIndex >= 0 -> {
                     try {

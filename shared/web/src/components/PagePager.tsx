@@ -225,7 +225,9 @@ export function PagePager({
         {panels.map((panel, i) => (
           <div
             key={PRIMARY_PAGES[i] ?? i}
-            className="h-full shrink-0 flex flex-col min-h-0 overflow-hidden"
+            className={`h-full shrink-0 flex flex-col min-h-0 overflow-hidden ${
+              i === index ? '' : 'pointer-events-none'
+            }`}
             style={{ width: width > 0 ? width : '100%' }}
             aria-hidden={i !== index}
           >

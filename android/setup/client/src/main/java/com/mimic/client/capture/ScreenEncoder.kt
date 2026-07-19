@@ -123,6 +123,15 @@ class ScreenEncoder(
                     val fmt = c.outputFormat
                     val sps = fmt.getByteBuffer("csd-0")
                     val pps = fmt.getByteBuffer("csd-1")
+                    val profile = try { fmt.getInteger(MediaFormat.KEY_PROFILE) } catch (_: Exception) { -1 }
+                    val level = try { fmt.getInteger(MediaFormat.KEY_LEVEL) } catch (_: Exception) { -1 }
+                    val mime = try { fmt.getString(MediaFormat.KEY_MIME) } catch (_: Exception) { "?" }
+                    Log.i(
+                        tag,
+                        "outputFormat mime=$mime profile=$profile level=$level " +
+                            "sps=${sps?.remaining() ?: 0}B pps=${pps?.remaining() ?: 0}B " +
+                            "req=Baseline/L4",
+                    )
                     val parts = ArrayList<Byte>()
                     fun addAnnex(buf: java.nio.ByteBuffer?) {
                         if (buf == null) return
@@ -134,6 +143,7 @@ class ScreenEncoder(
                     addAnnex(sps)
                     addAnnex(pps)
                     spsPps = parts.toByteArray()
+                    Log.i(tag, "spsPps annexB=${spsPps.size}B ready for IDR prepend")
                 }
                 outIndex >= 0 -> {
                     try {

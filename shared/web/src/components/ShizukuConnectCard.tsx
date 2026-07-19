@@ -6,7 +6,7 @@ import { hostCall, addLog, onNativePush } from '../lib/bridge'
 import { isAndroidHost } from '../lib/platform'
 import { ActionBtn, Tooltip } from './Toolkit'
 import { RailCard, type RailBadgeTone } from './RailCard'
-import { TEXT, RADIUS } from '../lib/design'
+import { TEXT, RADIUS, GAP } from '../lib/design'
 import { ShizukuGuideModal } from './ShizukuGuideModal'
 
 type CapStatus = {
@@ -136,8 +136,8 @@ export function ShizukuConnectCard({
   }
 
   const detail = sh?.detail || ''
-  // One primary action: connect XOR fall back to normal.
   const primaryConnected = connected
+  const busyCls = busy ? 'opacity-50 pointer-events-none' : undefined
 
   return (
     <RailCard
@@ -174,45 +174,46 @@ export function ShizukuConnectCard({
         <div>{t('peer.shizuku_state', { state: shState })}</div>
         {detail ? <div className="truncate">{detail}</div> : null}
       </div>
-      <div className="grid grid-cols-2 gap-2">
+      {/* Three compact actions on one row — tips keep full wording. */}
+      <div className={`grid grid-cols-3 ${GAP.md}`}>
         {primaryConnected ? (
           <ActionBtn
             icon={<Shield className="w-3.5 h-3.5" />}
-            label={t('peer.shizuku_use_normal')}
+            label={t('peer.shizuku_use_normal_short')}
             title={t('peer.shizuku_use_normal_tip')}
             variant="outline"
             size="fill"
             onClick={() => { if (!busy) void useNormal() }}
-            className={busy ? 'opacity-50 pointer-events-none' : undefined}
+            className={busyCls}
           />
         ) : (
           <ActionBtn
             icon={<Shield className="w-3.5 h-3.5" />}
-            label={busy ? t('peer.shizuku_connecting') : t('peer.shizuku_connect')}
+            label={busy ? t('peer.shizuku_connecting_short') : t('peer.shizuku_connect_short')}
             title={t('peer.shizuku_connect_tip')}
             variant="primary"
             size="fill"
             onClick={() => { if (!busy) void connect() }}
-            className={busy ? 'opacity-50 pointer-events-none' : undefined}
+            className={busyCls}
           />
         )}
         <ActionBtn
           icon={<ExternalLink className="w-3.5 h-3.5" />}
-          label={t('peer.shizuku_open_app')}
+          label={t('peer.shizuku_open_app_short')}
           title={t('peer.shizuku_open_app_tip')}
           variant="outline"
           size="fill"
           onClick={openApp}
         />
+        <ActionBtn
+          icon={<BookOpen className="w-3.5 h-3.5" />}
+          label={t('peer.shizuku_guide_btn_short')}
+          title={t('peer.shizuku_guide_btn_tip')}
+          variant="outline"
+          size="fill"
+          onClick={() => setGuideOpen(true)}
+        />
       </div>
-      <ActionBtn
-        icon={<BookOpen className="w-3.5 h-3.5" />}
-        label={t('peer.shizuku_guide_btn')}
-        title={t('peer.shizuku_guide_btn_tip')}
-        variant="outline"
-        size="fill"
-        onClick={() => setGuideOpen(true)}
-      />
       {msg && <div className={`${TEXT.tiny} text-text-muted break-words`}>{msg}</div>}
       <ShizukuGuideModal
         open={guideOpen}

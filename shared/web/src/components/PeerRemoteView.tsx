@@ -10,19 +10,16 @@ import { VirtualMouseOverlay } from './VirtualMouseOverlay'
 import { AbsolutePointerOverlay } from './AbsolutePointerOverlay'
 import { SoftKeyboardOverlay } from './SoftKeyboardOverlay'
 import { TEXT } from '../lib/design'
+import {
+  annexbHasIdr,
+  annexbHasPps,
+  annexbHasSps,
+  scanAnnexB,
+  summarizeSps,
+} from '../lib/h264Diag'
 
-function annexbHasIdr(u8: Uint8Array) {
-  for (let i = 0; i + 4 < u8.length; i++) {
-    if (u8[i] === 0 && u8[i + 1] === 0 && u8[i + 2] === 0 && u8[i + 3] === 1) {
-      if ((u8[i + 4] & 0x1f) === 5) return true
-      i += 3
-    } else if (u8[i] === 0 && u8[i + 1] === 0 && u8[i + 2] === 1) {
-      if ((u8[i + 3] & 0x1f) === 5) return true
-      i += 2
-    }
-  }
-  return false
-}
+/** WebCodecs config — must match encoder Baseline L4.0 for 1080p. */
+const DECODER_CODEC = 'avc1.42E028'
 
 type PeerH264Detail = {
   w?: number
@@ -92,6 +89,17 @@ export function PeerRemoteView({
   const [latHint, setLatHint] = useState('')
   const keyRecvRef = useRef(0)
   const deltaDropRef = useRef(0)
+  const decodeErrRef = useRef(0)
+  const lastKeyTsRef = useRef(0)
+  const spsSeenRef = useRef(false)
+  const ppsSeenRef = useRef(false)
+  const streamCodecRef = useRef('')
+  const streamProfileRef = useRef('')
+  const flagKeyMismatchRef = useRef(0)
+  const lastGapMaxRef = useRef(0)
+  const lastDropDeltaRef = useRef(0)
+  const lastQueueRef = useRef(0)
+  const [diagTick, setDiagTick] = useState(0)
 
   const requestKeyframe = (reason: string) => {
     const now = performance.now()
@@ -152,7 +160,7 @@ export function PeerRemoteView({
     setDims(`${w}×${h}`)
     setVideoAspect(w / h)
     needKeyRef.current = true
-    addLog(`[Decode] configure ${w}x${h} codec=avc1.42E028`)
+    addLog(`[Decode] configure ${w}x${h} codec=${DECODER_CODEC}`)
     if (typeof VideoDecoder === 'undefined') {
       setStatus(t('peer.webcodecs_unavailable'))
       return
@@ -160,15 +168,17 @@ export function PeerRemoteView({
     decoderRef.current = new VideoDecoder({
       output: paintFrame,
       error: (e) => {
+        decodeErrRef.current++
         closeDecoder()
         videoSizeRef.current = { w: 0, h: 0 }
         requestKeyframe('error')
         setStatus(t('peer.decoder_error', { msg: e.message }))
-        addLog(`[Decode] VideoDecoder error: ${e.message}`)
+        addLog(`[Decode] VideoDecoder error #${decodeErrRef.current}: ${e.message}`)
+        setDiagTick((n) => n + 1)
       },
     })
     decoderRef.current.configure({
-      codec: 'avc1.42E028',
+      codec: DECODER_CODEC,
       optimizeForLatency: true,
       hardwareAcceleration: 'prefer-hardware',
     })
@@ -199,9 +209,20 @@ export function PeerRemoteView({
       lastTsMsRef.current = -1
       skewSumRef.current = 0
       skewNRef.current = 0
+      decodeErrRef.current = 0
+      lastKeyTsRef.current = 0
+      spsSeenRef.current = false
+      ppsSeenRef.current = false
+      streamCodecRef.current = ''
+      streamProfileRef.current = ''
+      flagKeyMismatchRef.current = 0
+      lastGapMaxRef.current = 0
+      lastDropDeltaRef.current = 0
+      lastQueueRef.current = 0
       setExpanded(false)
       setKbOpen(false)
       setLatHint('')
+      setDiagTick((n) => n + 1)
       return
     }
     const onFrame = (ev: Event) => {
@@ -234,10 +255,29 @@ export function PeerRemoteView({
       lastRecvTsRef.current = nowRecv
       lastTsMsRef.current = tsMs
 
+      // Parameter sets / profile — once per stream (or when SPS changes).
+      if (annexbHasSps(annexb)) {
+        spsSeenRef.current = true
+        const sum = summarizeSps(annexb)
+        if (sum && sum.codec !== streamCodecRef.current) {
+          streamCodecRef.current = sum.codec
+          streamProfileRef.current = `${sum.profile}@L${sum.level}`
+          addLog(
+            `[Decode] SPS ${sum.codec} ${sum.profile} level=${sum.level} ` +
+              `cfg=${DECODER_CODEC} match=${sum.codec.toUpperCase() === DECODER_CODEC.toUpperCase()}`,
+          )
+          setDiagTick((n) => n + 1)
+        }
+      }
+      if (annexbHasPps(annexb)) ppsSeenRef.current = true
+
       ensureDecoder(w, h)
       const decoder = decoderRef.current
       if (!decoder || decoder.state === 'closed') return
-      const key = ((flags & 1) !== 0) || annexbHasIdr(annexb)
+      const flagKey = (flags & 1) !== 0
+      const nalKey = annexbHasIdr(annexb)
+      if (flagKey !== nalKey) flagKeyMismatchRef.current++
+      const key = flagKey || nalKey
       recvCountRef.current++
       if (needKeyRef.current && !key) {
         requestKeyframe('sync')
@@ -264,30 +304,50 @@ export function PeerRemoteView({
           needKeyRef.current = false
           dropCountRef.current = 0
           keyRecvRef.current++
+          lastKeyTsRef.current = nowRecv
           setStatus(t('peer.live'))
           if (keyRecvRef.current <= 3 || keyRecvRef.current % 30 === 0) {
-            addLog(`[Decode] IDR #${keyRecvRef.current} ${w}x${h} bytes=${annexb.byteLength}`)
+            const nals = scanAnnexB(annexb).map((n) => n.type).join(',')
+            addLog(
+              `[Decode] IDR #${keyRecvRef.current} ${w}x${h} bytes=${annexb.byteLength} ` +
+                `flagKey=${flagKey ? 1 : 0} nalKey=${nalKey ? 1 : 0} ` +
+                `sps=${spsSeenRef.current ? 1 : 0} pps=${ppsSeenRef.current ? 1 : 0} nals=[${nals}]`,
+            )
           }
         }
       } catch (e: unknown) {
+        decodeErrRef.current++
         closeDecoder()
         videoSizeRef.current = { w: 0, h: 0 }
         requestKeyframe('decode')
         const msg = e instanceof Error ? e.message : String(e)
         setStatus(t('peer.decode_error', { msg }))
-        addLog(`[Decode] decode() throw: ${msg}`)
+        addLog(`[Decode] decode() throw #${decodeErrRef.current}: ${msg}`)
+        setDiagTick((n) => n + 1)
       }
       const nowDiag = performance.now()
       if (nowDiag - lastDiagTsRef.current >= 1500) {
         lastDiagTsRef.current = nowDiag
         const avgGap = gapNRef.current > 0 ? Math.round(gapSumRef.current / gapNRef.current) : 0
         const avgSkew = skewNRef.current > 0 ? Math.round(skewSumRef.current / skewNRef.current) : 0
+        const gapMax = Math.round(gapMaxRef.current)
         const rtt = rttMsRef.current
         const rttPart = rtt != null ? ` rtt=${rtt}` : ''
-        const hint = `tx=${transportRef.current} gap≈${avgGap}ms jitter≈${avgSkew}ms q=${decoder.decodeQueueSize}${rttPart}`
+        const keyAge = lastKeyTsRef.current > 0 ? Math.round(nowDiag - lastKeyTsRef.current) : -1
+        const hint =
+          `tx=${transportRef.current} gap≈${avgGap}ms jitter≈${avgSkew}ms ` +
+          `q=${decoder.decodeQueueSize}${rttPart}`
         setLatHint(hint)
+        lastGapMaxRef.current = gapMax
+        lastDropDeltaRef.current = deltaDropRef.current
+        lastQueueRef.current = decoder.decodeQueueSize
         addLog(
-          `[Decode] recv=${recvCountRef.current} idr=${keyRecvRef.current} dropDelta=${deltaDropRef.current} fps≈${framesRef.current} needKey=${needKeyRef.current} ${hint} gapMax=${Math.round(gapMaxRef.current)}`,
+          `[Decode] recv=${recvCountRef.current} idr=${keyRecvRef.current} ` +
+            `dropDelta=${deltaDropRef.current} err=${decodeErrRef.current} ` +
+            `fps≈${framesRef.current} needKey=${needKeyRef.current} ` +
+            `keyAge=${keyAge}ms sps=${spsSeenRef.current ? 1 : 0} pps=${ppsSeenRef.current ? 1 : 0} ` +
+            `codec=${streamCodecRef.current || '?'} cfg=${DECODER_CODEC} ` +
+            `flagMis=${flagKeyMismatchRef.current} ${hint} gapMax=${gapMax}`,
         )
         deltaDropRef.current = 0
         gapSumRef.current = 0
@@ -295,6 +355,7 @@ export function PeerRemoteView({
         gapNRef.current = 0
         skewSumRef.current = 0
         skewNRef.current = 0
+        setDiagTick((n) => n + 1)
       }
     }
     window.addEventListener('peer-h264', onFrame)
@@ -362,6 +423,9 @@ export function PeerRemoteView({
       window.dispatchEvent(new CustomEvent('peer-decode-stats', { detail: { active: false } }))
       return
     }
+    const keyAgeMs = lastKeyTsRef.current > 0
+      ? Math.round(performance.now() - lastKeyTsRef.current)
+      : -1
     window.dispatchEvent(new CustomEvent('peer-decode-stats', {
       detail: {
         active: true,
@@ -374,9 +438,23 @@ export function PeerRemoteView({
         rtt: rttMsRef.current,
         transport: transportRef.current,
         humanControl,
+        // Structured H.264 diagnostics (tearing / missing IDR).
+        codecCfg: DECODER_CODEC,
+        codecStream: streamCodecRef.current || '',
+        profile: streamProfileRef.current || '',
+        hasSps: spsSeenRef.current,
+        hasPps: ppsSeenRef.current,
+        idrCount: keyRecvRef.current,
+        keyAgeMs,
+        needKey: needKeyRef.current,
+        dropDelta: lastDropDeltaRef.current,
+        gapMax: lastGapMaxRef.current,
+        queue: lastQueueRef.current,
+        decodeErr: decodeErrRef.current,
+        flagKeyMismatch: flagKeyMismatchRef.current,
       },
     }))
-  }, [active, source, dims, fps, status, latHint, encodeHint, humanControl])
+  }, [active, source, dims, fps, status, latHint, encodeHint, humanControl, diagTick])
 
   if (!active) return null
 

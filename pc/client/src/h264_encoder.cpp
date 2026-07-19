@@ -147,6 +147,18 @@ void cache_sps_pps_from_annexb(const std::vector<uint8_t>& ab, std::vector<uint8
     if (!sps.empty() && !pps.empty()) {
         sps_pps = sps;
         sps_pps.insert(sps_pps.end(), pps.begin(), pps.end());
+        // SPS RBSP after start code + nal header: profile_idc, constraints, level_idc.
+        uint8_t profile = 0, level = 0;
+        if (sps.size() >= 5) {
+            size_t hdr = (sps.size() >= 4 && sps[0] == 0 && sps[1] == 0 && sps[2] == 0 && sps[3] == 1) ? 4u
+                : (sps.size() >= 3 && sps[0] == 0 && sps[1] == 0 && sps[2] == 1) ? 3u : 0u;
+            if (hdr && sps.size() >= hdr + 4) {
+                profile = sps[hdr + 1];
+                level = sps[hdr + 3];
+            }
+        }
+        LOG("h264", "cached SPS+PPS total=%zu sps=%zu pps=%zu profile_idc=%u level_idc=%u",
+            sps_pps.size(), sps.size(), pps.size(), (unsigned)profile, (unsigned)level);
     }
 }
 
