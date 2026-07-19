@@ -188,7 +188,27 @@
     "expand_view": "展開畫幅（橫向全螢幕）",
     "collapse_view": "收起畫幅",
     "expand_hint": "橫握手機觀看 · 依被控端比例 contain · 點收起返回",
-    "vmouse_hint": "滑動=相對移動游標（不跳到手指下）"
+    "vmouse_hint": "滑動=相對移動游標（不跳到手指下）",
+    "shizuku_title": "Shizuku 特權",
+    "shizuku_body": "App 沙箱（獨立 VirtualDisplay）需要 Shizuku。先啟動並授權 Shizuku，再點「連接」。一般檔僅支援主螢幕整機控制。",
+    "shizuku_badge_off": "未連接",
+    "shizuku_badge_on": "已連接",
+    "shizuku_badge_need_auth": "待授權",
+    "shizuku_badge_missing": "未安裝/未執行",
+    "shizuku_backend": "目前後端: {backend}",
+    "shizuku_state": "Shizuku 狀態: {state}",
+    "shizuku_connect": "連接 Shizuku",
+    "shizuku_connecting": "連接中…",
+    "shizuku_connect_tip": "綁定特權服務並切換到 Shizuku 後端",
+    "shizuku_connect_failed": "連接失敗",
+    "shizuku_connected": "已連接 Shizuku",
+    "shizuku_open_app": "打開 Shizuku",
+    "shizuku_open_app_tip": "打開 Shizuku 管理器以啟動或授權",
+    "shizuku_open_failed": "無法打開 Shizuku",
+    "shizuku_refresh_tip": "重新整理狀態",
+    "shizuku_use_normal": "改用一般檔",
+    "shizuku_use_normal_tip": "退回 MediaProjection + 無障礙（無 App 沙箱）",
+    "shizuku_using_normal": "已切換為一般檔"
   },
 
   "screenshot": {

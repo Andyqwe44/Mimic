@@ -37,6 +37,12 @@ powershell -File scripts\Release.ps1 -PublishGitee  # 可选：薄 Setup 挂 Git
 
 默认路径：CDN 货架 + 旧 Setup 应用内更新。Gitee Setup 附件需显式 `-PublishGitee`。
 
+## 验收策略（铁律 11）
+
+- **功能/修复合入后默认直接发版**（`Release.ps1` / `-ClientOnly` / `-ServerOnly` 按改动端选择）。
+- **不以 Dev / Vite HMR / 本机未装机包验收**；用户只测 CDN 应用内更新后的发行版。
+- Agent 完成可发版改动后应 bump 版本并跑发版脚本，除非用户明确说「先别发」。
+
 Android APK：`Build-Android.ps1` → CDN `http://47.107.43.5/mimic/android/`；详见 `android/README.md`。
 
 CDN：`scripts/Publish-Cdn.ps1`（`-ClientOnly` 含 android）。

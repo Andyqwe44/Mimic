@@ -286,6 +286,40 @@ export function PeerRemoteView({
 
   return (
     <div className={shellClass}>
+      {/* Chrome OUTSIDE rotate(90deg) plane — otherwise collapse is off-screen / untappable. */}
+      {expanded && (
+        <div
+          className="fixed z-[90] flex items-center gap-1 pointer-events-auto"
+          style={{
+            top: 'max(10px, env(safe-area-inset-top, 0px))',
+            right: 'max(10px, env(safe-area-inset-right, 0px))',
+          }}
+          data-no-page-swipe
+        >
+          {humanControl && (
+            <Tooltip text={kbOpen ? t('peer.soft_kb_close') : t('peer.soft_kb_open')}>
+              <button
+                type="button"
+                className={`h-9 w-9 rounded-lg flex items-center justify-center shrink-0 bg-bg-secondary/90 ring-1 ring-inset ring-border ${
+                  kbOpen ? 'text-accent' : 'text-text-secondary'
+                }`}
+                onClick={() => setKbOpen((v) => !v)}
+              >
+                <Keyboard className="w-4 h-4" />
+              </button>
+            </Tooltip>
+          )}
+          <Tooltip text={t('peer.collapse_view')}>
+            <button
+              type="button"
+              className="h-9 w-9 rounded-lg flex items-center justify-center shrink-0 bg-bg-secondary/90 ring-1 ring-inset ring-border text-text-secondary"
+              onClick={() => setExpanded(false)}
+            >
+              <Minimize2 className="w-4 h-4" />
+            </button>
+          </Tooltip>
+        </div>
+      )}
       <div className="flex flex-col bg-black" style={planeStyle}>
         <div className="h-7 px-2 flex items-center gap-2 text-[11px] text-text-tertiary border-b border-border shrink-0">
           <span className="font-medium text-text-secondary">{t('peer.remote_view')}</span>
@@ -297,28 +331,17 @@ export function PeerRemoteView({
           <span className="ml-auto truncate min-w-0">
             {status}{!humanControl ? ` · ${t('peer.ai_mode_short')}` : ''}
           </span>
-          {humanControl && expanded && (
-            <Tooltip text={kbOpen ? t('peer.soft_kb_close') : t('peer.soft_kb_open')}>
+          {!expanded && (
+            <Tooltip text={t('peer.expand_view')}>
               <button
                 type="button"
-                className={`h-6 w-6 rounded flex items-center justify-center shrink-0 ${
-                  kbOpen ? 'bg-accent-soft-mid text-accent' : 'hover:bg-bg-hover text-text-secondary'
-                }`}
-                onClick={() => setKbOpen((v) => !v)}
+                className="h-6 w-6 rounded flex items-center justify-center shrink-0 hover:bg-bg-hover text-text-secondary"
+                onClick={() => setExpanded(true)}
               >
-                <Keyboard className="w-3.5 h-3.5" />
+                <Expand className="w-3.5 h-3.5" />
               </button>
             </Tooltip>
           )}
-          <Tooltip text={expanded ? t('peer.collapse_view') : t('peer.expand_view')}>
-            <button
-              type="button"
-              className="h-6 w-6 rounded flex items-center justify-center shrink-0 hover:bg-bg-hover text-text-secondary"
-              onClick={() => setExpanded((v) => !v)}
-            >
-              {expanded ? <Minimize2 className="w-3.5 h-3.5" /> : <Expand className="w-3.5 h-3.5" />}
-            </button>
-          </Tooltip>
         </div>
         <div className={stageClass} data-no-page-swipe>
           <canvas

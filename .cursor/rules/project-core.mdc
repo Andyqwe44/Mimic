@@ -24,6 +24,7 @@ alwaysApply: true
 8. **版本真相源** — PC 只改 `pc/client/src/version.h`；Server 改 `server/package.json`；Android 改 `android/package.json` + `android/version.json`（lib DLL 用 Build.ps1 `$LibVer`）。
 9. **跨进程参数不加引号包路径**；被调进程必须剥两端引号。
 10. **禁止编造工具返回值** — 未调用就说未调用；关键结论先 `git` 核实。
+11. **改完直接发版** — 功能/修复合入后默认跑 `Release.ps1`（相关端）上 CDN；**不以 Dev/HMR 验收**，以装机包 / 应用内更新后的发行版实测为准。
 
 ## 目录速览
 
@@ -45,4 +46,4 @@ scripts/ installer/ docs/
 
 详细构建/发版 → `build-release`；C++ → `cpp-backend`；前端 → `monitor-web`（globs 指向 `shared/web`）。
 
-测试以发行版 / 装机更新为准（无 Dev/HMR 轨道）。
+测试以发行版 / 装机更新为准（无 Dev/HMR 轨道）。**改完直接发版**（铁律 11）— 见 `.cursor/rules/build-release.mdc`。

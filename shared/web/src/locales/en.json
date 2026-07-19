@@ -188,7 +188,27 @@
     "expand_view": "Expand view (landscape fullscreen)",
     "collapse_view": "Collapse view",
     "expand_hint": "Hold phone sideways · contain to remote aspect · tap collapse",
-    "vmouse_hint": "Drag = relative cursor move (no snap under finger)"
+    "vmouse_hint": "Drag = relative cursor move (no snap under finger)",
+    "shizuku_title": "Shizuku privilege",
+    "shizuku_body": "App sandbox (isolated VirtualDisplay) needs Shizuku. Start and authorize Shizuku, then tap Connect. Normal mode only supports whole-display control.",
+    "shizuku_badge_off": "Off",
+    "shizuku_badge_on": "Connected",
+    "shizuku_badge_need_auth": "Need auth",
+    "shizuku_badge_missing": "Not installed/running",
+    "shizuku_backend": "Backend: {backend}",
+    "shizuku_state": "Shizuku: {state}",
+    "shizuku_connect": "Connect Shizuku",
+    "shizuku_connecting": "Connecting…",
+    "shizuku_connect_tip": "Bind privileged service and switch to Shizuku backend",
+    "shizuku_connect_failed": "Connect failed",
+    "shizuku_connected": "Shizuku connected",
+    "shizuku_open_app": "Open Shizuku",
+    "shizuku_open_app_tip": "Open Shizuku manager to start or authorize",
+    "shizuku_open_failed": "Cannot open Shizuku",
+    "shizuku_refresh_tip": "Refresh status",
+    "shizuku_use_normal": "Use normal",
+    "shizuku_use_normal_tip": "Fall back to MediaProjection + Accessibility (no app sandbox)",
+    "shizuku_using_normal": "Switched to normal backend"
   },
 
   "screenshot": {

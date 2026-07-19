@@ -1,7 +1,9 @@
 // Peers page — signaling login, devices, invite/accept/hangup (no remote video).
 import { useState } from 'react'
 import { PeerPanel } from './PeerPanel'
+import { ShizukuConnectCard } from './ShizukuConnectCard'
 import { SHELL_PAD } from '../lib/design'
+import { isAndroidHost } from '../lib/platform'
 
 export function ControlView({
   peerControlMode,
@@ -19,9 +21,16 @@ export function ControlView({
   onSessionStart?: () => void
 }) {
   const [peerExpanded, setPeerExpanded] = useState(true)
+  const [shizukuExpanded, setShizukuExpanded] = useState(true)
 
   return (
     <div className={`flex-1 overflow-y-auto ${SHELL_PAD.page} space-y-3 min-h-0`}>
+      {isAndroidHost() && (
+        <ShizukuConnectCard
+          expanded={shizukuExpanded}
+          onToggle={() => setShizukuExpanded((v) => !v)}
+        />
+      )}
       <PeerPanel
         expanded={peerExpanded}
         onToggle={() => setPeerExpanded((v) => !v)}

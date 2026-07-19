@@ -263,6 +263,7 @@ class AndroidHost(
             "get_capability_backend" -> caps.statusJson()
                 .put("a11y_enabled", MimicAccessibilityService.isEnabled())
             "set_capability_backend" -> caps.setBackend(args.optString("backend", "normal"))
+            "open_shizuku" -> openShizukuApp()
             "crash_log" -> {
                 appendLog("crash", "${args.optString("kind")} | ${args.optString("message")}")
                 jsonOk()
@@ -817,6 +818,43 @@ class AndroidHost(
             context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "0.0.0"
         } catch (_: Exception) {
             "0.0.0"
+        }
+    }
+
+    /** Launch Shizuku manager (or Play Store / official site fallback). */
+    private fun openShizukuApp(): JSONObject {
+        val pm = context.packageManager
+        val pkgs = listOf("moe.shizuku.privileged.api", "moe.shizuku.manager")
+        for (pkg in pkgs) {
+            val launch = pm.getLaunchIntentForPackage(pkg)
+            if (launch != null) {
+                return try {
+                    launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(launch)
+                    JSONObject().put("ok", true).put("package", pkg)
+                } catch (e: Exception) {
+                    JSONObject().put("ok", false).put("error", e.message ?: "startActivity failed")
+                }
+            }
+        }
+        return try {
+            val market = Intent(
+                Intent.ACTION_VIEW,
+                Uri.parse("market://details?id=moe.shizuku.privileged.api"),
+            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(market)
+            JSONObject().put("ok", true).put("via", "market")
+        } catch (_: Exception) {
+            try {
+                val web = Intent(
+                    Intent.ACTION_VIEW,
+                    Uri.parse("https://shizuku.rikka.app/"),
+                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(web)
+                JSONObject().put("ok", true).put("via", "web")
+            } catch (e: Exception) {
+                JSONObject().put("ok", false).put("error", "android: Shizuku not installed (${e.message})")
+            }
         }
     }
 
