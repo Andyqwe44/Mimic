@@ -237,21 +237,24 @@ class AndroidHost(
         return if (started.optBoolean("ok", false)) {
             pendingStartAfterConsent = false
             appendLog("cap", "encoder started target=$tid")
-            // Kick an IDR ASAP — static screens may not emit frames until dirty.
-            main.postDelayed({
-                try { capture.requestKeyframe() } catch (_: Exception) {}
-            }, 200L)
-            // display:* — send Mimic to background so capture shows the phone's current UI,
-            // not Mimic itself sitting on top after the consent dialog.
+            // Burst keyframe requests — static screens / first-frame races need multiple kicks.
+            listOf(80L, 250L, 700L, 1600L).forEach { delayMs ->
+                main.postDelayed({
+                    try { capture.requestKeyframe() } catch (_: Exception) {}
+                }, delayMs)
+            }
+            // display:* — send Mimic to background AFTER first frames so encoder has content,
+            // and PC sees something before the home screen goes fully static.
             if (tid.startsWith("display:")) {
-                main.post {
+                main.postDelayed({
                     try {
                         (context as? android.app.Activity)?.moveTaskToBack(true)
                         appendLog("cap", "display target → moveTaskToBack")
+                        capture.requestKeyframe()
                     } catch (e: Exception) {
                         appendLog("cap", "moveTaskToBack failed: ${e.message}")
                     }
-                }
+                }, 900L)
             }
             started.put("id", tid).put("peer_proto", 2)
         } else {

@@ -135,6 +135,8 @@
     "control": "控制",
     "request_control": "请求控制",
     "invite_from": "来自 {name} 的邀请",
+    "call_banner_android": "本机正被「{name}」呼叫",
+    "call_banner_pc": "有设备正在呼叫：{name}",
     "accept": "接受",
     "accept_tip": "接受会话并允许对方画面与控制（目标由对方选择）",
     "reject": "拒绝",

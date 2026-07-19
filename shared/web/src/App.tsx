@@ -18,6 +18,7 @@ import { SelfTestModal } from './components/SelfTestModal'
 import { SettingsView } from './components/SettingsView'
 import { Tooltip } from './components/Toolkit'
 import { UpdateModal, type UpdateInfo } from './components/UpdateModal'
+import { IncomingCallBanner } from './components/IncomingCallBanner'
 import { hostCall, logMgr, addLog, applyTheme, onUpdateProgress, onNativePush, type UpdateProgressMsg } from './lib/bridge'
 import { hasBootSettings, readBootSettings } from './lib/bootSettings'
 import { cantCaptureMinimized } from './lib/constants'
@@ -1276,6 +1277,8 @@ export default function App() {
           else selfTestAbort.current = true
         }}
       />
+
+      <IncomingCallBanner onAccepted={onPeerSessionStart} />
 
       {displayUpdateInfo && (
         <UpdateModal

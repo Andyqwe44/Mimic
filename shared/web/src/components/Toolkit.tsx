@@ -144,7 +144,7 @@ export function ActionBtn({
   label: string
   title: string
   variant: 'primary' | 'danger' | 'outline' | 'outline-accent'
-  size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl'
+  size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl' | 'fill'
   onClick?: () => void
   className?: string
 }) {

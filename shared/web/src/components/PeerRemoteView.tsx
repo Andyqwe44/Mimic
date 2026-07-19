@@ -28,27 +28,37 @@ type PeerH264Detail = {
   bytes: Uint8Array
 }
 
+/** Largest box of `aspect` that fits inside (cw × ch). */
+function fitContain(cw: number, ch: number, aspect: number) {
+  if (cw <= 0 || ch <= 0 || aspect <= 0) return { w: 0, h: 0 }
+  let w = cw
+  let h = cw / aspect
+  if (h > ch) {
+    h = ch
+    w = ch * aspect
+  }
+  return { w: Math.max(1, Math.floor(w)), h: Math.max(1, Math.floor(h)) }
+}
+
 export function PeerRemoteView({
   active,
   humanControl,
   fill: _fill = false,
   encodeHint,
   compact: _compact = false,
-  /** remote = peer stream; local = this device's outbound capture mirror. */
   source = 'remote',
 }: {
   active: boolean
   humanControl: boolean
-  /** Fill parent height (Monitor workspace). Kept for call-site compat; sizing follows videoAspect. */
   fill?: boolean
-  /** Optional encoder path hint from controlled side (e.g. SOFTWARE). */
   encodeHint?: string
-  /** Smaller preview — kept for call-site compat; sizing follows videoAspect. */
   compact?: boolean
   source?: 'remote' | 'local'
 }) {
   const { t } = useTranslation()
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const stageRef = useRef<HTMLDivElement>(null)
+  const kbWrapRef = useRef<HTMLDivElement>(null)
   const decoderRef = useRef<VideoDecoder | null>(null)
   const needKeyRef = useRef(true)
   const videoSizeRef = useRef({ w: 0, h: 0 })
@@ -64,6 +74,8 @@ export function PeerRemoteView({
   const [videoAspect, setVideoAspect] = useState(16 / 9)
   const [expanded, setExpanded] = useState(false)
   const [kbOpen, setKbOpen] = useState(false)
+  const [kbH, setKbH] = useState(0)
+  const [stageBox, setStageBox] = useState({ w: 0, h: 0 })
   const keyRecvRef = useRef(0)
   const deltaDropRef = useRef(0)
 
@@ -159,8 +171,6 @@ export function PeerRemoteView({
         deltaDropRef.current++
         return
       }
-      // Backpressure only when decode queue is badly backed up (LAN: do NOT drop
-      // every delta just because queueSize>0 — that caused constant blur).
       if (!key && decoder.decodeQueueSize > 10) {
         dropCountRef.current++
         deltaDropRef.current++
@@ -212,13 +222,13 @@ export function PeerRemoteView({
 
   useEffect(() => {
     if (!expanded) {
+      setKbOpen(false)
       try {
         const o = screen.orientation as ScreenOrientation & { unlock?: () => void }
         o?.unlock?.()
       } catch { /* */ }
       return
     }
-    // Landscape remote (PC) on portrait phone: CSS rotate — do not lock OS orientation.
     const tmr = window.setTimeout(() => requestKeyframe('expand'), 80)
     return () => {
       window.clearTimeout(tmr)
@@ -228,6 +238,30 @@ export function PeerRemoteView({
       } catch { /* */ }
     }
   }, [expanded])
+
+  useEffect(() => {
+    if (!kbOpen) {
+      setKbH(0)
+      return
+    }
+    const el = kbWrapRef.current
+    if (!el) return
+    const measure = () => setKbH(el.offsetHeight)
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [kbOpen])
+
+  useEffect(() => {
+    const el = stageRef.current
+    if (!el) return
+    const update = () => setStageBox({ w: el.clientWidth, h: el.clientHeight })
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [expanded, kbH, videoAspect])
 
   const send = (action: Record<string, unknown>) => {
     if (!humanControl) return
@@ -241,15 +275,17 @@ export function PeerRemoteView({
 
   if (!active) return null
 
-  // Single tree: expand only changes CSS — canvas must NOT remount (was black after expand/exit).
   const portraitVideo = videoAspect > 0 && videoAspect < 1
   const landscapeVideo = videoAspect >= 1
-  // Fake-landscape: rotate CW when expanded landscape content on a portrait viewport.
   const viewportPortrait =
     typeof window !== 'undefined' && window.innerHeight > window.innerWidth
   const rotated = expanded && landscapeVideo && viewportPortrait
-  // Mini preview: fixed shell follows remote frame aspect (PC window stream is screen canvas).
   const maxPreviewH = portraitVideo ? 'min(58vh, 640px)' : 'min(36vh, 420px)'
+
+  // When rotated, the pre-rotate content box swaps axes so post-rotate fills the stage.
+  const contentW = rotated ? stageBox.h : stageBox.w
+  const contentH = rotated ? stageBox.w : stageBox.h
+  const fit = fitContain(contentW, contentH, videoAspect > 0 ? videoAspect : 16 / 9)
 
   const shellClass = expanded
     ? 'fixed inset-0 z-[80] bg-black overflow-hidden'
@@ -266,24 +302,16 @@ export function PeerRemoteView({
       }
 
   const planeStyle: CSSProperties = expanded
-    ? { position: 'absolute', inset: 0, width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }
-    : { display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }
-
-  const stageClass = expanded
-    ? 'relative bg-black flex items-center justify-center overflow-hidden flex-1 min-h-0 w-full'
-    : 'relative bg-black flex items-center justify-center overflow-hidden flex-1 min-h-0 w-full'
-
-  const rotatedStageStyle: CSSProperties | undefined = rotated
     ? {
         position: 'absolute',
-        width: '100dvh',
-        height: '100dvw',
-        top: '50%',
-        left: '50%',
-        transform: 'translate(-50%, -50%) rotate(90deg)',
-        transformOrigin: 'center center',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: kbOpen ? kbH : 0,
+        display: 'flex',
+        flexDirection: 'column',
       }
-    : undefined
+    : { display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }
 
   return (
     <div className={shellClass} style={shellStyle}>
@@ -348,45 +376,68 @@ export function PeerRemoteView({
           </div>
         )}
         <div
-          className={stageClass}
-          style={rotatedStageStyle}
+          ref={stageRef}
+          className="relative bg-black flex items-center justify-center overflow-hidden flex-1 min-h-0 w-full"
           data-no-page-swipe={humanControl ? true : undefined}
         >
-          <canvas
-            ref={canvasRef}
-            width={640}
-            height={360}
-            className="max-w-full max-h-full object-contain pointer-events-none"
-            style={{
-              aspectRatio: `${videoAspect}`,
-              width: '100%',
-              height: '100%',
-              objectFit: 'contain',
-            }}
-          />
-          {humanControl && (
-            <VirtualMouseOverlay
-              enabled
-              videoAspect={videoAspect}
-              rotated={rotated}
-              showPanel={expanded}
-              onAction={send}
+          <div
+            className="relative flex items-center justify-center"
+            style={
+              rotated
+                ? {
+                    width: contentW > 0 ? contentW : '100%',
+                    height: contentH > 0 ? contentH : '100%',
+                    transform: 'rotate(90deg)',
+                    transformOrigin: 'center center',
+                  }
+                : { width: '100%', height: '100%' }
+            }
+          >
+            <canvas
+              ref={canvasRef}
+              width={640}
+              height={360}
+              className="pointer-events-none"
+              style={{
+                width: fit.w > 0 ? fit.w : '100%',
+                height: fit.h > 0 ? fit.h : '100%',
+                maxWidth: '100%',
+                maxHeight: '100%',
+                objectFit: 'contain',
+              }}
             />
-          )}
-          {humanControl && expanded && (
-            <SoftKeyboardOverlay
-              open={kbOpen}
-              onClose={() => setKbOpen(false)}
-              onKey={sendKey}
-            />
-          )}
+            {humanControl && (
+              <VirtualMouseOverlay
+                enabled
+                videoAspect={videoAspect}
+                rotated={rotated}
+                showPanel={expanded}
+                fitWidth={fit.w}
+                fitHeight={fit.h}
+                onAction={send}
+              />
+            )}
+          </div>
         </div>
-        {expanded && !rotated && (
+        {expanded && !rotated && !kbOpen && (
           <div className={`${TEXT.tiny} text-center text-text-muted py-1 shrink-0`}>
             {t('peer.expand_hint')}
           </div>
         )}
       </div>
+      {humanControl && expanded && kbOpen && (
+        <div
+          ref={kbWrapRef}
+          className="fixed inset-x-0 bottom-0 z-[95] pointer-events-auto"
+          data-no-page-swipe
+        >
+          <SoftKeyboardOverlay
+            open={kbOpen}
+            onClose={() => setKbOpen(false)}
+            onKey={sendKey}
+          />
+        </div>
+      )}
     </div>
   )
 }

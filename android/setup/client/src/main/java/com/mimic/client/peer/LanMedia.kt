@@ -19,6 +19,7 @@ import kotlin.concurrent.thread
 class LanMedia(
     private val onJson: (JSONObject) -> Unit,
     private val onH264: (ByteArray) -> Unit,
+    private val onReady: (() -> Unit)? = null,
 ) {
     private val tag = "MimicLan"
     private val running = AtomicBoolean(false)
@@ -67,6 +68,8 @@ class LanMedia(
         out = DataOutputStream(s.getOutputStream())
         ready = true
         running.set(true)
+        Log.i(tag, "LAN attached ${s.remoteSocketAddress}")
+        try { onReady?.invoke() } catch (e: Exception) { Log.w(tag, "onReady", e) }
         thread(name = "mimic-lan-read", isDaemon = true) {
             try {
                 val inp = DataInputStream(s.getInputStream())
@@ -94,7 +97,6 @@ class LanMedia(
                 ready = false
             }
         }
-        Log.i(tag, "LAN attached ${s.remoteSocketAddress}")
     }
 
     fun sendH264(packedMetaAndAnnexB: ByteArray) {

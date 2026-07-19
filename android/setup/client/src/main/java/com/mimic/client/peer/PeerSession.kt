@@ -64,10 +64,15 @@ class PeerSession(
             storeFramePreferKey(bytes)
             push(JSONObject().put("type", "peer_frame"))
         },
+        onReady = { onMediaLinkReady("lan") },
     )
     private var udp: UdpMedia? = null
     @Volatile private var iceStarted = false
     @Volatile private var lastFrame: ByteArray? = null
+    /** Last outbound IDR while controlled — resent when media link becomes ready. */
+    @Volatile private var lastOutboundKey: ByteArray? = null
+    @Volatile private var h264SentCount = 0
+    @Volatile private var h264DropCount = 0
     @Volatile private var reconnectAttempt = 0
     private val reconnectRunnable = Runnable { tryReconnect() }
     private val presenceHb = object : Runnable {
@@ -145,18 +150,55 @@ class PeerSession(
 
     fun sendH264Packed(packed: ByteArray) {
         if (role != "controlled") return
+        val isKey = packed.size >= 12 &&
+            (java.nio.ByteBuffer.wrap(packed, 8, 4).order(java.nio.ByteOrder.LITTLE_ENDIAN).int and 1) != 0
+        if (isKey) lastOutboundKey = packed.copyOf()
         val u = udp
         if (u != null && u.ready) {
             u.sendH264(packed)
+            noteH264Sent(isKey)
             return
         }
         if (!lan.ready) {
-            if (System.currentTimeMillis() % 3000L < 50L) {
-                Log.w(tag, "sendH264Packed dropped — media not ready")
+            h264DropCount++
+            if (h264DropCount <= 3 || h264DropCount % 60 == 0) {
+                Log.w(tag, "sendH264Packed dropped — media not ready (drops=$h264DropCount key=$isKey)")
             }
             return
         }
         lan.sendH264(packed)
+        noteH264Sent(isKey)
+    }
+
+    private fun noteH264Sent(isKey: Boolean) {
+        h264SentCount++
+        if (h264SentCount <= 5 || (isKey && h264SentCount % 30 == 0)) {
+            Log.i(tag, "H264 sent #$h264SentCount key=$isKey")
+        }
+    }
+
+    /** LAN/UDP media just became writable — flush buffered IDR + kick encoder. */
+    private fun onMediaLinkReady(mode: String) {
+        transport = mode
+        push(JSONObject().put("type", "peer_transport").put("mode", mode))
+        Log.i(tag, "media link ready mode=$mode role=$role")
+        if (role != "controlled") return
+        val key = lastOutboundKey
+        if (key != null && key.isNotEmpty()) {
+            try {
+                if (lan.ready) lan.sendH264(key)
+                else udp?.takeIf { it.ready }?.sendH264(key)
+                Log.i(tag, "resent buffered IDR (${key.size} bytes) after media ready")
+            } catch (e: Exception) {
+                Log.w(tag, "resent IDR failed", e)
+            }
+        }
+        main.post {
+            try { onRequestKeyframe?.invoke() } catch (_: Exception) {}
+        }
+        main.postDelayed({
+            try { onRequestKeyframe?.invoke() } catch (_: Exception) {}
+        }, 400L)
     }
 
     fun login(args: JSONObject): JSONObject {
@@ -292,6 +334,9 @@ class PeerSession(
         lan.stop()
         role = "idle"
         transport = "none"
+        lastOutboundKey = null
+        h264SentCount = 0
+        h264DropCount = 0
         return JSONObject().put("ok", true)
     }
 
@@ -401,8 +446,6 @@ class PeerSession(
             }
         }
         if (ok) {
-            transport = "lan"
-            push(JSONObject().put("type", "peer_transport").put("mode", "lan"))
             if (peerDeviceId.isNotBlank()) {
                 sendWs(
                     JSONObject()
@@ -451,8 +494,7 @@ class PeerSession(
                     push(JSONObject().put("type", "peer_frame"))
                 },
                 onReady = {
-                    transport = "p2p"
-                    push(JSONObject().put("type", "peer_transport").put("mode", "p2p"))
+                    onMediaLinkReady("p2p")
                     Log.i(tag, "P2P media ready (UDP hole-punch)")
                 },
             )
@@ -546,6 +588,9 @@ class PeerSession(
                     .put("id", json.optString("id", result.optString("id", "")))
                     .put("peer_proto", 2)
                 if (result.has("error")) ack.put("error", result.optString("error"))
+                if (result.has("pending_consent")) {
+                    ack.put("pending_consent", result.optBoolean("pending_consent"))
+                }
                 mediaSendJson(ack)
             }
             "set_target_ack" -> {

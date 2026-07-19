@@ -34,6 +34,8 @@ export const BTN_SIZE_CLASS: Record<string, string> = {
   md: 'w-[104px]',   // 104px — 7 units
   lg: 'w-[132px]',   // 132px — 8–14 units (e.g. 检查更新=8)
   xl: 'w-[168px]',   // 168px — 15+ units
+  /** Grid / stacked rows — fill the cell (Shizuku card etc.) */
+  fill: 'w-full',
 }
 
 /** Approximate display width: CJK / fullwidth count as 2 Latin units. */

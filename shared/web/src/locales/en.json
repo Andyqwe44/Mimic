@@ -135,6 +135,8 @@
     "control": "Control",
     "request_control": "Request control",
     "invite_from": "Invite from {name}",
+    "call_banner_android": "This device is being called by {name}",
+    "call_banner_pc": "Incoming call from {name}",
     "accept": "Accept",
     "accept_tip": "Accept session and allow video + control (controller picks the target)",
     "reject": "Reject",

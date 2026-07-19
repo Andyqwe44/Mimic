@@ -76,7 +76,7 @@ export function SoftKeyboardOverlay({
 
   return (
     <div
-      className="absolute inset-x-0 bottom-0 z-20 bg-bg-secondary/95 backdrop-blur-sm border-t border-border p-2 space-y-1.5 pointer-events-auto"
+      className="w-full bg-bg-secondary/95 backdrop-blur-sm border-t border-border p-2 space-y-1.5 pointer-events-auto"
       data-no-page-swipe
     >
       <div className="flex items-center justify-between px-1">
