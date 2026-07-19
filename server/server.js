@@ -8,10 +8,12 @@
  *   node server.js [--port 8443] [--host 0.0.0.0]
  */
 const http = require('http');
+const dgram = require('dgram');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
+const { URL } = require('url');
 
 const pkg = (() => {
   try {
@@ -29,6 +31,12 @@ const INSTANCE_ID = crypto.randomBytes(8).toString('hex');
 const PORT = (() => {
   const i = process.argv.indexOf('--port');
   return i >= 0 ? parseInt(process.argv[i + 1], 10) : 8443;
+})();
+const STUN_PORT = (() => {
+  const i = process.argv.indexOf('--stun-port');
+  if (i >= 0) return parseInt(process.argv[i + 1], 10) || 3478;
+  const e = parseInt(process.env.MIMIC_STUN_PORT || '3478', 10);
+  return Number.isFinite(e) && e > 0 ? e : 3478;
 })();
 const HOST = (() => {
   const i = process.argv.indexOf('--host');
@@ -402,6 +410,26 @@ const server = http.createServer(async (req, res) => {
       selfUrl: selfUrl || null,
       bootstrap: BOOTSTRAP_URL,
       instanceId: INSTANCE_ID,
+      stunPort: STUN_PORT,
+    });
+    return;
+  }
+
+  // ICE config for clients — STUN only (no TURN / no media relay).
+  if (req.method === 'GET' && url.pathname === '/api/ice') {
+    let host = '47.107.43.5';
+    try {
+      const u = new URL(selfUrl || BOOTSTRAP_URL);
+      if (u.hostname) host = u.hostname;
+    } catch { /* keep default */ }
+    json(res, 200, {
+      ok: true,
+      stunUrls: [`stun:${host}:${STUN_PORT}`],
+      stunHost: host,
+      stunPort: STUN_PORT,
+      turnUrls: [],
+      iceTransportPolicy: 'all',
+      note: 'STUN only — media is peer direct (LAN or UDP hole-punch); no TURN relay',
     });
     return;
   }
@@ -846,13 +874,67 @@ function startHeartbeat() {
 
 server.listen(PORT, HOST, () => {
   console.log(`[signaling] MimicServer listening http://${HOST}:${PORT}`);
-  console.log(`[signaling] WS path /ws?token=...  health GET /health`);
+  console.log(`[signaling] WS path /ws?token=...  health GET /health  ice GET /api/ice`);
   console.log(`[signaling] bootstrap ${BOOTSTRAP_URL}  ver=${SERVER_VER}`);
   console.log(`[signaling] default login demo / demo`);
-  // Defer join so /health is already accepting (reverse probe).
+  startStunServer();
   setImmediate(() => {
     joinCluster()
       .then(() => startHeartbeat())
       .catch((e) => console.log(`[cluster] init error: ${e.message || e}`));
   });
 });
+
+// ─── STUN Binding (RFC 5389 subset) — same process, UDP STUN_PORT; no TURN ───
+const STUN_MAGIC = 0x2112A442;
+const STUN_BINDING_REQUEST = 0x0001;
+const STUN_BINDING_SUCCESS = 0x0101;
+const STUN_ATTR_XOR_MAPPED = 0x0020;
+
+function startStunServer() {
+  const sock = dgram.createSocket('udp4');
+  sock.on('message', (msg, rinfo) => {
+    try {
+      if (!msg || msg.length < 20) return;
+      const type = msg.readUInt16BE(0);
+      const length = msg.readUInt16BE(2);
+      const magic = msg.readUInt32BE(4);
+      if (magic !== STUN_MAGIC) return;
+      if ((type & 0x3fff) !== STUN_BINDING_REQUEST) return;
+      if (20 + length > msg.length) return;
+
+      const tid = msg.subarray(8, 20);
+      // XOR-MAPPED-ADDRESS: IPv4
+      const xorPort = rinfo.port ^ ((STUN_MAGIC >> 16) & 0xffff);
+      const parts = String(rinfo.address).split('.').map((x) => parseInt(x, 10) & 0xff);
+      if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) return;
+      const ipBuf = Buffer.from(parts);
+      for (let i = 0; i < 4; i++) ipBuf[i] ^= (STUN_MAGIC >> (24 - 8 * i)) & 0xff;
+
+      const attrVal = Buffer.alloc(8);
+      attrVal.writeUInt8(0, 0);
+      attrVal.writeUInt8(0x01, 1); // IPv4
+      attrVal.writeUInt16BE(xorPort, 2);
+      ipBuf.copy(attrVal, 4);
+
+      const attr = Buffer.alloc(4 + attrVal.length);
+      attr.writeUInt16BE(STUN_ATTR_XOR_MAPPED, 0);
+      attr.writeUInt16BE(attrVal.length, 2);
+      attrVal.copy(attr, 4);
+
+      const resp = Buffer.alloc(20 + attr.length);
+      resp.writeUInt16BE(STUN_BINDING_SUCCESS, 0);
+      resp.writeUInt16BE(attr.length, 2);
+      resp.writeUInt32BE(STUN_MAGIC, 4);
+      tid.copy(resp, 8);
+      attr.copy(resp, 20);
+      sock.send(resp, rinfo.port, rinfo.address);
+    } catch (e) {
+      console.log(`[stun] handle error: ${e.message || e}`);
+    }
+  });
+  sock.on('error', (e) => console.log(`[stun] error: ${e.message || e}`));
+  sock.bind(STUN_PORT, HOST, () => {
+    console.log(`[stun] Binding UDP ${HOST}:${STUN_PORT} (STUN-only, no TURN/media relay)`);
+  });
+}

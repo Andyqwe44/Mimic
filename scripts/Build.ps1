@@ -157,7 +157,7 @@ function Build-MimicClient {
             'winhttp.lib', 'bcrypt.lib', 'advapi32.lib', 'mfplat.lib', 'mf.lib', 'mfuuid.lib', 'wmcodecdspuuid.lib')
         $linkflags = @('/OPT:REF', '/OPT:ICF', '/Brepro')
         $srcs = @('src\main.cpp', 'src\commands.cpp', 'src\h264_encoder.cpp', 'src\ws_client.cpp',
-            'src\peer_session.cpp',
+            'src\peer_session.cpp', 'src\peer_udp.cpp',
             'src\virtual_desktop.cpp', 'src\paths.cpp', 'src\sha256_util.cpp', 'src\update_verify.cpp')
         $libs = @('dep\WebView2LoaderStatic.lib', "$Root\pc\logger\build\logger.lib") +
         (@('common', 'wgc', 'gdi', 'pw', 'screen', 'desktop') | ForEach-Object { "$Root\pc\capture\build\capture_$_.lib" }) +

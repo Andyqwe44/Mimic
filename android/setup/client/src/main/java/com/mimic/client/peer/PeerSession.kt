@@ -60,6 +60,8 @@ class PeerSession(
             push(JSONObject().put("type", "peer_frame"))
         },
     )
+    private var udp: UdpMedia? = null
+    @Volatile private var iceStarted = false
     @Volatile private var lastFrame: ByteArray? = null
     @Volatile private var reconnectAttempt = 0
     private val reconnectRunnable = Runnable { tryReconnect() }
@@ -105,6 +107,17 @@ class PeerSession(
     /** Session ended (local or remote) — host closes stream/control gates. */
     var onSessionEnd: (() -> Unit)? = null
 
+    private fun mediaReady(): Boolean = lan.ready || (udp?.ready == true)
+
+    private fun mediaSendJson(obj: JSONObject) {
+        val u = udp
+        if (u != null && u.ready) {
+            u.sendJson(obj)
+            return
+        }
+        if (lan.ready) lan.sendJson(obj)
+    }
+
     fun statusJson(): JSONObject = JSONObject()
         .put("ok", true)
         .put("online", online)
@@ -116,10 +129,16 @@ class PeerSession(
         .put("deviceName", deviceName)
         .put("platform", "android")
         .put("peer_proto", 2)
-        .put("mediaReady", lan.ready)
+        .put("mediaReady", mediaReady())
 
     fun sendH264Packed(packed: ByteArray) {
-        if (role != "controlled" || !lan.ready) return
+        if (role != "controlled") return
+        val u = udp
+        if (u != null && u.ready) {
+            u.sendH264(packed)
+            return
+        }
+        if (!lan.ready) return
         lan.sendH264(packed)
     }
 
@@ -194,6 +213,9 @@ class PeerSession(
         main.removeCallbacks(reconnectRunnable)
         main.removeCallbacks(presenceHb)
         reconnectAttempt = 0
+        iceStarted = false
+        try { udp?.stop() } catch (_: Exception) {}
+        udp = null
         lan.stop()
         try { ws?.close(1000, "logout") } catch (_: Exception) {}
         ws = null
@@ -243,6 +265,9 @@ class PeerSession(
 
     fun hangup(): JSONObject {
         if (online) sendWs(JSONObject().put("type", "hangup"))
+        iceStarted = false
+        try { udp?.stop() } catch (_: Exception) {}
+        udp = null
         lan.stop()
         role = "idle"
         transport = "none"
@@ -266,15 +291,15 @@ class PeerSession(
         "peer_reject" -> reject(args)
         "peer_hangup" -> hangup()
         "peer_request_windows" -> {
-            if (!lan.ready) err("LAN not ready")
+            if (!mediaReady()) err("media not ready")
             else {
-                lan.sendJson(JSONObject().put("type", "list_targets").put("peer_proto", 2))
-                lan.sendJson(JSONObject().put("type", "list_windows"))
+                mediaSendJson(JSONObject().put("type", "list_targets").put("peer_proto", 2))
+                mediaSendJson(JSONObject().put("type", "list_windows"))
                 JSONObject().put("ok", true)
             }
         }
         "peer_set_target" -> {
-            if (!lan.ready) err("LAN not ready")
+            if (!mediaReady()) err("media not ready")
             else {
                 val o = JSONObject().put("type", "set_target").put("peer_proto", 2)
                 val id = args.optString("id", args.optString("target_id", ""))
@@ -282,22 +307,24 @@ class PeerSession(
                 if (args.has("hwnd")) o.put("hwnd", args.optLong("hwnd"))
                 val title = args.optString("title", "")
                 if (title.isNotBlank()) o.put("title", title)
-                lan.sendJson(o)
+                mediaSendJson(o)
                 JSONObject().put("ok", true)
             }
         }
         "peer_send_control" -> {
-            if (!lan.ready) err("LAN not ready")
+            if (!mediaReady()) err("media not ready")
             else {
                 val action = args.optJSONObject("action") ?: args
-                lan.sendJson(JSONObject().put("type", "control").put("action", action))
+                mediaSendJson(JSONObject().put("type", "control").put("action", action))
                 JSONObject().put("ok", true)
             }
         }
         "peer_set_control_mode" ->
             JSONObject().put("ok", true).put("controlMode", args.optString("mode", "human"))
         "peer_request_keyframe" -> {
-            if (lan.ready) lan.sendJson(JSONObject().put("type", "need_key"))
+            val u = udp
+            if (u != null && u.ready) u.sendJson(JSONObject().put("type", "need_key"))
+            else if (lan.ready) lan.sendJson(JSONObject().put("type", "need_key"))
             JSONObject().put("ok", true)
         }
         "peer_get_frame" -> {
@@ -363,9 +390,80 @@ class PeerSession(
                 )
             }
         } else {
-            push(JSONObject().put("type", "peer_error").put("error", "LAN unreachable; WAN P2P requires ICE"))
-            push(JSONObject().put("type", "peer_transport").put("mode", "none"))
+            Log.w(tag, "LAN fail → ICE/STUN UDP punch")
+            push(JSONObject().put("type", "peer_transport").put("mode", "ice"))
+            if (peerDeviceId.isNotBlank()) {
+                sendWs(
+                    JSONObject()
+                        .put("type", "signal")
+                        .put("toDeviceId", peerDeviceId)
+                        .put("payload", JSONObject().put("kind", "wan_probe").put("proto", "udp-punch").put("ver", 1)),
+                )
+            }
+            beginIce("ice_offer")
+            main.postDelayed({
+                if (udp?.ready != true && transport != "lan") {
+                    push(
+                        JSONObject()
+                            .put("type", "peer_error")
+                            .put("error", "Direct P2P failed (symmetric NAT or firewall). No TURN relay in this build."),
+                    )
+                    push(JSONObject().put("type", "peer_transport").put("mode", "none"))
+                }
+            }, 15_000L)
         }
+    }
+
+    private fun stunHost(): String {
+        val u = signalingHttp.removePrefix("https://").removePrefix("http://")
+        return u.substringBefore('/').substringBefore(':').ifBlank { "47.107.43.5" }
+    }
+
+    private fun beginIce(kind: String) {
+        if (!iceStarted) {
+            iceStarted = true
+            val media = UdpMedia(
+                onJson = { handleLanJson(it) },
+                onH264 = { bytes ->
+                    storeFramePreferKey(bytes)
+                    push(JSONObject().put("type", "peer_frame"))
+                },
+                onReady = {
+                    transport = "p2p"
+                    push(JSONObject().put("type", "peer_transport").put("mode", "p2p"))
+                    Log.i(tag, "P2P media ready (UDP hole-punch)")
+                },
+            )
+            if (!media.start(stunHost(), 3478)) {
+                iceStarted = false
+                push(JSONObject().put("type", "peer_error").put("error", "ICE/STUN start failed"))
+                return
+            }
+            udp = media
+        }
+        val cands = udp?.localCands() ?: emptyList()
+        val payload = JSONObject()
+            .put("kind", kind)
+            .put("cands", UdpMedia.candsToJson(cands))
+            .put("proto", "udp-punch")
+            .put("ver", 1)
+        if (peerDeviceId.isNotBlank()) {
+            sendWs(
+                JSONObject()
+                    .put("type", "signal")
+                    .put("toDeviceId", peerDeviceId)
+                    .put("payload", payload),
+            )
+        }
+        Log.i(tag, "sent $kind cands=${cands.size}")
+    }
+
+    private fun onRemoteIce(payload: JSONObject) {
+        val rem = UdpMedia.parseCands(payload.optJSONArray("cands"))
+        if (rem.isEmpty()) return
+        if (!iceStarted) beginIce("ice_answer")
+        udp?.setRemoteCands(rem)
+        Log.i(tag, "ICE punch toward ${rem.size} remote cands")
     }
 
     private fun applySessionRole(msg: JSONObject) {
@@ -405,7 +503,7 @@ class PeerSession(
                     if (!w.has("title")) w.put("title", t.optString("title", t.optString("id", "")))
                     windows.put(w)
                 }
-                lan.sendJson(
+                mediaSendJson(
                     JSONObject()
                         .put("type", if (json.optString("type") == "list_targets") "list_targets" else "list_windows")
                         .put("peer_proto", 2)
@@ -426,7 +524,7 @@ class PeerSession(
                     .put("id", json.optString("id", result.optString("id", "")))
                     .put("peer_proto", 2)
                 if (result.has("error")) ack.put("error", result.optString("error"))
-                lan.sendJson(ack)
+                mediaSendJson(ack)
             }
             "set_target_ack" -> {
                 if (!json.optBoolean("ok", false)) {
@@ -495,6 +593,15 @@ class PeerSession(
                                     transport = "lan"
                                     push(JSONObject().put("type", "peer_transport").put("mode", "lan"))
                                 }
+                                "wan_probe" -> {
+                                    Log.i(tag, "wan_probe → start ICE")
+                                    beginIce("ice_answer")
+                                }
+                                "ice_offer" -> {
+                                    onRemoteIce(payload)
+                                    if (role == "controlled" || role == "idle") beginIce("ice_answer")
+                                }
+                                "ice_answer" -> onRemoteIce(payload)
                                 else -> push(msg)
                             }
                         }

@@ -2,6 +2,7 @@
  * peer_session.cpp — Signaling client + LAN TCP media for peer control.
  */
 #include "peer_session.h"
+#include "peer_udp.h"
 #include "h264_encoder.h"
 #include "../../logger/logger.h"
 
@@ -47,6 +48,7 @@ std::string g_peer_device_id;
 std::string g_control_mode = "human"; // human|ai
 std::string g_transport = "none";     // lan|p2p|none
 std::atomic<bool> g_media_ready{false};
+std::atomic<bool> g_ice_started{false};
 
 SOCKET g_sig_sock = INVALID_SOCKET;
 std::thread g_sig_reader;
@@ -400,6 +402,10 @@ bool ws_handshake(SOCKET s, const std::string& host, uint16_t port, const std::s
 void lan_stop_unlocked();
 
 void lan_send_frame(uint8_t type, const uint8_t* data, size_t len) {
+    if (peer_udp_ready()) {
+        peer_udp_send(type, data, len);
+        return;
+    }
     std::lock_guard<std::mutex> lk(g_lan_send_mtx);
     if (g_lan_sock == INVALID_SOCKET) return;
     uint8_t hdr[5];
@@ -606,6 +612,8 @@ void lan_stop_unlocked() {
     g_lan_running = false;
     g_media_ready = false;
     g_transport = "none";
+    g_ice_started = false;
+    peer_udp_stop();
     if (g_lan_listen != INVALID_SOCKET) { closesocket(g_lan_listen); g_lan_listen = INVALID_SOCKET; }
     {
         std::lock_guard<std::mutex> lk(g_lan_send_mtx);
@@ -623,6 +631,64 @@ void signal_send(const std::string& to_device, const std::string& payload_json) 
     std::string msg = std::string("{\"type\":\"signal\",\"toDeviceId\":\"") + to_device +
                       "\",\"payload\":" + payload_json + "}";
     ws_send_text(g_sig_sock, msg);
+}
+
+std::string stun_host_from_signaling() {
+    // http://host:port → host
+    std::string u = g_signaling_http;
+    size_t p = u.find("://");
+    if (p != std::string::npos) u = u.substr(p + 3);
+    size_t slash = u.find('/');
+    if (slash != std::string::npos) u = u.substr(0, slash);
+    size_t colon = u.find(':');
+    if (colon != std::string::npos) u = u.substr(0, colon);
+    return u;
+}
+
+void begin_ice_p2p(const char* offer_kind) {
+    if (g_ice_started.exchange(true)) {
+        // already started — still re-announce cands
+    } else {
+        std::string host = stun_host_from_signaling();
+        bool ok = peer_udp_start(
+            host, 3478,
+            [](uint8_t type, const std::vector<uint8_t>& payload) {
+                handle_lan_payload(type, payload);
+            },
+            []() {
+                g_transport = "p2p";
+                g_media_ready = true;
+                emit_ui(R"({"type":"peer_transport","mode":"p2p"})");
+                LOG("peer", "P2P media ready (UDP hole-punch)");
+            });
+        if (!ok) {
+            g_ice_started = false;
+            emit_ui(R"json({"type":"peer_error","error":"ICE/STUN start failed — cannot gather candidates"})json");
+            return;
+        }
+    }
+    auto cands = peer_udp_local_cands();
+    std::string payload = std::string("{\"kind\":\"") + offer_kind + "\",\"cands\":" +
+                          peer_udp_cands_json(cands) + ",\"proto\":\"udp-punch\",\"ver\":1}";
+    signal_send(g_peer_device_id, payload);
+    LOG("peer", "sent %s cands=%zu", offer_kind, cands.size());
+}
+
+void on_remote_ice_cands(const std::string& payload) {
+    size_t a = payload.find("\"cands\":");
+    if (a == std::string::npos) return;
+    a = payload.find('[', a);
+    if (a == std::string::npos) return;
+    size_t e = payload.find(']', a);
+    if (e == std::string::npos) return;
+    std::vector<PeerUdpCand> rem;
+    if (!peer_udp_parse_cands_json(payload.substr(a, e - a + 1), rem)) {
+        LOG_WARN("peer", "ICE remote cands parse empty");
+        return;
+    }
+    if (!g_ice_started.load()) begin_ice_p2p("ice_answer");
+    peer_udp_set_remote_cands(rem);
+    LOG("peer", "ICE punch toward %zu remote cands", rem.size());
 }
 
 void try_establish_lan_as_controlled(const PeerSessionInfo& /*sess*/,
@@ -671,11 +737,18 @@ void try_connect_lan_offer(const std::string& payload) {
         if (lan_connect_to(ip, port)) { ok = true; break; }
     }
     if (!ok) {
-        LOG_WARN("peer", "LAN connect failed - sending wan_probe (ICE stub)");
-        g_transport = "none";
-        emit_ui(R"json({"type":"peer_error","error":"LAN unreachable; WAN P2P requires ICE"})json");
-        emit_ui(R"({"type":"peer_transport","mode":"none"})");
-        signal_send(g_peer_device_id, R"({"kind":"wan_probe","proto":"ice-datachannel","ver":1})");
+        LOG_WARN("peer", "LAN fail → ICE/STUN UDP punch (no TURN)");
+        emit_ui(R"({"type":"peer_transport","mode":"ice"})");
+        signal_send(g_peer_device_id, R"({"kind":"wan_probe","proto":"udp-punch","ver":1})");
+        begin_ice_p2p("ice_offer");
+        // Fail soft if P2P not up in 15s
+        std::thread([]() {
+            Sleep(15000);
+            if (!peer_udp_ready() && g_transport != "lan") {
+                emit_ui(R"json({"type":"peer_error","error":"Direct P2P failed (symmetric NAT or firewall). No TURN relay in this build."})json");
+                emit_ui(R"({"type":"peer_transport","mode":"none"})");
+            }
+        }).detach();
     } else {
         signal_send(g_peer_device_id, R"({"kind":"lan_ack"})");
     }
@@ -690,7 +763,21 @@ void handle_signal_payload(const std::string& from, const std::string& payload) 
         emit_ui(R"({"type":"peer_transport","mode":"lan"})");
         return;
     }
-    // Forward opaque (future SDP)
+    if (payload.find("\"kind\":\"wan_probe\"") != std::string::npos) {
+        LOG("peer", "wan_probe → start ICE as controlled");
+        begin_ice_p2p("ice_answer");
+        return;
+    }
+    if (payload.find("\"kind\":\"ice_offer\"") != std::string::npos) {
+        on_remote_ice_cands(payload);
+        if (g_role == PeerRole::Controlled || g_role == PeerRole::Idle)
+            begin_ice_p2p("ice_answer");
+        return;
+    }
+    if (payload.find("\"kind\":\"ice_answer\"") != std::string::npos) {
+        on_remote_ice_cands(payload);
+        return;
+    }
     emit_ui(std::string("{\"type\":\"peer_signal\",\"from\":\"") + from +
             "\",\"payload\":" + payload + "}");
 }
@@ -1163,7 +1250,7 @@ void peer_send_h264(const H264Packet& pkt) {
     lan_send_frame(1, body.data(), body.size());
 }
 
-bool peer_media_ready() { return g_media_ready.load(); }
+bool peer_media_ready() { return g_media_ready.load() || peer_udp_ready(); }
 std::string peer_transport_mode() { return g_transport; }
 
 // Command helper used by commands.cpp
