@@ -68,6 +68,15 @@ export function PeerRemoteView({
   const lastKeyReqRef = useRef(0)
   const recvCountRef = useRef(0)
   const lastDiagTsRef = useRef(0)
+  const lastRecvTsRef = useRef(0)
+  const gapSumRef = useRef(0)
+  const gapMaxRef = useRef(0)
+  const gapNRef = useRef(0)
+  const lastTsMsRef = useRef(-1)
+  const skewSumRef = useRef(0)
+  const skewNRef = useRef(0)
+  const transportRef = useRef('none')
+  const rttMsRef = useRef<number | null>(null)
   const [fps, setFps] = useState(0)
   const [dims, setDims] = useState('')
   const [status, setStatus] = useState(t('peer.waiting_frames'))
@@ -76,6 +85,7 @@ export function PeerRemoteView({
   const [kbOpen, setKbOpen] = useState(false)
   const [kbH, setKbH] = useState(0)
   const [stageBox, setStageBox] = useState({ w: 0, h: 0 })
+  const [latHint, setLatHint] = useState('')
   const keyRecvRef = useRef(0)
   const deltaDropRef = useRef(0)
 
@@ -143,14 +153,33 @@ export function PeerRemoteView({
   }
 
   useEffect(() => {
+    const onLink = (ev: Event) => {
+      const d = (ev as CustomEvent<{ transport?: string; rtt_ms?: number | null }>).detail
+      if (!d) return
+      if (typeof d.transport === 'string') transportRef.current = d.transport
+      if (d.rtt_ms !== undefined) rttMsRef.current = d.rtt_ms
+    }
+    window.addEventListener('peer-link-stats', onLink)
+    return () => window.removeEventListener('peer-link-stats', onLink)
+  }, [])
+
+  useEffect(() => {
     if (!active) {
       closeDecoder()
       setStatus(t('peer.idle'))
       setFps(0)
       dropCountRef.current = 0
       recvCountRef.current = 0
+      lastRecvTsRef.current = 0
+      gapSumRef.current = 0
+      gapMaxRef.current = 0
+      gapNRef.current = 0
+      lastTsMsRef.current = -1
+      skewSumRef.current = 0
+      skewNRef.current = 0
       setExpanded(false)
       setKbOpen(false)
+      setLatHint('')
       return
     }
     const onFrame = (ev: Event) => {
@@ -160,7 +189,26 @@ export function PeerRemoteView({
       const w = d.w || view.getUint32(0, true)
       const h = d.h || view.getUint32(4, true)
       const flags = d.flags ?? view.getUint32(8, true)
+      const tsMs = view.getUint32(12, true)
       const annexb = d.bytes.subarray(16)
+      const nowRecv = performance.now()
+      let gap = 0
+      if (lastRecvTsRef.current > 0) {
+        gap = nowRecv - lastRecvTsRef.current
+        gapSumRef.current += gap
+        gapNRef.current++
+        if (gap > gapMaxRef.current) gapMaxRef.current = gap
+      }
+      if (lastTsMsRef.current >= 0 && gap > 0) {
+        const encDelta = (tsMs - lastTsMsRef.current + 0x100000000) % 0x100000000
+        if (encDelta > 0 && encDelta < 5000) {
+          skewSumRef.current += Math.abs(gap - encDelta)
+          skewNRef.current++
+        }
+      }
+      lastRecvTsRef.current = nowRecv
+      lastTsMsRef.current = tsMs
+
       ensureDecoder(w, h)
       const decoder = decoderRef.current
       if (!decoder || decoder.state === 'closed') return
@@ -207,10 +255,21 @@ export function PeerRemoteView({
       const nowDiag = performance.now()
       if (nowDiag - lastDiagTsRef.current >= 1500) {
         lastDiagTsRef.current = nowDiag
+        const avgGap = gapNRef.current > 0 ? Math.round(gapSumRef.current / gapNRef.current) : 0
+        const avgSkew = skewNRef.current > 0 ? Math.round(skewSumRef.current / skewNRef.current) : 0
+        const rtt = rttMsRef.current
+        const rttPart = rtt != null ? ` rtt=${rtt}` : ''
+        const hint = `tx=${transportRef.current} gap≈${avgGap}ms jitter≈${avgSkew}ms q=${decoder.decodeQueueSize}${rttPart}`
+        setLatHint(hint)
         addLog(
-          `[Decode] recv=${recvCountRef.current} idr=${keyRecvRef.current} dropDelta=${deltaDropRef.current} fps≈${framesRef.current} needKey=${needKeyRef.current} q=${decoder.decodeQueueSize}`,
+          `[Decode] recv=${recvCountRef.current} idr=${keyRecvRef.current} dropDelta=${deltaDropRef.current} fps≈${framesRef.current} needKey=${needKeyRef.current} ${hint} gapMax=${Math.round(gapMaxRef.current)}`,
         )
         deltaDropRef.current = 0
+        gapSumRef.current = 0
+        gapMaxRef.current = 0
+        gapNRef.current = 0
+        skewSumRef.current = 0
+        skewNRef.current = 0
       }
     }
     window.addEventListener('peer-h264', onFrame)
@@ -251,7 +310,7 @@ export function PeerRemoteView({
     const ro = new ResizeObserver(measure)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [kbOpen])
+  }, [kbOpen, expanded])
 
   useEffect(() => {
     const el = stageRef.current
@@ -282,12 +341,14 @@ export function PeerRemoteView({
   const rotated = expanded && landscapeVideo && viewportPortrait
   const maxPreviewH = portraitVideo ? 'min(58vh, 640px)' : 'min(36vh, 420px)'
 
-  // Rotated: pre-rotate box = (stageH × stageW), absolute (NOT flex — flex would shrink it).
+  // Rotated: pre-rotate box = (stageH × stageW). Keyboard lives inside when open.
   const contentW = rotated ? stageBox.h : stageBox.w
-  const contentH = rotated ? stageBox.w : stageBox.h
+  const contentHFull = rotated ? stageBox.w : stageBox.h
+  const kbReserve = rotated && kbOpen ? kbH : 0
+  const videoAreaH = Math.max(1, contentHFull - kbReserve)
   const fit = fitContain(
     contentW > 0 ? contentW : 1,
-    contentH > 0 ? contentH : 1,
+    videoAreaH > 0 ? videoAreaH : 1,
     videoAspect > 0 ? videoAspect : 16 / 9,
   )
 
@@ -305,17 +366,58 @@ export function PeerRemoteView({
         marginInline: portraitVideo ? 'auto' : undefined,
       }
 
+  // Non-rotated: push plane up with fixed keyboard. Rotated: keyboard inside rotate box.
+  const planeBottom = !rotated && kbOpen ? kbH : 0
   const planeStyle: CSSProperties = expanded
     ? {
         position: 'absolute',
         top: 0,
         left: 0,
         right: 0,
-        bottom: kbOpen ? kbH : 0,
+        bottom: planeBottom,
         display: 'flex',
         flexDirection: 'column',
       }
     : { display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }
+
+  const softKb = humanControl && expanded && kbOpen ? (
+    <div ref={kbWrapRef} className="shrink-0 w-full pointer-events-auto" data-no-page-swipe>
+      <SoftKeyboardOverlay
+        open={kbOpen}
+        onClose={() => setKbOpen(false)}
+        onKey={sendKey}
+      />
+    </div>
+  ) : null
+
+  const videoStack = (
+    <div
+      className="relative flex items-center justify-center overflow-hidden flex-1 min-h-0 w-full"
+      style={rotated ? { flex: '1 1 0', minHeight: 0 } : undefined}
+    >
+      <canvas
+        ref={canvasRef}
+        width={640}
+        height={360}
+        className="pointer-events-none shrink-0"
+        style={{
+          width: fit.w > 0 ? fit.w : '100%',
+          height: fit.h > 0 ? fit.h : '100%',
+        }}
+      />
+      {humanControl && (
+        <VirtualMouseOverlay
+          enabled
+          videoAspect={videoAspect}
+          rotated={rotated}
+          showPanel={expanded}
+          fitWidth={fit.w}
+          fitHeight={fit.h}
+          onAction={send}
+        />
+      )}
+    </div>
+  )
 
   return (
     <div className={shellClass} style={shellStyle}>
@@ -363,6 +465,9 @@ export function PeerRemoteView({
             {encodeHint && (
               <span className="text-amber-500 truncate">{encodeHint}</span>
             )}
+            {latHint && (
+              <span className="tabular-nums text-text-muted truncate min-w-0">{latHint}</span>
+            )}
             <span className="ml-auto truncate min-w-0">
               {status}{!humanControl ? ` · ${t('peer.ai_mode_short')}` : ''}
             </span>
@@ -384,48 +489,33 @@ export function PeerRemoteView({
           className="relative bg-black flex items-center justify-center overflow-hidden flex-1 min-h-0 w-full"
           data-no-page-swipe={humanControl ? true : undefined}
         >
-          <div
-            className="flex items-center justify-center"
-            style={
-              rotated
-                ? {
-                    position: 'absolute',
-                    width: contentW > 0 ? contentW : '100%',
-                    height: contentH > 0 ? contentH : '100%',
-                    left: '50%',
-                    top: '50%',
-                    transform: 'translate(-50%, -50%) rotate(90deg)',
-                    transformOrigin: 'center center',
-                    // Prevent flex/parent from shrinking the swapped box before rotate.
-                    flexShrink: 0,
-                    minWidth: contentW > 0 ? contentW : undefined,
-                    minHeight: contentH > 0 ? contentH : undefined,
-                  }
-                : { position: 'absolute', inset: 0, width: '100%', height: '100%' }
-            }
-          >
-            <canvas
-              ref={canvasRef}
-              width={640}
-              height={360}
-              className="pointer-events-none shrink-0"
+          {rotated ? (
+            <div
+              className="flex flex-col"
               style={{
-                width: fit.w > 0 ? fit.w : '100%',
-                height: fit.h > 0 ? fit.h : '100%',
+                position: 'absolute',
+                width: contentW > 0 ? contentW : '100%',
+                height: contentHFull > 0 ? contentHFull : '100%',
+                left: '50%',
+                top: '50%',
+                transform: 'translate(-50%, -50%) rotate(90deg)',
+                transformOrigin: 'center center',
+                flexShrink: 0,
+                minWidth: contentW > 0 ? contentW : undefined,
+                minHeight: contentHFull > 0 ? contentHFull : undefined,
               }}
-            />
-            {humanControl && (
-              <VirtualMouseOverlay
-                enabled
-                videoAspect={videoAspect}
-                rotated={rotated}
-                showPanel={expanded}
-                fitWidth={fit.w}
-                fitHeight={fit.h}
-                onAction={send}
-              />
-            )}
-          </div>
+            >
+              {videoStack}
+              {softKb}
+            </div>
+          ) : (
+            <div
+              className="flex items-center justify-center"
+              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
+            >
+              {videoStack}
+            </div>
+          )}
         </div>
         {expanded && !rotated && !kbOpen && (
           <div className={`${TEXT.tiny} text-center text-text-muted py-1 shrink-0`}>
@@ -433,17 +523,9 @@ export function PeerRemoteView({
           </div>
         )}
       </div>
-      {humanControl && expanded && kbOpen && (
-        <div
-          ref={kbWrapRef}
-          className="fixed inset-x-0 bottom-0 z-[95] pointer-events-auto"
-          data-no-page-swipe
-        >
-          <SoftKeyboardOverlay
-            open={kbOpen}
-            onClose={() => setKbOpen(false)}
-            onKey={sendKey}
-          />
+      {!rotated && softKb && (
+        <div className="fixed inset-x-0 bottom-0 z-[95] pointer-events-auto" data-no-page-swipe>
+          {softKb}
         </div>
       )}
     </div>

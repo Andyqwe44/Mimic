@@ -1,5 +1,5 @@
 // UU-style virtual mouse — driver-level atoms: mousedown / mouseup / move / wheel.
-// Triangle tip is pinned to (x_norm, y_norm); panel body sits down-right of the tip.
+// NW triangle tip is pinned to (x_norm, y_norm); panel body sits down-right of the tip.
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Tooltip } from './Toolkit'
@@ -209,24 +209,26 @@ export function VirtualMouseOverlay({
             top: `${pos.y * 100}%`,
           }}
         >
-          {/* Up-pointing triangle — tip at top-center = control point. */}
-          <div
+          {/* NW-pointing triangle — tip at (0,0) = exact control point. */}
+          <svg
             className="absolute pointer-events-none"
-            style={{
-              left: 0,
-              top: 0,
-              width: 0,
-              height: 0,
-              borderLeft: '5px solid transparent',
-              borderRight: '5px solid transparent',
-              borderBottom: '8px solid var(--color-accent, #3b82f6)',
-              transform: 'translate(-50%, -100%)',
-            }}
+            width={14}
+            height={18}
+            viewBox="0 0 14 18"
+            style={{ left: 0, top: 0 }}
             aria-hidden
-          />
+          >
+            <path
+              d="M0 0 L14 10 L7.5 11.5 L10.5 18 L7 18 L4 11.5 Z"
+              fill="var(--color-accent, #3b82f6)"
+              stroke="#000"
+              strokeWidth="1"
+              strokeLinejoin="round"
+            />
+          </svg>
           {/* Panel body offset down-right of tip. */}
           <div
-            className={`absolute ${VMOUSE.panel} ${RADIUS.xl} bg-bg-secondary/95 ring-1 ring-inset ring-border shadow-lg select-none`}
+            className={`absolute ${VMOUSE.panel} ${RADIUS.xl} bg-bg-secondary/95 ring-1 ring-inset ring-border shadow-lg ${VMOUSE.stroke} select-none`}
             style={{
               left: PANEL_OFFSET_X,
               top: PANEL_OFFSET_Y,
@@ -248,7 +250,7 @@ export function VirtualMouseOverlay({
             >
               {t('peer.vmouse_panel')}
             </div>
-            <div className="flex items-stretch p-1.5 gap-1">
+            <div className={`flex items-stretch ${VMOUSE.pad} gap-1`}>
               <Tooltip text={t('peer.vmouse_left')}>
                 <button
                   type="button"

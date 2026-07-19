@@ -69,6 +69,8 @@ export function PeerPanel({
   const [status, setStatus] = useState('')
   const [probe, setProbe] = useState<ProbeState>('idle')
   const [rttMs, setRttMs] = useState<number | null>(null)
+  const rttMsRef = useRef<number | null>(null)
+  rttMsRef.current = rttMs
 
   const [clusterN, setClusterN] = useState(0)
 
@@ -161,6 +163,9 @@ export function PeerPanel({
       setProbe('ok')
       setRttMs(ms)
       setClusterN(n)
+      window.dispatchEvent(new CustomEvent('peer-link-stats', {
+        detail: { rtt_ms: ms },
+      }))
       if (!silent) setStatus(ms != null ? t('peer.probe_ok', { ms }) : t('peer.probe_ok', { ms: '?' }))
     } catch (e) {
       setProbe('missing')
@@ -200,11 +205,17 @@ export function PeerPanel({
         setTransport('none')
         setStatus(t('peer.session_ended'))
         onTransport?.('none')
+        window.dispatchEvent(new CustomEvent('peer-link-stats', {
+          detail: { transport: 'none', rtt_ms: rttMsRef.current },
+        }))
         onRemoteWindows?.([])
       } else if (d.type === 'peer_transport') {
         const mode = String(d.mode || 'none')
         setTransport(mode)
         onTransport?.(mode)
+        window.dispatchEvent(new CustomEvent('peer-link-stats', {
+          detail: { transport: mode, rtt_ms: rttMsRef.current },
+        }))
         // LAN ready → controller pulls remote window/desktop list
         if (mode !== 'none') {
           hostCall('peer_request_windows').catch(() => {})

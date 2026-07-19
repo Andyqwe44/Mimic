@@ -63,6 +63,8 @@ std::thread g_lan_reader;
 std::atomic<bool> g_lan_running{false};
 uint16_t g_lan_port = 0;
 std::mutex g_lan_send_mtx;
+std::atomic<uint32_t> g_lan_h264_sent{0};
+std::atomic<uint32_t> g_udp_h264_fallback{0};
 
 void ensure_wsa() {
     if (g_wsa.load()) return;
@@ -402,16 +404,20 @@ bool ws_handshake(SOCKET s, const std::string& host, uint16_t port, const std::s
 void lan_stop_unlocked();
 
 void lan_send_frame(uint8_t type, const uint8_t* data, size_t len) {
-    // type 2 = JSON control — prefer reliable LAN TCP when the socket is up
-    // (mousedown/up atoms must not be lost on UDP).
-    const bool prefer_lan = (type == 2);
-    if (!prefer_lan && peer_udp_ready()) {
-        peer_udp_send(type, data, len);
-        return;
-    }
+    // Prefer reliable LAN TCP whenever the socket is up (H.264 + control).
+    // UDP is only for true P2P when LAN is down — fragmented H.264 over UDP
+    // causes macroblock corruption on any lost fragment (same-LAN tearing).
     std::lock_guard<std::mutex> lk(g_lan_send_mtx);
     if (g_lan_sock == INVALID_SOCKET) {
-        if (peer_udp_ready()) peer_udp_send(type, data, len);
+        if (peer_udp_ready()) {
+            if (peer_udp_send(type, data, len) && type == 1) {
+                uint32_t n = g_udp_h264_fallback.fetch_add(1) + 1;
+                if (n <= 3 || n % 120 == 0) {
+                    LOG("peer", "H264 via UDP fallback #%u bytes=%zu udp_reasm_to=%u",
+                        n, len, peer_udp_reasm_timeouts());
+                }
+            }
+        }
         return;
     }
     uint8_t hdr[5];
@@ -426,6 +432,12 @@ void lan_send_frame(uint8_t type, const uint8_t* data, size_t len) {
         return;
     }
     if (len) send_all(g_lan_sock, (const char*)data, (int)len);
+    if (type == 1) {
+        uint32_t c = g_lan_h264_sent.fetch_add(1) + 1;
+        if (c <= 3 || c % 120 == 0) {
+            LOG("peer", "H264 via LAN TCP #%u bytes=%zu", c, len);
+        }
+    }
 }
 
 std::mutex g_frame_mtx;

@@ -31,6 +31,9 @@ void peer_udp_set_remote_cands(const std::vector<PeerUdpCand>& cands);
 
 bool peer_udp_send(uint8_t type, const uint8_t* data, size_t len);
 
+/// Incomplete fragment assemblies dropped due to timeout (lost UDP piece).
+uint32_t peer_udp_reasm_timeouts();
+
 /// JSON array fragment for signaling: [{"ip":"..","port":N,"typ":"srflx"},...]
 std::string peer_udp_cands_json(const std::vector<PeerUdpCand>& cands);
 bool peer_udp_parse_cands_json(const std::string& json_arr, std::vector<PeerUdpCand>& out);

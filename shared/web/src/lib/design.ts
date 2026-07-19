@@ -193,10 +193,22 @@ export const PEER_WORKSPACE = {
 
 /** Floating UU-style virtual mouse panel. */
 export const VMOUSE = {
-  panel: 'w-[148px]',
-  btnH: 'h-10',
-  wheelW: 'w-9',
-  handleH: 'h-6',
+  panel: 'w-[120px]',
+  btnH: 'h-8',
+  wheelW: 'w-8',
+  handleH: 'h-5',
+  /** Outer black stroke so panel stays visible on light/dark remote frames. */
+  stroke: 'shadow-[0_0_0_1.5px_#000]',
+  pad: 'p-1',
+} as const
+
+/** In-app soft keyboard (peer remote control). */
+export const SOFT_KB = {
+  keyH: 'h-11',
+  keyHLg: 'h-12',
+  gap: 'gap-1.5',
+  pad: 'p-2.5',
+  spaceY: 'space-y-2',
 } as const
 
 // ── Misc ──

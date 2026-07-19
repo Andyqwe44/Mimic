@@ -38,10 +38,12 @@ class UdpMedia(
     private var remoteCands: List<UdpCand> = emptyList()
     private val msgId = AtomicInteger(1)
     private val reasm = ConcurrentHashMap<Int, Reasm>()
+    private val reasmTimeouts = AtomicInteger(0)
 
     private class Reasm(val cnt: Int, val type: Int) {
         val parts = Array(cnt) { ByteArray(0) }
         val got = BooleanArray(cnt)
+        val startedAtMs = System.currentTimeMillis()
     }
 
     fun start(stunHost: String, stunPort: Int = 3478): Boolean {
@@ -158,6 +160,23 @@ class UdpMedia(
         ready = false
     }
 
+    private fun purgeStaleReasm() {
+        val now = System.currentTimeMillis()
+        val it = reasm.entries.iterator()
+        while (it.hasNext()) {
+            val e = it.next()
+            if (now - e.value.startedAtMs > REASM_TIMEOUT_MS) {
+                val n = reasmTimeouts.incrementAndGet()
+                if (n <= 5 || n % 30 == 0) {
+                    Log.w(tag, "UDP reasm timeout mid=${e.key} type=${e.value.type} frags=${e.value.cnt} (total=$n)")
+                }
+                it.remove()
+            }
+        }
+    }
+
+    fun reasmTimeoutCount(): Int = reasmTimeouts.get()
+
     private fun handle(data: ByteArray, n: Int, from: InetSocketAddress) {
         if (n < 14) return
         val bb = ByteBuffer.wrap(data, 0, n).order(ByteOrder.LITTLE_ENDIAN)
@@ -177,6 +196,7 @@ class UdpMedia(
         }
         lockPeer(from)
         if (cnt == 0 || idx >= cnt) return
+        purgeStaleReasm()
         val r = reasm.getOrPut(mid) { Reasm(cnt, type) }
         if (idx < r.parts.size) {
             r.parts[idx] = payload
@@ -214,6 +234,8 @@ class UdpMedia(
         private const val MAGIC = 0x3143504D
         private const val TYPE_PUNCH: Byte = 0xFF.toByte()
         private const val STUN_MAGIC = 0x2112A442
+        /** Drop incomplete UDP reassembly after this many ms (lost fragment). */
+        private const val REASM_TIMEOUT_MS = 400L
 
         fun candsToJson(cands: List<UdpCand>): JSONArray {
             val arr = JSONArray()

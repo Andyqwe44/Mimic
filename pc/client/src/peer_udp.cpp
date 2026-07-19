@@ -26,6 +26,8 @@ constexpr uint32_t kMagic = 0x3143504Du; // "MPC1" LE
 constexpr uint8_t kTypePunch = 0xFF;
 constexpr size_t kMaxFrag = 1100;
 constexpr uint32_t kStunMagic = 0x2112A442u;
+/** Drop incomplete UDP reassembly after this many ms (lost fragment). */
+constexpr DWORD kReasmTimeoutMs = 400;
 
 SOCKET g_sock = INVALID_SOCKET;
 std::thread g_reader;
@@ -41,14 +43,33 @@ std::vector<PeerUdpCand> g_remote_cands;
 PeerUdpPayloadFn g_on_payload;
 PeerUdpReadyFn g_on_ready;
 std::atomic<uint32_t> g_msg_id{1};
+std::atomic<uint32_t> g_reasm_timeouts{0};
+std::atomic<uint32_t> g_udp_send_ok{0};
 
 struct Reasm {
     uint16_t cnt = 0;
     uint8_t type = 0;
     std::vector<std::vector<uint8_t>> parts;
     std::vector<uint8_t> got;
+    DWORD started_ms = 0;
 };
 std::unordered_map<uint32_t, Reasm> g_reasm;
+
+void purge_stale_reasm(DWORD now) {
+    for (auto it = g_reasm.begin(); it != g_reasm.end(); ) {
+        if (now - it->second.started_ms > kReasmTimeoutMs) {
+            uint32_t n = g_reasm_timeouts.fetch_add(1) + 1;
+            if (n <= 5 || n % 30 == 0) {
+                LOG_WARN("peer", "UDP reasm timeout mid=%u type=%u frags=%u (total_timeouts=%u)",
+                         (unsigned)it->first, (unsigned)it->second.type,
+                         (unsigned)it->second.cnt, n);
+            }
+            it = g_reasm.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
 
 bool send_to(const sockaddr_in& to, const uint8_t* data, size_t len) {
     if (g_sock == INVALID_SOCKET) return false;
@@ -193,12 +214,15 @@ void handle_datagram(const uint8_t* data, int n, const sockaddr_in& from) {
     bool complete = false;
     {
         std::lock_guard<std::mutex> lk(g_mtx);
+        DWORD now = GetTickCount();
+        purge_stale_reasm(now);
         auto& r = g_reasm[mid];
         if (r.parts.empty()) {
             r.cnt = cnt;
             r.type = type;
             r.parts.resize(cnt);
             r.got.assign(cnt, 0);
+            r.started_ms = now;
         }
         if (idx < r.parts.size()) {
             r.parts[idx].assign(payload, payload + plen);
@@ -396,8 +420,14 @@ bool peer_udp_send(uint8_t type, const uint8_t* data, size_t len) {
         if (chunk) memcpy(pkt.data() + 14, data + off, chunk);
         if (!send_to(peer, pkt.data(), pkt.size())) return false;
     }
+    uint32_t n = g_udp_send_ok.fetch_add(1) + 1;
+    if (type == 1 && (n <= 3 || n % 120 == 0)) {
+        LOG("peer", "UDP H264 send #%u bytes=%zu frags=%u", n, len, (unsigned)cnt);
+    }
     return true;
 }
+
+uint32_t peer_udp_reasm_timeouts() { return g_reasm_timeouts.load(); }
 
 std::string peer_udp_cands_json(const std::vector<PeerUdpCand>& cands) {
     std::string s = "[";

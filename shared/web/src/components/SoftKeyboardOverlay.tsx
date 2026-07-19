@@ -1,7 +1,7 @@
 // In-app letter keyboard — sends keydown/keyup so the controlled host IME decides layout.
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { TEXT } from '../lib/design'
+import { SOFT_KB, TEXT } from '../lib/design'
 
 const ROW1 = ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p']
 const ROW2 = ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l']
@@ -26,7 +26,7 @@ function KeyBtn({
   return (
     <button
       type="button"
-      className={`${wide ? 'flex-[1.6]' : 'flex-1'} h-9 min-w-0 rounded-md ${TEXT.xs} font-medium transition-colors ${
+      className={`${wide ? 'flex-[1.6]' : 'flex-1'} ${SOFT_KB.keyH} min-w-0 rounded-md ${TEXT.sm} font-medium transition-colors ${
         active
           ? 'bg-accent-soft-mid text-accent ring-1 ring-accent-ring'
           : 'bg-bg-tertiary text-text-primary active:bg-accent-soft'
@@ -76,8 +76,9 @@ export function SoftKeyboardOverlay({
 
   return (
     <div
-      className="w-full bg-bg-secondary/95 backdrop-blur-sm border-t border-border p-2 space-y-1.5 pointer-events-auto"
+      className={`w-full bg-bg-secondary/95 backdrop-blur-sm border-t border-border ${SOFT_KB.pad} ${SOFT_KB.spaceY} pointer-events-auto`}
       data-no-page-swipe
+      style={{ paddingBottom: 'max(0.625rem, env(safe-area-inset-bottom, 0px))' }}
     >
       <div className="flex items-center justify-between px-1">
         <span className={`${TEXT.xs} text-text-secondary`}>{t('peer.soft_kb_title')}</span>
@@ -89,24 +90,24 @@ export function SoftKeyboardOverlay({
           {t('peer.soft_kb_close')}
         </button>
       </div>
-      <div className="flex gap-1">
+      <div className={`flex ${SOFT_KB.gap}`}>
         {ROW1.map((c) => (
           <KeyBtn key={c} label={shift ? c.toUpperCase() : c} onPress={() => tapLetter(c)} />
         ))}
       </div>
-      <div className="flex gap-1 px-3">
+      <div className={`flex ${SOFT_KB.gap} px-3`}>
         {ROW2.map((c) => (
           <KeyBtn key={c} label={shift ? c.toUpperCase() : c} onPress={() => tapLetter(c)} />
         ))}
       </div>
-      <div className="flex gap-1">
+      <div className={`flex ${SOFT_KB.gap}`}>
         <KeyBtn label="⇧" wide active={shift} onPress={() => setShift((v) => !v)} />
         {ROW3.map((c) => (
           <KeyBtn key={c} label={shift ? c.toUpperCase() : c} onPress={() => tapLetter(c)} />
         ))}
         <KeyBtn label="⌫" wide onPress={() => tapSpecial('Backspace', 'Backspace')} />
       </div>
-      <div className="flex gap-1">
+      <div className={`flex ${SOFT_KB.gap}`}>
         <KeyBtn label="Ctrl" wide active={ctrl} onPress={() => setCtrl((v) => !v)} />
         <KeyBtn label="Alt" wide active={alt} onPress={() => setAlt((v) => !v)} />
         <KeyBtn label="Tab" onPress={() => tapSpecial('Tab', 'Tab')} />

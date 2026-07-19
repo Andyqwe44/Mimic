@@ -153,27 +153,28 @@ class PeerSession(
         val isKey = packed.size >= 12 &&
             (java.nio.ByteBuffer.wrap(packed, 8, 4).order(java.nio.ByteOrder.LITTLE_ENDIAN).int and 1) != 0
         if (isKey) lastOutboundKey = packed.copyOf()
+        // Prefer reliable LAN TCP when available — UDP fragments cause tearing on loss.
+        if (lan.ready) {
+            lan.sendH264(packed)
+            noteH264Sent(isKey, viaUdp = false)
+            return
+        }
         val u = udp
         if (u != null && u.ready) {
             u.sendH264(packed)
-            noteH264Sent(isKey)
+            noteH264Sent(isKey, viaUdp = true)
             return
         }
-        if (!lan.ready) {
-            h264DropCount++
-            if (h264DropCount <= 3 || h264DropCount % 60 == 0) {
-                Log.w(tag, "sendH264Packed dropped — media not ready (drops=$h264DropCount key=$isKey)")
-            }
-            return
+        h264DropCount++
+        if (h264DropCount <= 3 || h264DropCount % 60 == 0) {
+            Log.w(tag, "sendH264Packed dropped — media not ready (drops=$h264DropCount key=$isKey)")
         }
-        lan.sendH264(packed)
-        noteH264Sent(isKey)
     }
 
-    private fun noteH264Sent(isKey: Boolean) {
+    private fun noteH264Sent(isKey: Boolean, viaUdp: Boolean) {
         h264SentCount++
-        if (h264SentCount <= 5 || (isKey && h264SentCount % 30 == 0)) {
-            Log.i(tag, "H264 sent #$h264SentCount key=$isKey")
+        if (h264SentCount <= 5 || (isKey && h264SentCount % 30 == 0) || h264SentCount % 120 == 0) {
+            Log.i(tag, "H264 sent #$h264SentCount key=$isKey via=${if (viaUdp) "udp" else "lan"}")
         }
     }
 
