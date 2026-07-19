@@ -68,16 +68,33 @@ class CaptureController(
                 .put("need_consent", true)
         }
         return try {
-            stopInternal(clearConsent = false)
-            CaptureService.resetReady()
-            val i = Intent(context, CaptureService::class.java)
-            if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(i)
-            else context.startService(i)
-            if (!CaptureService.awaitForeground(2500L)) {
-                Log.e(tag, "CaptureService foreground not ready in time")
-                return JSONObject()
-                    .put("ok", false)
-                    .put("error", "android: CaptureService foreground not ready")
+            // Tear down previous encoder/projection but keep CaptureService FGS when possible
+            // (stop+restart races caused "foreground not ready" after MediaProjection consent).
+            streaming = false
+            try { encoder?.stop() } catch (_: Exception) {}
+            encoder = null
+            try { projection?.stop() } catch (_: Exception) {}
+            projection = null
+
+            if (!CaptureService.foregroundReady) {
+                CaptureService.resetReady()
+                val i = Intent(context, CaptureService::class.java)
+                if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(i)
+                else context.startService(i)
+                if (!CaptureService.awaitForeground(3500L)) {
+                    Log.w(tag, "CaptureService not ready — retry start")
+                    try { context.stopService(Intent(context, CaptureService::class.java)) } catch (_: Exception) {}
+                    try { Thread.sleep(200) } catch (_: InterruptedException) {}
+                    CaptureService.resetReady()
+                    if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(i)
+                    else context.startService(i)
+                    if (!CaptureService.awaitForeground(3500L)) {
+                        Log.e(tag, "CaptureService foreground not ready in time")
+                        return JSONObject()
+                            .put("ok", false)
+                            .put("error", "android: CaptureService foreground not ready")
+                    }
+                }
             }
             val mgr = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
             val proj = mgr.getMediaProjection(mediaProjectionResultCode, mediaProjectionData!!)

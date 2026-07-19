@@ -358,7 +358,7 @@ export function PeerRemoteView({
 
   const shellClass = expanded
     ? 'fixed inset-0 z-[80] bg-black overflow-hidden'
-    : 'shrink-0 rounded-xl bg-bg-secondary ring-1 ring-inset ring-border overflow-hidden w-full'
+    : 'shrink-0 rounded-t-xl bg-bg-secondary ring-1 ring-inset ring-border overflow-hidden w-full'
 
   const shellStyle: CSSProperties | undefined = expanded
     ? undefined
@@ -418,7 +418,7 @@ export function PeerRemoteView({
 
   const videoStack = (
     <div
-      className="relative flex items-center justify-center overflow-hidden flex-1 min-h-0 w-full"
+      className="relative flex items-center justify-center overflow-hidden flex-1 min-h-0 w-full h-full"
       style={rotated ? { flex: '1 1 0', minHeight: 0 } : undefined}
     >
       <canvas
@@ -426,10 +426,11 @@ export function PeerRemoteView({
         width={640}
         height={360}
         className="pointer-events-none shrink-0"
-        style={{
-          width: fit.w > 0 ? fit.w : '100%',
-          height: fit.h > 0 ? fit.h : '100%',
-        }}
+        style={
+          fit.w >= 8 && fit.h >= 8
+            ? { width: fit.w, height: fit.h }
+            : { width: '100%', height: '100%' }
+        }
       />
       {controlOverlay}
     </div>
@@ -554,20 +555,13 @@ export function PeerRemoteView({
         </div>
       ) : (
         <>
-          <div className={shellClass} style={shellStyle}>
-            <div className="flex flex-col bg-black" style={planeStyle}>
-              <div
-                ref={stageRef}
-                className="relative bg-black flex items-center justify-center overflow-hidden flex-1 min-h-0 w-full"
-                data-no-page-swipe={humanControl ? true : undefined}
-              >
-                <div
-                  className="flex items-center justify-center"
-                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
-                >
-                  {videoStack}
-                </div>
-              </div>
+          <div className={shellClass} style={{ ...shellStyle, position: 'relative' }}>
+            <div
+              ref={stageRef}
+              className="absolute inset-0 bg-black flex items-center justify-center overflow-hidden"
+              data-no-page-swipe={humanControl ? true : undefined}
+            >
+              {videoStack}
             </div>
           </div>
           {/* Status below preview — does not steal video height */}

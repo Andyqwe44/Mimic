@@ -51,7 +51,9 @@ class CaptureService : Service() {
     }
 
     override fun onDestroy() {
-        foregroundReady = false
+        // Do NOT clear foregroundReady here — stopService + restart races:
+        // new instance can mark ready, then old onDestroy would wipe it and
+        // awaitForeground times out ("CaptureService foreground not ready").
         super.onDestroy()
     }
 

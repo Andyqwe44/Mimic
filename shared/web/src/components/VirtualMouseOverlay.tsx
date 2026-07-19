@@ -254,7 +254,7 @@ export function VirtualMouseOverlay({
               <Tooltip text={t('peer.vmouse_left')}>
                 <button
                   type="button"
-                  className={`flex-1 ${VMOUSE.btnH} ${RADIUS.lg} ${TEXT.xs} font-semibold bg-bg-tertiary text-text-primary active:bg-accent-soft-mid`}
+                  className={`${VMOUSE.btnW} ${VMOUSE.btnH} ${RADIUS.lg} ${TEXT.xs} font-semibold bg-bg-tertiary text-text-primary active:bg-accent-soft-mid`}
                   {...bindButton('left')}
                 >
                   {t('peer.vmouse_left_short')}
@@ -293,7 +293,7 @@ export function VirtualMouseOverlay({
               <Tooltip text={t('peer.vmouse_right')}>
                 <button
                   type="button"
-                  className={`flex-1 ${VMOUSE.btnH} ${RADIUS.lg} ${TEXT.xs} font-semibold bg-bg-tertiary text-text-primary active:bg-accent-soft-mid`}
+                  className={`${VMOUSE.btnW} ${VMOUSE.btnH} ${RADIUS.lg} ${TEXT.xs} font-semibold bg-bg-tertiary text-text-primary active:bg-accent-soft-mid`}
                   {...bindButton('right')}
                 >
                   {t('peer.vmouse_right_short')}

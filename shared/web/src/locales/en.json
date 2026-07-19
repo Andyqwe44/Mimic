@@ -247,7 +247,8 @@
     "copy_failed": "Copy failed (long-press to select text manually)",
     "share_all": "Share / export logs",
     "share_file": "Share this log file",
-    "share_ok": "Share sheet opened (log file)",
+    "share_ok": "Opened log file (also copied to clipboard)",
+    "share_ok_file": "Saved and opened log file",
     "refresh_file": "Refresh file content",
     "pin_tip": "Pin panel — exclude from auto-layout",
     "unpin_tip": "Unpin panel — allow auto-layout adjustment"

@@ -191,9 +191,10 @@ export const PEER_WORKSPACE = {
   panelWeight: 'flex-1 min-h-0',
 } as const
 
-/** Floating UU-style virtual mouse panel. */
+/** Floating UU-style virtual mouse panel — width hugs buttons (no trailing blank). */
 export const VMOUSE = {
-  panel: 'w-[120px]',
+  panel: 'w-max',
+  btnW: 'w-12',
   btnH: 'h-8',
   wheelW: 'w-8',
   handleH: 'h-5',

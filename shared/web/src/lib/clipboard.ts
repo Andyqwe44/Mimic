@@ -5,8 +5,8 @@ import { getHostPlatform } from './platform'
 export async function copyText(text: string): Promise<boolean> {
   if (!text) return false
 
-  // Prefer native clipboard on Android (avoids NotAllowedError).
-  if (getHostPlatform() === 'android') {
+  // Prefer native clipboard (WebView often rejects navigator.clipboard).
+  if (getHostPlatform() === 'android' || getHostPlatform() === 'windows') {
     try {
       const r = await hostCall('clipboard_write', { text })
       if (r && r.ok !== false) return true
@@ -43,12 +43,13 @@ export async function copyText(text: string): Promise<boolean> {
 }
 
 /**
- * Share sheet (Android) — prefers a .txt file via FileProvider so QQ/WeChat
- * are not limited by EXTRA_TEXT length. Falls back to clipboard copy.
+ * Share sheet (Android) or save+clipboard (Windows) — prefers a .txt file so
+ * QQ/WeChat are not limited by EXTRA_TEXT length. Falls back to clipboard copy.
  */
 export async function shareText(text: string, filename = 'mimic-log.txt'): Promise<boolean> {
   if (!text) return false
-  if (getHostPlatform() === 'android') {
+  const plat = getHostPlatform()
+  if (plat === 'android' || plat === 'windows') {
     try {
       const r = await hostCall('share_text', { text, filename, as_file: true })
       if (r && r.ok !== false) return true

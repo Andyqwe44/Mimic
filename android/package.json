@@ -1,8 +1,8 @@
 {
     "name":  "mimic-android",
     "private":  true,
-    "version":  "0.1.28",
-    "mimicReleaseNote":  "frame pipeline + SHOW_TOUCHES + real keyboard IME",
+    "version":  "0.1.29",
+    "mimicReleaseNote":  "fix CaptureService race + preview canvas + PC log share + vmouse",
     "description":  "Mimic Android shell 閳?Capacitor WebView hosting shared/web",
     "scripts":  {
                     "build:web":  "npm --prefix ../shared/web run build",

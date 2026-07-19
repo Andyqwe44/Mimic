@@ -1321,6 +1321,87 @@ static std::string cmd_open_log_dir() {
     return R"({"ok":true})";
 }
 
+static bool clipboard_set_utf8(const std::string& utf8) {
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), (int)utf8.size(), nullptr, 0);
+    if (wlen <= 0) return false;
+    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, (SIZE_T)(wlen + 1) * sizeof(wchar_t));
+    if (!mem) return false;
+    wchar_t* dst = (wchar_t*)GlobalLock(mem);
+    if (!dst) { GlobalFree(mem); return false; }
+    MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), (int)utf8.size(), dst, wlen);
+    dst[wlen] = 0;
+    GlobalUnlock(mem);
+    if (!OpenClipboard(get_main_hwnd() ? (HWND)get_main_hwnd() : nullptr)) {
+        GlobalFree(mem);
+        return false;
+    }
+    EmptyClipboard();
+    if (!SetClipboardData(CF_UNICODETEXT, mem)) {
+        CloseClipboard();
+        GlobalFree(mem);
+        return false;
+    }
+    CloseClipboard();
+    return true;
+}
+
+static std::string sanitize_share_filename(std::string name) {
+    if (name.empty()) name = "mimic-log.txt";
+    for (char& c : name) {
+        if (c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' ||
+            c == '"' || c == '<' || c == '>' || c == '|')
+            c = '_';
+    }
+    if (name.find('.') == std::string::npos) name += ".txt";
+    return name;
+}
+
+static std::string cmd_clipboard_write(const std::string& args) {
+    std::string text = json_get_str(args, "text");
+    if (text.empty()) return R"({"ok":false,"error":"empty text"})";
+    if (!clipboard_set_utf8(text)) {
+        LOG_WARN("cmd", "clipboard_write failed");
+        return R"({"ok":false,"error":"clipboard failed"})";
+    }
+    LOG("cmd", "clipboard_write ok chars=%zu", text.size());
+    return R"({"ok":true})";
+}
+
+/** Write log to a .txt under the log dir, copy contents to clipboard, open the file. */
+static std::string cmd_share_text(const std::string& args) {
+    std::string text = json_get_str(args, "text");
+    if (text.empty()) return R"({"ok":false,"error":"empty text"})";
+    std::string filename = sanitize_share_filename(json_get_str(args, "filename"));
+
+    char path[MAX_PATH] = {};
+    const char* log_dir = capture_log_get_dir();
+    if (log_dir && log_dir[0]) {
+        snprintf(path, sizeof(path), "%s\\%s", log_dir, filename.c_str());
+    } else {
+        char tmp[MAX_PATH] = {};
+        GetTempPathA(MAX_PATH, tmp);
+        snprintf(path, sizeof(path), "%s%s", tmp, filename.c_str());
+    }
+
+    FILE* f = nullptr;
+    if (fopen_s(&f, path, "wb") != 0 || !f) {
+        LOG_ERROR("cmd", "share_text: fopen failed path=%s", path);
+        return R"({"ok":false,"error":"write failed"})";
+    }
+    fwrite(text.data(), 1, text.size(), f);
+    fclose(f);
+
+    bool clip_ok = clipboard_set_utf8(text);
+    HINSTANCE hi = ShellExecuteA(nullptr, "open", path, nullptr, nullptr, SW_SHOW);
+    bool open_ok = ((INT_PTR)hi > 32);
+    LOG("cmd", "share_text: path=%s clip=%d open=%d chars=%zu",
+        path, (int)clip_ok, (int)open_ok, text.size());
+    if (!clip_ok && !open_ok)
+        return R"({"ok":false,"error":"share failed"})";
+    return std::string("{\"ok\":true,\"path\":\"") + json_escape(path) +
+           "\",\"clipboard\":" + (clip_ok ? "true" : "false") + "}";
+}
+
 static std::string cmd_clear_log() {
     // Stop any running stream first — prevents use-after-free in concurrent LOG() calls
     if (g_streaming) {
@@ -3202,6 +3283,8 @@ std::string dispatch_command(const std::string& json) {
     else if (cmd == "read_logs") result = cmd_read_logs(json_get_int(args, "max_files"));
     else if (cmd == "read_log_file") result = cmd_read_log_file(json_get_str(args, "filename"));
     else if (cmd == "open_log_dir") result = cmd_open_log_dir();
+    else if (cmd == "clipboard_write") result = cmd_clipboard_write(args);
+    else if (cmd == "share_text") result = cmd_share_text(args);
     else if (cmd == "clear_log") result = cmd_clear_log();
     else if (cmd == "log_ui_event") {
         result = cmd_log_ui_event(json_get_str(args, "event"), json_get_str(args, "detail"));
