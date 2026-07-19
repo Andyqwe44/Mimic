@@ -1,5 +1,5 @@
 // Peer remote view — WebCodecs H.264 decode + UU virtual mouse + soft keyboard.
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Expand, Keyboard, Minimize2 } from 'lucide-react'
 import { hostCall, addLog } from '../lib/bridge'
@@ -61,9 +61,11 @@ export function PeerRemoteView({
   const [videoAspect, setVideoAspect] = useState(16 / 9)
   const [expanded, setExpanded] = useState(false)
   const [kbOpen, setKbOpen] = useState(false)
-  const [portrait, setPortrait] = useState(
-    typeof window !== 'undefined' ? window.innerHeight >= window.innerWidth : true,
-  )
+  const [vp, setVp] = useState(() => ({
+    w: typeof window !== 'undefined' ? window.innerWidth : 360,
+    h: typeof window !== 'undefined' ? window.innerHeight : 640,
+  }))
+  const portrait = vp.h >= vp.w
   const keyRecvRef = useRef(0)
   const deltaDropRef = useRef(0)
 
@@ -112,6 +114,8 @@ export function PeerRemoteView({
         }
       },
       error: (e) => {
+        closeDecoder()
+        videoSizeRef.current = { w: 0, h: 0 }
         requestKeyframe('error')
         setStatus(t('peer.decoder_error', { msg: e.message }))
         addLog(`[Decode] VideoDecoder error: ${e.message}`)
@@ -153,13 +157,15 @@ export function PeerRemoteView({
         deltaDropRef.current++
         return
       }
-      // After sync, a lost IDR still leaves deltas undecodable — pull key early.
-      if (!key && decoder.decodeQueueSize > 0) {
+      // Backpressure only when decode queue is badly backed up (LAN: do NOT drop
+      // every delta just because queueSize>0 — that caused constant blur).
+      if (!key && decoder.decodeQueueSize > 10) {
         dropCountRef.current++
         deltaDropRef.current++
-        if (dropCountRef.current >= 2) {
+        if (dropCountRef.current >= 4) {
           dropCountRef.current = 0
-          requestKeyframe('drop')
+          try { decoder.flush() } catch { /* */ }
+          requestKeyframe('backpressure')
         }
         return
       }
@@ -179,6 +185,8 @@ export function PeerRemoteView({
           }
         }
       } catch (e: unknown) {
+        closeDecoder()
+        videoSizeRef.current = { w: 0, h: 0 }
         requestKeyframe('decode')
         const msg = e instanceof Error ? e.message : String(e)
         setStatus(t('peer.decode_error', { msg }))
@@ -201,7 +209,7 @@ export function PeerRemoteView({
   }, [active, t])
 
   useEffect(() => {
-    const onResize = () => setPortrait(window.innerHeight >= window.innerWidth)
+    const onResize = () => setVp({ w: window.innerWidth, h: window.innerHeight })
     onResize()
     window.addEventListener('resize', onResize)
     window.addEventListener('orientationchange', onResize)
@@ -223,7 +231,10 @@ export function PeerRemoteView({
       const o = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> }
       o?.lock?.('landscape')?.catch?.(() => {})
     } catch { /* */ }
+    // After expand/orientation settle, ask for a fresh IDR (canvas stays mounted).
+    const tmr = window.setTimeout(() => requestKeyframe('expand'), 80)
     return () => {
+      window.clearTimeout(tmr)
       try {
         const o = screen.orientation as ScreenOrientation & { unlock?: () => void }
         o?.unlock?.()
@@ -243,123 +254,104 @@ export function PeerRemoteView({
 
   if (!active) return null
 
-  const stageInner = (
-    <div
-      className={`relative bg-black flex items-center justify-center overflow-hidden ${
-        expanded
-          ? 'flex-1 min-h-0 w-full'
-          : compact
-            ? 'w-full aspect-video max-h-[28vh] shrink-0'
-            : fill
-              ? 'flex-1 min-h-0'
-              : 'min-h-[160px] max-h-[280px]'
-      }`}
-      data-no-page-swipe
-    >
-      <canvas
-        ref={canvasRef}
-        width={640}
-        height={360}
-        className="max-w-full max-h-full object-contain pointer-events-none"
-        style={{
-          aspectRatio: `${videoAspect}`,
-          width: '100%',
-          height: '100%',
-          objectFit: 'contain',
-        }}
-      />
-      {humanControl && (
-        <VirtualMouseOverlay
-          enabled
-          videoAspect={videoAspect}
-          onAction={send}
-        />
-      )}
-      {humanControl && (
-        <SoftKeyboardOverlay
-          open={kbOpen}
-          onClose={() => setKbOpen(false)}
-          onKey={sendKey}
-        />
-      )}
-    </div>
-  )
+  // Single tree: expand only changes CSS — canvas must NOT remount (was black after expand/exit).
+  const landscapePlane = expanded && portrait
+  const shellClass = expanded
+    ? 'fixed inset-0 z-[80] bg-black overflow-hidden'
+    : `${fill && !compact ? 'flex-1 flex flex-col min-h-0' : 'shrink-0'} rounded-xl bg-bg-secondary ring-1 ring-inset ring-border overflow-hidden`
 
-  const toolbar = (
-    <div className="h-7 px-2 flex items-center gap-2 text-[11px] text-text-tertiary border-b border-border shrink-0">
-      <span className="font-medium text-text-secondary">{t('peer.remote_view')}</span>
-      <span className="tabular-nums">{dims}</span>
-      <span className="tabular-nums">{fps} fps</span>
-      {encodeHint && (
-        <span className="text-amber-500 truncate">{encodeHint}</span>
-      )}
-      <span className="ml-auto truncate min-w-0">
-        {status}{!humanControl ? ` · ${t('peer.ai_mode_short')}` : ''}
-      </span>
-      {humanControl && (
-        <Tooltip text={kbOpen ? t('peer.soft_kb_close') : t('peer.soft_kb_open')}>
-          <button
-            type="button"
-            className={`h-6 w-6 rounded flex items-center justify-center shrink-0 ${
-              kbOpen ? 'bg-accent-soft-mid text-accent' : 'hover:bg-bg-hover text-text-secondary'
-            }`}
-            onClick={() => setKbOpen((v) => !v)}
-          >
-            <Keyboard className="w-3.5 h-3.5" />
-          </button>
-        </Tooltip>
-      )}
-      <Tooltip text={expanded ? t('peer.collapse_view') : t('peer.expand_view')}>
-        <button
-          type="button"
-          className="h-6 w-6 rounded flex items-center justify-center shrink-0 hover:bg-bg-hover text-text-secondary"
-          onClick={() => setExpanded((v) => !v)}
-        >
-          {expanded ? <Minimize2 className="w-3.5 h-3.5" /> : <Expand className="w-3.5 h-3.5" />}
-        </button>
-      </Tooltip>
-    </div>
-  )
+  const planeStyle: CSSProperties = landscapePlane
+    ? {
+        position: 'absolute',
+        width: vp.h,
+        height: vp.w,
+        top: '50%',
+        left: '50%',
+        transform: 'translate(-50%, -50%) rotate(90deg)',
+        transformOrigin: 'center center',
+      }
+    : expanded
+      ? { position: 'absolute', inset: 0, width: '100%', height: '100%' }
+      : { display: 'flex', flexDirection: 'column', width: '100%', height: fill && !compact ? '100%' : undefined }
 
-  if (expanded) {
-    // Portrait WebView: CSS-rotate a landscape plane so user can hold phone sideways.
-    // Already landscape (after lock/turn): no rotate — fill screen with contain.
-    const landscapePlane = portrait
-    return (
-      <div className="fixed inset-0 z-[80] bg-black overflow-hidden">
-        <div
-          className="flex flex-col bg-black"
-          style={
-            landscapePlane
-              ? {
-                  position: 'absolute',
-                  width: '100dvh',
-                  height: '100dvw',
-                  top: '50%',
-                  left: '50%',
-                  transform: 'translate(-50%, -50%) rotate(90deg)',
-                  transformOrigin: 'center center',
-                }
-              : {
-                  position: 'absolute',
-                  inset: 0,
-                }
-          }
-        >
-          {toolbar}
-          {stageInner}
+  const stageClass = expanded
+    ? 'relative bg-black flex items-center justify-center overflow-hidden flex-1 min-h-0 w-full'
+    : compact
+      ? 'relative bg-black flex items-center justify-center overflow-hidden w-full aspect-video max-h-[28vh] shrink-0'
+      : fill
+        ? 'relative bg-black flex items-center justify-center overflow-hidden flex-1 min-h-0'
+        : 'relative bg-black flex items-center justify-center overflow-hidden min-h-[160px] max-h-[280px]'
+
+  return (
+    <div className={shellClass}>
+      <div className="flex flex-col bg-black" style={planeStyle}>
+        <div className="h-7 px-2 flex items-center gap-2 text-[11px] text-text-tertiary border-b border-border shrink-0">
+          <span className="font-medium text-text-secondary">{t('peer.remote_view')}</span>
+          <span className="tabular-nums">{dims}</span>
+          <span className="tabular-nums">{fps} fps</span>
+          {encodeHint && (
+            <span className="text-amber-500 truncate">{encodeHint}</span>
+          )}
+          <span className="ml-auto truncate min-w-0">
+            {status}{!humanControl ? ` · ${t('peer.ai_mode_short')}` : ''}
+          </span>
+          {humanControl && (
+            <Tooltip text={kbOpen ? t('peer.soft_kb_close') : t('peer.soft_kb_open')}>
+              <button
+                type="button"
+                className={`h-6 w-6 rounded flex items-center justify-center shrink-0 ${
+                  kbOpen ? 'bg-accent-soft-mid text-accent' : 'hover:bg-bg-hover text-text-secondary'
+                }`}
+                onClick={() => setKbOpen((v) => !v)}
+              >
+                <Keyboard className="w-3.5 h-3.5" />
+              </button>
+            </Tooltip>
+          )}
+          <Tooltip text={expanded ? t('peer.collapse_view') : t('peer.expand_view')}>
+            <button
+              type="button"
+              className="h-6 w-6 rounded flex items-center justify-center shrink-0 hover:bg-bg-hover text-text-secondary"
+              onClick={() => setExpanded((v) => !v)}
+            >
+              {expanded ? <Minimize2 className="w-3.5 h-3.5" /> : <Expand className="w-3.5 h-3.5" />}
+            </button>
+          </Tooltip>
+        </div>
+        <div className={stageClass} data-no-page-swipe>
+          <canvas
+            ref={canvasRef}
+            width={640}
+            height={360}
+            className="max-w-full max-h-full object-contain pointer-events-none"
+            style={{
+              aspectRatio: `${videoAspect}`,
+              width: '100%',
+              height: '100%',
+              objectFit: 'contain',
+            }}
+          />
+          {humanControl && (
+            <VirtualMouseOverlay
+              enabled
+              videoAspect={videoAspect}
+              onAction={send}
+            />
+          )}
+          {humanControl && (
+            <SoftKeyboardOverlay
+              open={kbOpen}
+              onClose={() => setKbOpen(false)}
+              onKey={sendKey}
+            />
+          )}
+        </div>
+        {expanded && (
           <div className={`${TEXT.tiny} text-center text-text-muted py-1 shrink-0`}>
             {t('peer.expand_hint')}
           </div>
-        </div>
+        )}
       </div>
-    )
-  }
-
-  return (
-    <div className={`${fill && !compact ? 'flex-1 flex flex-col min-h-0' : 'shrink-0'} rounded-xl bg-bg-secondary ring-1 ring-inset ring-border overflow-hidden`}>
-      {toolbar}
-      {stageInner}
     </div>
   )
 }

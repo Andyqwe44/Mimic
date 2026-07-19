@@ -2,6 +2,7 @@ package com.mimic.client.input
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.content.Intent
 import android.graphics.Path
 import android.os.Build
 import android.os.Handler
@@ -14,44 +15,85 @@ import java.lang.ref.WeakReference
 /**
  * User-enabled AccessibilityService for normal-backend tap/swipe injection.
  * When [confinePackage] is set (app target), leaving that package triggers re-launch
- * so the controller cannot drive the user to Home / other apps.
+ * so the controller cannot drive the user to Home / Recents / other apps.
  */
 class MimicAccessibilityService : AccessibilityService() {
     private val main = Handler(Looper.getMainLooper())
     private var lastRelaunchMs = 0L
+    private val confineWatch = object : Runnable {
+        override fun run() {
+            tryEnforceConfine("poll")
+            if (confinePackage != null) main.postDelayed(this, 350L)
+        }
+    }
 
     override fun onServiceConnected() {
         instance = WeakReference(this)
+        if (confinePackage != null) startConfineWatch()
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        val pkgConfine = confinePackage ?: return
-        if (event == null) return
-        if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
-            event.eventType != AccessibilityEvent.TYPE_WINDOWS_CHANGED
-        ) {
-            return
-        }
-        val pkg = event.packageName?.toString() ?: return
-        if (pkg == pkgConfine) return
-        if (pkg == ourPackage) return
-        if (pkg in SYSTEM_IGNORE) return
-        // Debounce relaunch storms (launcher animations, permission sheets).
-        val now = System.currentTimeMillis()
-        if (now - lastRelaunchMs < 800) return
-        lastRelaunchMs = now
-        Log.i(TAG, "confine: left $pkgConfine → saw $pkg; re-launch")
-        val act = confineActivity
-        main.post {
-            relaunchConfined?.invoke(pkgConfine, act)
+        if (confinePackage == null || event == null) return
+        when (event.eventType) {
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+            AccessibilityEvent.TYPE_WINDOWS_CHANGED,
+            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+            -> tryEnforceConfine("event:${event.eventType} pkg=${event.packageName}")
         }
     }
 
     override fun onInterrupt() {}
 
     override fun onDestroy() {
+        main.removeCallbacks(confineWatch)
         if (instance?.get() === this) instance = null
         super.onDestroy()
+    }
+
+    private fun startConfineWatch() {
+        main.removeCallbacks(confineWatch)
+        main.post(confineWatch)
+    }
+
+    private fun stopConfineWatch() {
+        main.removeCallbacks(confineWatch)
+    }
+
+    /** If focused UI left the confined package (Home / Recents / other app), bounce back. */
+    private fun tryEnforceConfine(reason: String) {
+        val pkgConfine = confinePackage ?: return
+        val focused = rootInActiveWindow?.packageName?.toString()
+            ?: return
+        if (focused == pkgConfine) return
+        if (focused == ourPackage) return
+        // Permission / installer sheets — allow briefly (user may need them).
+        if (focused in PERMISSION_SHEETS) return
+        // Home, Recents (systemui), launchers, other apps → re-launch confined target.
+        val now = System.currentTimeMillis()
+        if (now - lastRelaunchMs < 250) return
+        lastRelaunchMs = now
+        Log.i(TAG, "confine: left $pkgConfine → saw $focused ($reason); re-launch")
+        val act = confineActivity
+        main.post {
+            relaunchConfined?.invoke(pkgConfine, act)
+            // Nudge Recents away when possible (best-effort; gesture nav still needs relaunch).
+            if (focused == "com.android.systemui" || isLauncherPackage(focused)) {
+                try {
+                    performGlobalAction(GLOBAL_ACTION_BACK)
+                } catch (_: Exception) {
+                }
+            }
+        }
+    }
+
+    private fun isLauncherPackage(pkg: String): Boolean {
+        return try {
+            val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+            val ri = packageManager.resolveActivity(home, 0) ?: return false
+            ri.activityInfo?.packageName == pkg
+        } catch (_: Exception) {
+            false
+        }
     }
 
     fun injectNormalized(action: JSONObject, screenW: Int, screenH: Int): JSONObject {
@@ -71,7 +113,6 @@ class MimicAccessibilityService : AccessibilityService() {
                     .apply { if (!ok) put("error", "dispatchGesture failed") }
             }
             "move", "drag" -> {
-                // Treat held move as a short tap-drag toward the point (best-effort).
                 if (Build.VERSION.SDK_INT < 24) {
                     return JSONObject().put("ok", false).put("error", "gesture API requires API 24+")
                 }
@@ -90,8 +131,8 @@ class MimicAccessibilityService : AccessibilityService() {
 
     companion object {
         private const val TAG = "MimicA11y"
-        private val SYSTEM_IGNORE = setOf(
-            "com.android.systemui",
+        /** Transient system sheets only — NOT systemui Recents / launchers. */
+        private val PERMISSION_SHEETS = setOf(
             "com.android.permissioncontroller",
             "com.google.android.permissioncontroller",
             "com.android.settings",
@@ -117,6 +158,10 @@ class MimicAccessibilityService : AccessibilityService() {
             confinePackage = packageName?.ifBlank { null }
             confineActivity = activity?.ifBlank { null }
             Log.i(TAG, "confine=${confinePackage ?: "(none)"}")
+            get()?.let { svc ->
+                if (confinePackage != null) svc.startConfineWatch()
+                else svc.stopConfineWatch()
+            }
         }
 
         fun clearConfine() = setConfine(null, null)

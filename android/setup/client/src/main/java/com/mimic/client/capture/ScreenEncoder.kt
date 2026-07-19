@@ -19,7 +19,7 @@ class ScreenEncoder(
     private val width: Int,
     private val height: Int,
     private val dpi: Int,
-    private val bitrate: Int = 4_000_000,
+    private val bitrate: Int = 6_000_000,
     private val fps: Int = 30,
     private val onFrame: (packed: ByteArray) -> Unit,
     private val onProjectionStopped: (() -> Unit)? = null,
@@ -54,6 +54,7 @@ class ScreenEncoder(
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
             setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
             setInteger(MediaFormat.KEY_FRAME_RATE, fps)
+            // 1s GOP; force-sync via requestKeyframe for faster recovery.
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
             setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline)
             setInteger(MediaFormat.KEY_LEVEL, MediaCodecInfo.CodecProfileLevel.AVCLevel4)

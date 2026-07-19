@@ -61,6 +61,8 @@ class PeerSession(
         },
     )
     @Volatile private var lastFrame: ByteArray? = null
+    @Volatile private var reconnectAttempt = 0
+    private val reconnectRunnable = Runnable { tryReconnect() }
 
     private fun storeFramePreferKey(bytes: ByteArray) {
         if (bytes.size < 12) return
@@ -137,6 +139,8 @@ class PeerSession(
             }
             online = true
             role = "idle"
+            reconnectAttempt = 0
+            PeerKeepAliveService.start(context)
             Log.i(tag, "logged in user=$user device=$deviceId")
             JSONObject()
                 .put("ok", true)
@@ -166,6 +170,8 @@ class PeerSession(
 
     fun logout(): JSONObject {
         running.set(false)
+        main.removeCallbacks(reconnectRunnable)
+        reconnectAttempt = 0
         lan.stop()
         try { ws?.close(1000, "logout") } catch (_: Exception) {}
         ws = null
@@ -174,6 +180,7 @@ class PeerSession(
         role = "idle"
         transport = "none"
         peerDeviceId = ""
+        PeerKeepAliveService.stop(context)
         return JSONObject().put("ok", true)
     }
 
@@ -484,23 +491,61 @@ class PeerSession(
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                if (ws !== webSocket) return // stale socket after reconnect
                 online = false
-                if (running.get()) {
+                if (running.get() && token.isNotBlank()) {
+                    push(JSONObject().put("type", "peer_reconnecting").put("reason", "ws_closed"))
+                    scheduleReconnect()
+                } else if (running.get()) {
                     push(JSONObject().put("type", "peer_offline").put("reason", "ws_closed"))
                 }
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                if (ws !== null && ws !== webSocket) return // stale
                 Log.e(tag, "ws failure", t)
                 latchDone.countDown()
                 online = false
-                if (running.get()) {
+                if (running.get() && token.isNotBlank()) {
+                    push(JSONObject().put("type", "peer_reconnecting").put("reason", t.message ?: "ws_fail"))
+                    scheduleReconnect()
+                } else if (running.get()) {
                     push(JSONObject().put("type", "peer_offline").put("reason", t.message ?: "ws_fail"))
                 }
             }
         })
         latchDone.await(8, TimeUnit.SECONDS)
         return latchOk.get()
+    }
+
+    private fun scheduleReconnect() {
+        if (!running.get() || token.isBlank() || signalingHttp.isBlank()) return
+        main.removeCallbacks(reconnectRunnable)
+        val delay = (1000L * (1 shl reconnectAttempt.coerceAtMost(5))).coerceAtMost(30_000L)
+        reconnectAttempt++
+        Log.i(tag, "ws reconnect in ${delay}ms attempt=$reconnectAttempt")
+        main.postDelayed(reconnectRunnable, delay)
+    }
+
+    private fun tryReconnect() {
+        if (!running.get() || token.isBlank() || signalingHttp.isBlank()) return
+        Log.i(tag, "ws reconnect attempt=$reconnectAttempt")
+        try {
+            try { ws?.cancel() } catch (_: Exception) {}
+            ws = null
+            if (openWs(signalingHttp, token)) {
+                online = true
+                reconnectAttempt = 0
+                PeerKeepAliveService.start(context)
+                push(JSONObject().put("type", "peer_online").put("reconnected", true))
+                Log.i(tag, "ws reconnected")
+            } else {
+                scheduleReconnect()
+            }
+        } catch (e: Exception) {
+            Log.e(tag, "reconnect", e)
+            scheduleReconnect()
+        }
     }
 
     private fun sendWs(msg: JSONObject) {

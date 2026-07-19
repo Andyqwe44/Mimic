@@ -532,9 +532,9 @@ bool H264Encoder::init(ID3D11Device* device, int width, int height, int fps, int
         set_bool(CODECAPI_AVLowLatencyMode, true);
         set_u4(CODECAPI_AVEncCommonRateControlMode, eAVEncCommonRateControlMode_CBR);
         set_u4(CODECAPI_AVEncCommonMeanBitRate, (ULONG)bitrate_kbps * 1000);
-        // ~0.5s GOP → faster keyframe recovery after loss (B-frames off).
-        ULONG gop = (ULONG)((fps > 1) ? (fps / 2) : 15);
-        if (gop < 8) gop = 8;
+        // ~0.33s GOP → faster keyframe recovery after loss (B-frames off).
+        ULONG gop = (ULONG)((fps > 2) ? (fps / 3) : 10);
+        if (gop < 5) gop = 5;
         set_u4(CODECAPI_AVEncMPVGOPSize, gop);
         set_u4(CODECAPI_AVEncMPVDefaultBPictureCount, 0);
         // 0 = favor speed / lower latency on vendors that honor it.

@@ -109,6 +109,8 @@
     "probe_tip": "探測伺服器是否可達並測量延遲",
     "logout": "登出",
     "online": "已上線",
+    "offline": "已離線",
+    "reconnecting": "重連中…",
     "logged_out": "已登出",
     "login_failed": "登入失敗",
     "register_ok": "註冊成功 — 請登入",
@@ -212,7 +214,7 @@
     "copy_ok": "已複製",
     "copy_failed": "複製失敗（可長按選取文字手動複製）",
     "share_all": "分享 / 匯出日誌",
-    "share_ok": "已開啟分享",
+    "share_ok": "已開啟分享（日誌檔）",
     "refresh_file": "重新整理檔案內容",
     "pin_tip": "固定面板 — 不受自動佈局影響",
     "unpin_tip": "取消固定 — 允許自動佈局調整"

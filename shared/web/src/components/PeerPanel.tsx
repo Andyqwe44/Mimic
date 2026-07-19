@@ -234,6 +234,16 @@ export function PeerPanel({
       } else if (d.type === 'peer_offline') {
         setOnline(false)
         setRole('idle')
+        setStatus(t('peer.offline'))
+        addLog('[Peer] offline')
+      } else if (d.type === 'peer_reconnecting') {
+        // Keep "logged in" UI; signaling is retrying in background.
+        setStatus(t('peer.reconnecting'))
+        addLog(`[Peer] reconnecting: ${d.reason || ''}`)
+      } else if (d.type === 'peer_online') {
+        setOnline(true)
+        setStatus(t('peer.online'))
+        if (d.reconnected) addLog('[Peer] reconnected')
       }
     })
   }, [onRemoteWindows, onTransport, onRole, onSessionStart, refreshStatus, t])

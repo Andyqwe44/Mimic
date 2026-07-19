@@ -42,12 +42,15 @@ export async function copyText(text: string): Promise<boolean> {
   }
 }
 
-/** Share sheet (Android) or clipboard fallback — best way to get logs off-device. */
-export async function shareText(text: string): Promise<boolean> {
+/**
+ * Share sheet (Android) — prefers a .txt file via FileProvider so QQ/WeChat
+ * are not limited by EXTRA_TEXT length. Falls back to clipboard copy.
+ */
+export async function shareText(text: string, filename = 'mimic-log.txt'): Promise<boolean> {
   if (!text) return false
   if (getHostPlatform() === 'android') {
     try {
-      const r = await hostCall('share_text', { text })
+      const r = await hostCall('share_text', { text, filename, as_file: true })
       if (r && r.ok !== false) return true
     } catch {
       /* fall through */

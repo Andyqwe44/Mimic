@@ -204,6 +204,18 @@ class AndroidHost(
         return if (started.optBoolean("ok", false)) {
             pendingStartAfterConsent = false
             appendLog("cap", "encoder started target=$tid")
+            // display:* — send Mimic to background so capture shows the phone's current UI,
+            // not Mimic itself sitting on top after the consent dialog.
+            if (tid.startsWith("display:")) {
+                main.post {
+                    try {
+                        (context as? android.app.Activity)?.moveTaskToBack(true)
+                        appendLog("cap", "display target → moveTaskToBack")
+                    } catch (e: Exception) {
+                        appendLog("cap", "moveTaskToBack failed: ${e.message}")
+                    }
+                }
+            }
             started.put("id", tid).put("peer_proto", 2)
         } else {
             JSONObject()
@@ -268,19 +280,61 @@ class AndroidHost(
             "share_text" -> {
                 val text = args.optString("text", "")
                 if (text.isEmpty()) return JSONObject().put("ok", false).put("error", "empty text")
+                // Default: share as .txt file (QQ/WeChat choke on long EXTRA_TEXT).
+                val asFile = args.optBoolean("as_file", true)
+                val rawName = args.optString("filename", "mimic-log.txt").ifBlank { "mimic-log.txt" }
+                val safeName = rawName.replace(Regex("[^A-Za-z0-9._-]"), "_").take(64)
                 try {
-                    val send = Intent(Intent.ACTION_SEND).apply {
-                        type = "text/plain"
-                        putExtra(Intent.EXTRA_TEXT, text.take(500_000))
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                    main.post {
-                        context.startActivity(
-                            Intent.createChooser(send, "Mimic logs").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    if (asFile) {
+                        val dir = File(context.cacheDir, "share").also { it.mkdirs() }
+                        dir.listFiles()?.forEach { f ->
+                            if (f.isFile && f.name.startsWith("mimic-log") &&
+                                System.currentTimeMillis() - f.lastModified() > 86_400_000L
+                            ) f.delete()
+                        }
+                        val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                        val file = File(dir, if (safeName.contains('.')) {
+                            safeName.replace(".", "_$stamp.")
+                        } else {
+                            "${safeName}_$stamp.txt"
+                        })
+                        file.writeText(text)
+                        val uri = FileProvider.getUriForFile(
+                            context,
+                            "${context.packageName}.fileprovider",
+                            file,
                         )
+                        val send = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_STREAM, uri)
+                            putExtra(Intent.EXTRA_SUBJECT, "Mimic logs")
+                            clipData = ClipData.newUri(context.contentResolver, "mimic-log", uri)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        main.post {
+                            context.startActivity(
+                                Intent.createChooser(send, "Mimic logs")
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                            )
+                        }
+                        appendLog("log", "share_file ok path=${file.name} chars=${text.length}")
+                        jsonOk().put("chars", text.length).put("file", file.name).put("mode", "file")
+                    } else {
+                        val send = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_TEXT, text.take(500_000))
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        main.post {
+                            context.startActivity(
+                                Intent.createChooser(send, "Mimic logs")
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                            )
+                        }
+                        appendLog("log", "share_text ok chars=${text.length}")
+                        jsonOk().put("chars", text.length).put("mode", "text")
                     }
-                    appendLog("log", "share_text ok chars=${text.length}")
-                    jsonOk().put("chars", text.length)
                 } catch (e: Exception) {
                     JSONObject().put("ok", false).put("error", e.message ?: "share failed")
                 }

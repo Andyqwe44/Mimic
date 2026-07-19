@@ -109,6 +109,8 @@
     "probe_tip": "Measure reachability and latency",
     "logout": "Logout",
     "online": "Online",
+    "offline": "Offline",
+    "reconnecting": "Reconnecting…",
     "logged_out": "Logged out",
     "login_failed": "Login failed",
     "register_ok": "Registered — please log in",
@@ -212,7 +214,7 @@
     "copy_ok": "Copied",
     "copy_failed": "Copy failed (long-press to select text manually)",
     "share_all": "Share / export logs",
-    "share_ok": "Share sheet opened",
+    "share_ok": "Share sheet opened (log file)",
     "refresh_file": "Refresh file content",
     "pin_tip": "Pin panel — exclude from auto-layout",
     "unpin_tip": "Unpin panel — allow auto-layout adjustment"
