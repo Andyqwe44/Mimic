@@ -4,7 +4,9 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.util.Log
 import com.mimic.client.BuildConfig
 import com.mimic.client.IMimicFrameCallback
@@ -13,16 +15,55 @@ import org.json.JSONObject
 import rikka.shizuku.Shizuku
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Binds Shizuku UserService ([PrivilegedRemoteService]) and exposes sync helpers.
+ * Observes binder + permission results so preferred backend can auto-reconnect
+ * after process restart (MAA-Meow-style readiness).
  */
 class ShizukuConnector(private val context: Context) {
     private val tag = "MimicShizuku"
+    private val mainHandler = Handler(Looper.getMainLooper())
     @Volatile private var remote: IMimicPrivileged? = null
     @Volatile private var bound = false
     private var connection: ServiceConnection? = null
+    private val observing = AtomicBoolean(false)
+
+    /** Invoked on main thread when binder appears or permission is granted. */
+    @Volatile var onReady: (() -> Unit)? = null
+
+    private val binderReceived = Shizuku.OnBinderReceivedListener {
+        Log.i(tag, "binder received")
+        mainHandler.post { onReady?.invoke() }
+    }
+
+    private val binderDead = Shizuku.OnBinderDeadListener {
+        Log.w(tag, "binder dead")
+        remote = null
+        bound = false
+    }
+
+    private val permListener = Shizuku.OnRequestPermissionResultListener { _, grantResult ->
+        val granted = grantResult == PackageManager.PERMISSION_GRANTED
+        Log.i(tag, "permission result granted=$granted")
+        if (granted) {
+            mainHandler.post { onReady?.invoke() }
+        }
+    }
+
+    fun startObserving() {
+        if (!observing.compareAndSet(false, true)) return
+        try {
+            Shizuku.addBinderReceivedListenerSticky(binderReceived)
+            Shizuku.addBinderDeadListener(binderDead)
+            Shizuku.addRequestPermissionResultListener(permListener)
+        } catch (e: Exception) {
+            Log.w(tag, "startObserving", e)
+            observing.set(false)
+        }
+    }
 
     fun pingAvailable(): Boolean {
         return try {

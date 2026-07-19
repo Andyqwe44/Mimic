@@ -457,14 +457,16 @@ export function PeerPanel({
                 />
               )}
               {role === 'controller' && (
-                <div className="flex gap-1 ml-auto">
+                <div className="flex gap-1 ml-auto items-center">
+                  <span className="text-[10px] text-text-muted hidden sm:inline">{t('peer.control_mode')}</span>
                   <Tooltip text={t('peer.human_tip')}>
                     <button type="button" onClick={() => {
                       onControlMode('human')
                       hostCall('peer_set_control_mode', { mode: 'human' })
                     }}
-                      className={`h-7 w-7 rounded-md flex items-center justify-center ${controlMode === 'human' ? 'bg-accent-soft-mid text-accent' : 'text-text-muted hover:bg-bg-hover'}`}>
+                      className={`h-7 px-2 rounded-md inline-flex items-center gap-1 text-[11px] ${controlMode === 'human' ? 'bg-accent-soft-mid text-accent' : 'text-text-muted hover:bg-bg-hover'}`}>
                       <User className="w-3.5 h-3.5" />
+                      <span>{t('peer.human_short')}</span>
                     </button>
                   </Tooltip>
                   <Tooltip text={t('peer.ai_tip')}>
@@ -472,8 +474,9 @@ export function PeerPanel({
                       onControlMode('ai')
                       hostCall('peer_set_control_mode', { mode: 'ai' })
                     }}
-                      className={`h-7 w-7 rounded-md flex items-center justify-center ${controlMode === 'ai' ? 'bg-accent-soft-mid text-accent' : 'text-text-muted hover:bg-bg-hover'}`}>
+                      className={`h-7 px-2 rounded-md inline-flex items-center gap-1 text-[11px] ${controlMode === 'ai' ? 'bg-accent-soft-mid text-accent' : 'text-text-muted hover:bg-bg-hover'}`}>
                       <Bot className="w-3.5 h-3.5" />
+                      <span>{t('peer.ai_short')}</span>
                     </button>
                   </Tooltip>
                 </div>

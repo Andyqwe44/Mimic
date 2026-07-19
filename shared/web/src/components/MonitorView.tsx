@@ -848,7 +848,10 @@ export function MonitorView({
               <span className={`${TEXT.sm} font-medium text-text-primary truncate`}>
                 {t('peer.remote_workspace')}
               </span>
-              <div className="flex gap-1 ml-auto shrink-0">
+              <div className="flex gap-1 ml-auto shrink-0 items-center">
+                <span className={`${TEXT.tiny} text-text-muted hidden sm:inline mr-0.5`}>
+                  {t('peer.control_mode')}
+                </span>
                 <Tooltip text={t('peer.human_tip')}>
                   <button
                     type="button"
@@ -856,11 +859,12 @@ export function MonitorView({
                       setPeerControlMode?.('human')
                       hostCall('peer_set_control_mode', { mode: 'human' })
                     }}
-                    className={`h-7 w-7 rounded-md flex items-center justify-center ${
+                    className={`h-7 px-2 rounded-md inline-flex items-center gap-1 ${TEXT.xs} ${
                       peerControlMode === 'human' ? 'bg-accent-soft-mid text-accent' : 'text-text-muted hover:bg-bg-hover'
                     }`}
                   >
                     <User className="w-3.5 h-3.5" />
+                    <span>{t('peer.human_short')}</span>
                   </button>
                 </Tooltip>
                 <Tooltip text={t('peer.ai_tip')}>
@@ -870,22 +874,21 @@ export function MonitorView({
                       setPeerControlMode?.('ai')
                       hostCall('peer_set_control_mode', { mode: 'ai' })
                     }}
-                    className={`h-7 w-7 rounded-md flex items-center justify-center ${
+                    className={`h-7 px-2 rounded-md inline-flex items-center gap-1 ${TEXT.xs} ${
                       peerControlMode === 'ai' ? 'bg-accent-soft-mid text-accent' : 'text-text-muted hover:bg-bg-hover'
                     }`}
                   >
                     <Bot className="w-3.5 h-3.5" />
+                    <span>{t('peer.ai_short')}</span>
                   </button>
                 </Tooltip>
               </div>
             </div>
             <div className={`flex-1 flex flex-col min-h-0 ${SHELL_PAD.page} gap-2`}>
-              <div className={`${PEER_WORKSPACE.previewWeight} shrink-0 flex flex-col min-h-0`}>
+              <div className={`${PEER_WORKSPACE.previewWeight}`}>
                 <PeerRemoteView
                   active={lanReady}
                   humanControl={peerControlMode === 'human'}
-                  compact
-                  fill
                   encodeHint={encodeHint}
                 />
               </div>
@@ -946,13 +949,11 @@ export function MonitorView({
 
         {isControlled && (
           <div className={`flex-1 flex flex-col min-h-0 ${SHELL_PAD.page} gap-2`}>
-            <div className={`${PEER_WORKSPACE.previewWeight} shrink-0 flex flex-col min-h-0`}>
+            <div className={`${PEER_WORKSPACE.previewWeight}`}>
               <PeerRemoteView
                 active={lanReady}
                 humanControl={false}
                 source="local"
-                compact
-                fill
               />
             </div>
             <div className="text-center space-y-1 max-w-md mx-auto shrink-0">

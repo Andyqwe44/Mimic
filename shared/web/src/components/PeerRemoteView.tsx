@@ -31,19 +31,19 @@ type PeerH264Detail = {
 export function PeerRemoteView({
   active,
   humanControl,
-  fill = false,
+  fill: _fill = false,
   encodeHint,
-  compact = false,
+  compact: _compact = false,
   /** remote = peer stream; local = this device's outbound capture mirror. */
   source = 'remote',
 }: {
   active: boolean
   humanControl: boolean
-  /** Fill parent height (Monitor workspace). */
+  /** Fill parent height (Monitor workspace). Kept for call-site compat; sizing follows videoAspect. */
   fill?: boolean
   /** Optional encoder path hint from controlled side (e.g. SOFTWARE). */
   encodeHint?: string
-  /** Smaller 16:9 preview — leave room for target list below. */
+  /** Smaller preview — kept for call-site compat; sizing follows videoAspect. */
   compact?: boolean
   source?: 'remote' | 'local'
 }) {
@@ -64,11 +64,6 @@ export function PeerRemoteView({
   const [videoAspect, setVideoAspect] = useState(16 / 9)
   const [expanded, setExpanded] = useState(false)
   const [kbOpen, setKbOpen] = useState(false)
-  const [vp, setVp] = useState(() => ({
-    w: typeof window !== 'undefined' ? window.innerWidth : 360,
-    h: typeof window !== 'undefined' ? window.innerHeight : 640,
-  }))
-  const portrait = vp.h >= vp.w
   const keyRecvRef = useRef(0)
   const deltaDropRef = useRef(0)
 
@@ -216,17 +211,6 @@ export function PeerRemoteView({
   }, [active, t, source])
 
   useEffect(() => {
-    const onResize = () => setVp({ w: window.innerWidth, h: window.innerHeight })
-    onResize()
-    window.addEventListener('resize', onResize)
-    window.addEventListener('orientationchange', onResize)
-    return () => {
-      window.removeEventListener('resize', onResize)
-      window.removeEventListener('orientationchange', onResize)
-    }
-  }, [])
-
-  useEffect(() => {
     if (!expanded) {
       try {
         const o = screen.orientation as ScreenOrientation & { unlock?: () => void }
@@ -234,11 +218,7 @@ export function PeerRemoteView({
       } catch { /* */ }
       return
     }
-    try {
-      const o = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> }
-      o?.lock?.('landscape')?.catch?.(() => {})
-    } catch { /* */ }
-    // After expand/orientation settle, ask for a fresh IDR (canvas stays mounted).
+    // Follow content aspect — do NOT force landscape; phone portrait stays portrait.
     const tmr = window.setTimeout(() => requestKeyframe('expand'), 80)
     return () => {
       window.clearTimeout(tmr)
@@ -262,38 +242,34 @@ export function PeerRemoteView({
   if (!active) return null
 
   // Single tree: expand only changes CSS — canvas must NOT remount (was black after expand/exit).
-  const landscapePlane = expanded && portrait
+  const portraitVideo = videoAspect > 0 && videoAspect < 1
+  const maxPreviewH = portraitVideo ? 'min(58vh, 640px)' : 'min(36vh, 420px)'
+
   const shellClass = expanded
     ? 'fixed inset-0 z-[80] bg-black overflow-hidden'
-    : compact || fill
-      ? 'flex-1 flex flex-col min-h-0 h-full rounded-xl bg-bg-secondary ring-1 ring-inset ring-border overflow-hidden'
-      : 'shrink-0 rounded-xl bg-bg-secondary ring-1 ring-inset ring-border overflow-hidden'
+    : 'shrink-0 rounded-xl bg-bg-secondary ring-1 ring-inset ring-border overflow-hidden w-full'
 
-  const planeStyle: CSSProperties = landscapePlane
-    ? {
-        position: 'absolute',
-        width: vp.h,
-        height: vp.w,
-        top: '50%',
-        left: '50%',
-        transform: 'translate(-50%, -50%) rotate(90deg)',
-        transformOrigin: 'center center',
+  const shellStyle: CSSProperties | undefined = expanded
+    ? undefined
+    : {
+        // Match remote frame aspect (phone portrait / PC landscape / rotated phone).
+        aspectRatio: `${videoAspect}`,
+        width: '100%',
+        maxHeight: maxPreviewH,
+        maxWidth: portraitVideo ? 'min(100%, 420px)' : '100%',
+        marginInline: portraitVideo ? 'auto' : undefined,
       }
-    : expanded
-      ? { position: 'absolute', inset: 0, width: '100%', height: '100%' }
-      : { display: 'flex', flexDirection: 'column', width: '100%', height: (fill || compact) ? '100%' : undefined }
+
+  const planeStyle: CSSProperties = expanded
+    ? { position: 'absolute', inset: 0, width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }
+    : { display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }
 
   const stageClass = expanded
     ? 'relative bg-black flex items-center justify-center overflow-hidden flex-1 min-h-0 w-full'
-    : compact
-      ? 'relative bg-black flex items-center justify-center overflow-hidden w-full h-full min-h-0'
-      : fill
-        ? 'relative bg-black flex items-center justify-center overflow-hidden flex-1 min-h-0'
-        : 'relative bg-black flex items-center justify-center overflow-hidden min-h-[160px] max-h-[280px]'
+    : 'relative bg-black flex items-center justify-center overflow-hidden flex-1 min-h-0 w-full'
 
   return (
-    <div className={shellClass}>
-      {/* Chrome OUTSIDE rotate(90deg) plane — otherwise collapse is off-screen / untappable. */}
+    <div className={shellClass} style={shellStyle}>
       {expanded && (
         <div
           className="fixed z-[90] flex items-center gap-1 pointer-events-auto"
@@ -352,7 +328,7 @@ export function PeerRemoteView({
             </Tooltip>
           )}
         </div>
-        <div className={stageClass} data-no-page-swipe>
+        <div className={stageClass} data-no-page-swipe={humanControl ? true : undefined}>
           <canvas
             ref={canvasRef}
             width={640}
@@ -369,7 +345,7 @@ export function PeerRemoteView({
             <VirtualMouseOverlay
               enabled
               videoAspect={videoAspect}
-              rotated={landscapePlane}
+              rotated={false}
               showPanel={expanded}
               onAction={send}
             />

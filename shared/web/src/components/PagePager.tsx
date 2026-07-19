@@ -14,12 +14,18 @@ import { PRIMARY_PAGES, fractionalPageIndex, pageIndex, type AppPage } from '../
 
 const MIN_DX = 48
 const MAX_SLOPE = 0.7
+/** Screen-edge strips always allow horizontal page swipe (even over scroll/canvas). */
+const EDGE_PX = 28
 
 function blockedTarget(t: EventTarget | null): boolean {
   if (!(t instanceof Element)) return false
   return !!t.closest(
     'input, textarea, select, [contenteditable="true"], canvas, [data-no-page-swipe]',
   )
+}
+
+function nearHorizontalEdge(clientX: number, width: number): boolean {
+  return clientX <= EDGE_PX || clientX >= width - EDGE_PX
 }
 
 function prefersReducedMotion(): boolean {
@@ -116,11 +122,14 @@ export function PagePager({
 
     const onDown = (e: PointerEvent) => {
       if (e.pointerType === 'mouse' && e.button !== 0) return
+      const w = widthRef.current
+      const edge = nearHorizontalEdge(e.clientX, w)
       start.current = {
         x: e.clientX,
         y: e.clientY,
         id: e.pointerId,
-        blocked: blockedTarget(e.target),
+        // Edge swipe always wins so Monitor canvas / scroll areas don't trap navigation.
+        blocked: edge ? false : blockedTarget(e.target),
         axis: 'undecided',
       }
     }

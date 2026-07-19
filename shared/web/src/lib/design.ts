@@ -182,9 +182,10 @@ export const SOFT = {
   scrim: 'bg-scrim',
 } as const
 
-/** Peer Monitor workspace: preview ~30% / targets ~70% (MAA-Meow-style). */
+/** Peer Monitor workspace: preview follows remote frame aspect (portrait/landscape). */
 export const PEER_WORKSPACE = {
-  previewWeight: 'basis-[30%] max-h-[32vh] min-h-[120px]',
+  /** Outer slot — grows with content aspect; portrait gets more vertical room. */
+  previewWeight: 'shrink-0 flex flex-col min-h-0 w-full',
   panelWeight: 'flex-1 min-h-0',
 } as const
 

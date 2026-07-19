@@ -44,7 +44,42 @@ export function LogPanel({
   const [copiedFileIdx, setCopiedFileIdx] = useState<number | null>(null)
   // ── Copy feedback state ──
   const [refreshingIdx, setRefreshingIdx] = useState<number | null>(null)
+  const [sharingIdx, setSharingIdx] = useState<number | null>(null)
   const [entries, setEntries] = useState(logMgr.getAll())
+
+  /** Ensure history file lines are loaded, then return text (or null). */
+  const loadHistoryText = async (fi: number, f: HistoryFile): Promise<string | null> => {
+    if (f.lines.length > 0) return f.lines.join('\n')
+    try {
+      const res = await hostCall('read_log_file', { filename: f.name })
+      const content = typeof res?.content === 'string' ? res.content : ''
+      const newLines = content ? content.split('\n') : []
+      setHistoryFiles((prev) =>
+        prev.map((hf, i) => (i === fi ? { ...hf, lines: newLines } : hf)),
+      )
+      return content || null
+    } catch {
+      return null
+    }
+  }
+
+  const copyOrShareHistory = async (fi: number, f: HistoryFile, preferShare: boolean) => {
+    const text = await loadHistoryText(fi, f)
+    if (!text) {
+      addLog(`[Log] ${t('log.copy_failed')}`)
+      return false
+    }
+    const ok = preferShare
+      ? await shareText(text, f.name.endsWith('.txt') ? f.name : `${f.name}.txt`)
+      : await copyText(text)
+    if (!ok) addLog(`[Log] ${t('log.copy_failed')}`)
+    else {
+      addLog(
+        `[Log] ${preferShare ? t('log.share_ok') : t('log.copy_ok')} (${text.split('\n').length} lines)`,
+      )
+    }
+    return ok
+  }
 
   // ── Subscribe to LogManager changes ──
   useEffect(() => {
@@ -320,12 +355,10 @@ export function LogPanel({
                     <button
                       onClick={async (e) => {
                         e.stopPropagation()
-                        const ok = await copyText(f.lines.join('\n'))
+                        const ok = await copyOrShareHistory(fi, f, false)
                         if (ok) {
                           setCopiedFileIdx(fi)
                           setTimeout(() => setCopiedFileIdx(null), 1500)
-                        } else {
-                          addLog(`[Log] ${t('log.copy_failed')}`)
                         }
                       }}
                       className="p-1 rounded-md text-text-secondary hover:text-accent hover:bg-bg-tertiary transition-colors"
@@ -335,6 +368,23 @@ export function LogPanel({
                       ) : (
                         <Copy className="w-3.5 h-3.5" />
                       )}
+                    </button>
+                  </Tooltip>
+                  <Tooltip text={t('log.share_file')}>
+                    <button
+                      onClick={async (e) => {
+                        e.stopPropagation()
+                        setSharingIdx(fi)
+                        try {
+                          await copyOrShareHistory(fi, f, true)
+                        } finally {
+                          setSharingIdx(null)
+                        }
+                      }}
+                      disabled={sharingIdx === fi}
+                      className="p-1 rounded-md text-text-secondary hover:text-accent hover:bg-bg-tertiary transition-colors disabled:opacity-50"
+                    >
+                      <Share2 className="w-3.5 h-3.5" />
                     </button>
                   </Tooltip>
                   <ChevronDown
