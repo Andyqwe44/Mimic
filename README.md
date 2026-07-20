@@ -118,7 +118,8 @@ powershell -File scripts\Build.ps1                    # all native under pc/
 powershell -File scripts\Build.ps1 -Module mimic_client
 
 powershell -File scripts\Release.ps1 -DryRun
-powershell -File scripts\Release.ps1 -ClientOnly      # pc/client/src/version.h (+ Android CDN)
+powershell -File scripts\Release.ps1 -ClientOnly      # PC only (pc/client/src/version.h)
+powershell -File scripts\Release.ps1 -AndroidOnly     # Android only (android/version.json)
 powershell -File scripts\Release.ps1 -ServerOnly      # server/package.json
 powershell -File scripts\Release.ps1 -PublishGitee    # optional: attach thin Setups on Gitee
 ```

@@ -1,7 +1,8 @@
 # Publish-Cdn.ps1 — sync local release payloads to Aliyun Mimic CDN.
 #
-#   powershell -File scripts\Publish-Cdn.ps1
-#   powershell -File scripts\Publish-Cdn.ps1 -Version 0.3.35 -ClientOnly
+#   powershell -File scripts\Publish-Cdn.ps1                         # PC + Server + Android
+#   powershell -File scripts\Publish-Cdn.ps1 -Version 0.3.35 -ClientOnly -SkipAndroid   # PC only
+#   powershell -File scripts\Publish-Cdn.ps1 -AndroidOnly            # Android only
 #   powershell -File scripts\Publish-Cdn.ps1 -Version 0.2.0 -ServerOnly
 
 [CmdletBinding()]
@@ -22,13 +23,35 @@ if (($ClientOnly -and $ServerOnly) -or ($ClientOnly -and $AndroidOnly) -or ($Ser
 . "$PSScriptRoot\lib\Common.ps1"
 $ErrorActionPreference = 'Stop'
 $root = Get-RepoRoot
-# ClientOnly ships client + android (shared UI). ServerOnly = server only.
-$doClient = -not $ServerOnly -and -not $AndroidOnly
-$doServer = -not $ClientOnly -and -not $AndroidOnly
-$doAndroid = -not $SkipAndroid -and -not $ServerOnly
-if ($AndroidOnly) { $doClient = $false; $doServer = $false; $doAndroid = $true }
+
+# Exclusive -*Only: one track. Bare run: all three (android omitted if -SkipAndroid).
+$doClient = $false
+$doServer = $false
+$doAndroid = $false
+if ($AndroidOnly) {
+    $doAndroid = $true
+} elseif ($ClientOnly) {
+    $doClient = $true
+    # -ClientOnly = PC tree only; pass -SkipAndroid is redundant but accepted
+} elseif ($ServerOnly) {
+    $doServer = $true
+} else {
+    $doClient = $true
+    $doServer = $true
+    $doAndroid = -not $SkipAndroid
+}
+
 if (-not $Version) {
-    $Version = if ($doClient) { Get-AppVersion } elseif ($doServer) { Get-ServerVersion } else { '0.1.0' }
+    if ($doClient) {
+        $Version = Get-AppVersion
+    } elseif ($doServer) {
+        $Version = Get-ServerVersion
+    } elseif ($doAndroid) {
+        $aj = Join-Path $root 'android\version.json'
+        $Version = if (Test-Path $aj) { [string](Get-Content -Raw $aj | ConvertFrom-Json).app } else { '0.1.0' }
+    } else {
+        $Version = '0.0.0'
+    }
 }
 
 $clientDir = Join-Path $root 'release\MimicClient'

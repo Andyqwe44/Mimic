@@ -24,7 +24,7 @@ alwaysApply: true
 8. **版本真相源** — PC 只改 `pc/client/src/version.h`；Server 改 `server/package.json`；Android 改 `android/package.json` + `android/version.json`（lib DLL 用 Build.ps1 `$LibVer`）。
 9. **跨进程参数不加引号包路径**；被调进程必须剥两端引号。
 10. **禁止编造工具返回值** — 未调用就说未调用；关键结论先 `git` 核实。
-11. **改完直接发版** — 功能/修复合入后默认跑 `Release.ps1`（相关端）上 CDN；**不以 Dev/HMR 验收**，以装机包 / 应用内更新后的发行版实测为准。
+11. **改完直接发版** — 功能/修复合入后默认跑 `Release.ps1`（`-ClientOnly` / `-AndroidOnly` / `-ServerOnly` / 全量）上 CDN；**不以 Dev/HMR 验收**，以装机包 / 应用内更新后的发行版实测为准。
 12. **状态转换表进 README** — 登录/通话/设备/导航相关状态转换以根 `README.md`「状态转换表」为 SSOT；新功能或边界修复改了转换，**必须**更新该表（与铁律 6 配套）。
 
 ## 目录速览

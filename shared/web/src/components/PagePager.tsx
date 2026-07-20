@@ -1,5 +1,5 @@
-// Horizontal page track — native CSS scroll-snap (compositor-driven).
-// No per-frame React state / no per-child touch hijacking.
+// Horizontal page track — native CSS scroll-snap while dragging;
+// programmatic jumps use rAF (distance-scaled duration) + direct pill translate3d.
 import {
   Children,
   useEffect,
@@ -8,9 +8,13 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react'
+import { NAV, navTapDurationMs } from '../lib/design'
 import { PRIMARY_PAGES, pageIndex, type AppPage } from '../lib/pages'
 
-/** Write CSS vars on a host so bottom-nav pill can follow without React re-renders. */
+/**
+ * Drive bottom-nav pill via compositor-friendly translate3d (not CSS vars).
+ * CSS custom-property updates force main-thread style recalc on Android WebView.
+ */
 export function writeNavProgress(
   host: HTMLElement | null,
   fractional: number,
@@ -19,6 +23,42 @@ export function writeNavProgress(
   if (!host) return
   host.style.setProperty('--nav-fraction', String(fractional))
   host.classList.toggle('nav-dragging', dragging)
+  const pill = host.querySelector('[data-nav-pill]') as HTMLElement | null
+  if (!pill) return
+  const track = pill.parentElement
+  if (!track) return
+  const n = PRIMARY_PAGES.length
+  const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
+  const gapPx = NAV.bottomGapRem * rem
+  const cs = getComputedStyle(track)
+  const padL = parseFloat(cs.paddingLeft) || 0
+  const padR = parseFloat(cs.paddingRight) || 0
+  const innerW = Math.max(0, track.clientWidth - padL - padR)
+  const slotW = (innerW - (n - 1) * gapPx) / n
+  const pitch = slotW + gapPx
+  pill.style.left = `${padL}px`
+  pill.style.width = `${slotW}px`
+  pill.style.transform = `translate3d(${fractional * pitch}px,0,0)`
+}
+
+/** CSS cubic-bezier unit ease (x1,y1,x2,y2) → y at t∈[0,1]. */
+function bezierEase(t: number, x1: number, y1: number, x2: number, y2: number): number {
+  if (t <= 0) return 0
+  if (t >= 1) return 1
+  let x = t
+  for (let i = 0; i < 6; i++) {
+    const cx = 3 * x1
+    const bx = 3 * (x2 - x1) - cx
+    const ax = 1 - cx - bx
+    const dx = ((ax * x + bx) * x + cx) * x - t
+    const d = (3 * ax * x + 2 * bx) * x + cx
+    if (Math.abs(d) < 1e-6) break
+    x -= dx / d
+  }
+  const cy = 3 * y1
+  const by = 3 * (y2 - y1) - cy
+  const ay = 1 - cy - by
+  return ((ay * x + by) * x + cy) * x
 }
 
 function prefersReducedMotion(): boolean {
@@ -34,7 +74,7 @@ export function PagePager({
 }: {
   page: AppPage
   onPageChange: (p: AppPage) => void
-  /** Element that receives --nav-fraction / --nav-dragging (AppShell root). */
+  /** Element that receives nav-dragging + hosts [data-nav-pill] (AppShell root). */
   progressHostRef?: RefObject<HTMLElement | null>
   children: ReactNode
 }) {
@@ -45,14 +85,24 @@ export function PagePager({
   indexRef.current = index
   const onPageChangeRef = useRef(onPageChange)
   onPageChangeRef.current = onPageChange
-  /** True while programmatic scrollTo from a nav tap is in flight. */
+  /** True while programmatic rAF jump from a nav tap is in flight. */
   const syncingFromProp = useRef(false)
   /** Skip next layout scroll — page was committed from our own snap settle. */
   const skipNextScrollSync = useRef(false)
   /** Finger/pointer still down on the pager. */
   const gestureActive = useRef(false)
   const settleTimer = useRef(0)
+  const animRaf = useRef(0)
   const reduceMotion = useRef(prefersReducedMotion())
+
+  const progressHost = () => progressHostRef?.current ?? null
+
+  const cancelAnim = () => {
+    if (animRaf.current) {
+      cancelAnimationFrame(animRaf.current)
+      animRaf.current = 0
+    }
+  }
 
   useEffect(() => {
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
@@ -62,8 +112,7 @@ export function PagePager({
     return () => mq.removeEventListener('change', sync)
   }, [])
 
-  // Nav tap / external page change → native scroll (no transform math).
-  // Swipe-driven commits set skipNextScrollSync so we never fight the finger.
+  // Nav tap / external page change → distance-scaled rAF scroll (pill locked to scrollLeft).
   useLayoutEffect(() => {
     const el = scrollerRef.current
     if (!el) return
@@ -72,47 +121,67 @@ export function PagePager({
 
     if (skipNextScrollSync.current) {
       skipNextScrollSync.current = false
-      writeNavProgress(progressHostRef?.current ?? null, index, false)
+      writeNavProgress(progressHost(), index, false)
       return
     }
 
-    // User is mid-gesture — don't inject scrollTo (causes page flicker).
-    if (gestureActive.current) {
-      return
-    }
+    if (gestureActive.current) return
 
     const target = index * w
     if (Math.abs(el.scrollLeft - target) < 2) {
-      writeNavProgress(progressHostRef?.current ?? null, index, false)
+      writeNavProgress(progressHost(), index, false)
       return
     }
+
+    cancelAnim()
     syncingFromProp.current = true
-    el.scrollTo({
-      left: target,
-      behavior: reduceMotion.current ? 'auto' : 'smooth',
-    })
-    writeNavProgress(progressHostRef?.current ?? null, index, false)
     window.clearTimeout(settleTimer.current)
-    settleTimer.current = window.setTimeout(() => {
+
+    if (reduceMotion.current) {
+      el.scrollLeft = target
+      writeNavProgress(progressHost(), index, false)
       syncingFromProp.current = false
-    }, reduceMotion.current ? 50 : 360) as unknown as number
+      return
+    }
+
+    const from = el.scrollLeft
+    const pageDelta = Math.abs(target - from) / w
+    const duration = navTapDurationMs(pageDelta)
+    const [x1, y1, x2, y2] = NAV.tapEase
+    const t0 = performance.now()
+    const prevSnap = el.style.scrollSnapType
+    el.style.scrollSnapType = 'none'
+
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - t0) / duration)
+      const e = bezierEase(t, x1, y1, x2, y2)
+      const left = from + (target - from) * e
+      el.scrollLeft = left
+      writeNavProgress(progressHost(), left / w, true)
+      if (t < 1) {
+        animRaf.current = requestAnimationFrame(tick)
+        return
+      }
+      animRaf.current = 0
+      el.scrollLeft = target
+      el.style.scrollSnapType = prevSnap || 'x mandatory'
+      writeNavProgress(progressHost(), index, false)
+      syncingFromProp.current = false
+    }
+    animRaf.current = requestAnimationFrame(tick)
   }, [index, progressHostRef])
 
   useEffect(() => {
     const el = scrollerRef.current
     if (!el) return
 
-    const progressHost = () => progressHostRef?.current ?? null
-
     const commitPage = () => {
-      if (gestureActive.current) return
+      if (gestureActive.current || syncingFromProp.current) return
       const w = el.clientWidth
       if (w <= 0) return
       const next = Math.max(0, Math.min(PRIMARY_PAGES.length - 1, Math.round(el.scrollLeft / w)))
       writeNavProgress(progressHost(), next, false)
-      if (syncingFromProp.current) return
       if (next !== indexRef.current) {
-        // Page already snapped here — don't scrollTo back in useLayoutEffect.
         skipNextScrollSync.current = true
         onPageChangeRef.current(PRIMARY_PAGES[next])
       }
@@ -120,36 +189,35 @@ export function PagePager({
 
     const scheduleCommit = () => {
       window.clearTimeout(settleTimer.current)
-      // Wait for momentum / snap to finish. Longer than a quick reverse pause.
       settleTimer.current = window.setTimeout(() => {
-        if (gestureActive.current) return
-        syncingFromProp.current = false
+        if (gestureActive.current || syncingFromProp.current) return
         commitPage()
       }, 120) as unknown as number
     }
 
     const onScroll = () => {
+      if (syncingFromProp.current) return // rAF tick already drives pill
       const w = el.clientWidth
       if (w <= 0) return
-      // Keep pill 1:1 with scroll; leave nav-dragging on until true settle.
       writeNavProgress(progressHost(), el.scrollLeft / w, true)
-      // While finger is down, never commit (avoids flicker on quick reverse).
       if (gestureActive.current) return
-      // After finger-up (or nav-tap smooth scroll): debounce settle.
-      // Android WebView may lack scrollend.
       scheduleCommit()
     }
 
     const onScrollEnd = () => {
-      if (gestureActive.current) return
+      if (gestureActive.current || syncingFromProp.current) return
       window.clearTimeout(settleTimer.current)
-      syncingFromProp.current = false
       commitPage()
     }
 
     const onPointerDown = (e: PointerEvent) => {
-      // Only track primary touch/pen on the scroller itself (not nested controls).
       if (e.pointerType === 'mouse' && e.button !== 0) return
+      // Interrupt tap animation if user grabs the track.
+      if (syncingFromProp.current) {
+        cancelAnim()
+        el.style.scrollSnapType = 'x mandatory'
+        syncingFromProp.current = false
+      }
       gestureActive.current = true
       window.clearTimeout(settleTimer.current)
       writeNavProgress(progressHost(), el.scrollLeft / Math.max(1, el.clientWidth), true)
@@ -158,32 +226,34 @@ export function PagePager({
     const endGesture = () => {
       if (!gestureActive.current) return
       gestureActive.current = false
-      // Momentum may still be running — commit after scroll quiesces.
       scheduleCommit()
+    }
+
+    const onTouchStart = () => {
+      if (syncingFromProp.current) {
+        cancelAnim()
+        el.style.scrollSnapType = 'x mandatory'
+        syncingFromProp.current = false
+      }
+      gestureActive.current = true
+      window.clearTimeout(settleTimer.current)
     }
 
     el.addEventListener('scroll', onScroll, { passive: true })
     el.addEventListener('scrollend', onScrollEnd)
     el.addEventListener('pointerdown', onPointerDown, { passive: true })
-    // Some Android WebViews are flaky on pointer*; touch* is a belt-and-suspenders.
-    const onTouchStart = () => {
-      gestureActive.current = true
-      window.clearTimeout(settleTimer.current)
-    }
     el.addEventListener('touchstart', onTouchStart, { passive: true })
-    // pointerup/cancel on window: finger may leave the scroller mid-swipe.
     window.addEventListener('pointerup', endGesture, { passive: true })
     window.addEventListener('pointercancel', endGesture, { passive: true })
     window.addEventListener('touchend', endGesture, { passive: true })
     window.addEventListener('touchcancel', endGesture, { passive: true })
 
-    // Initial pill position
     writeNavProgress(progressHost(), indexRef.current, false)
 
     const ro = new ResizeObserver(() => {
       const w = el.clientWidth
       if (w <= 0) return
-      // Keep current page aligned after rotation / keyboard resize.
+      cancelAnim()
       syncingFromProp.current = true
       el.scrollLeft = indexRef.current * w
       writeNavProgress(progressHost(), indexRef.current, false)
@@ -205,6 +275,7 @@ export function PagePager({
       window.removeEventListener('touchcancel', endGesture)
       ro.disconnect()
       window.clearTimeout(settleTimer.current)
+      cancelAnim()
     }
   }, [progressHostRef])
 

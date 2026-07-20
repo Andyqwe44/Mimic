@@ -143,13 +143,29 @@ export const NAV = {
   pillRing: 'ring-[0.5px] ring-inset ring-accent-ring',
   /** Soft fill for sliding focus pill — rgba token */
   pillBg: 'bg-accent-soft',
-  /** Shared settle duration for page track + nav pill (ms) */
+  /** Shared settle duration for page track + nav pill (ms) — legacy single-step */
   settleMs: 300,
   settleEase: 'cubic-bezier(0.25, 0.85, 0.3, 1)',
+  /** Tap jump duration: clamp(min, base + perPage * pages, max) */
+  tapDurMin: 160,
+  tapDurBase: 140,
+  tapDurPerPage: 55,
+  tapDurMax: 280,
+  /** CSS cubic-bezier control points matching settleEase */
+  tapEase: [0.25, 0.85, 0.3, 1] as const,
   /** grid gap-1 between bottom tabs */
   bottomGap: 'gap-1',
   bottomGapRem: 0.25,
 } as const
+
+/** Duration (ms) for programmatic page jump by |page delta|. */
+export function navTapDurationMs(pageDelta: number): number {
+  const pages = Math.max(1, Math.abs(pageDelta))
+  return Math.min(
+    NAV.tapDurMax,
+    Math.max(NAV.tapDurMin, NAV.tapDurBase + NAV.tapDurPerPage * pages),
+  )
+}
 
 export const SHELL_PAD = {
   /** Match Log panel density — full-bleed content width, generous padding */

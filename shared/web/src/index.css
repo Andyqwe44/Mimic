@@ -213,9 +213,10 @@ svg.lucide {
   }
 }
 
-/* Bottom-nav sliding pill — synced with PagePager via --nav-fraction */
+/* Bottom-nav sliding pill — transform driven by PagePager writeNavProgress (translate3d).
+   CSS transition only applies when not dragging; drag/tap-anim set .nav-dragging. */
 .nav-pill {
-  transition: transform 300ms cubic-bezier(0.25, 0.85, 0.3, 1);
+  transition: transform 200ms cubic-bezier(0.25, 0.85, 0.3, 1);
 }
 .nav-dragging .nav-pill {
   transition: none;

@@ -1,13 +1,12 @@
 // PrimaryNav — side rail (desktop) or bottom bar (phone). Same IA.
-import { useLayoutEffect, type ReactNode, type RefObject } from 'react'
+import { type ReactNode, type RefObject } from 'react'
 import { Monitor, Users, FileText, Settings } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Tooltip } from './Toolkit'
 import { H, NAV, RADIUS, SHELL_PAD, TEXT } from '../lib/design'
-import { PRIMARY_PAGES, pageIndex, type AppPage } from '../lib/pages'
+import { PRIMARY_PAGES, type AppPage } from '../lib/pages'
 import type { ShellMode } from '../hooks/useViewport'
 import { addLog } from '../lib/bridge'
-import { writeNavProgress } from './PagePager'
 
 const ICONS: Record<string, ReactNode> = {
   Monitor: <Monitor className={H.icon} />,
@@ -23,7 +22,7 @@ export function PrimaryNav({
   expanded = true,
   onToggleExpand,
   appVersion,
-  progressHostRef,
+  progressHostRef: _progressHostRef,
 }: {
   page: AppPage
   setPage: (p: AppPage) => void
@@ -32,7 +31,7 @@ export function PrimaryNav({
   expanded?: boolean
   onToggleExpand?: () => void
   appVersion?: string
-  /** Shared CSS-var host for sliding pill (bottom mode). */
+  /** Shared host for sliding pill (bottom mode) — PagePager writes translate3d. */
   progressHostRef?: RefObject<HTMLElement | null>
 }) {
   const { t } = useTranslation()
@@ -51,18 +50,7 @@ export function PrimaryNav({
   const isActive = (id: AppPage) =>
     page === id || (page === 'DevTools' && id === 'Settings')
 
-  // When pager is not mounted (DevTools overlay / tab click before pager paints),
-  // keep pill aligned to the discrete page index.
-  useLayoutEffect(() => {
-    if (mode !== 'bottom' || !progressHostRef?.current) return
-    const host = progressHostRef.current
-    if (host.classList.contains('nav-dragging')) return
-    writeNavProgress(host, pageIndex(page), false)
-  }, [mode, page, progressHostRef])
-
   if (mode === 'bottom') {
-    const gapRem = NAV.bottomGapRem
-    const n = PRIMARY_PAGES.length
     return (
       <nav
         aria-label={t('nav.aria')}
@@ -77,12 +65,14 @@ export function PrimaryNav({
         >
           <div
             aria-hidden
+            data-nav-pill
             className={`nav-pill pointer-events-none absolute ${NAV.pillTop} ${NAV.pillH}
-              ${RADIUS.lg} ${NAV.pillBg} ${NAV.pillRing} will-change-transform`}
+              ${RADIUS.lg} ${NAV.pillBg} ${NAV.pillRing}`}
             style={{
-              width: `calc((100% - ${(n - 1) * gapRem}rem) / ${n})`,
-              // translateX % is relative to pill width → slot pitch = width + gap
-              transform: `translateX(calc(var(--nav-fraction, ${pageIndex(page)}) * (100% + ${gapRem}rem)))`,
+              left: 0,
+              width: 0,
+              transform: 'translate3d(0,0,0)',
+              willChange: 'transform',
             }}
           />
           {items.map((it) => {

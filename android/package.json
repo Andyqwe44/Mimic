@@ -1,8 +1,8 @@
 {
     "name":  "mimic-android",
     "private":  true,
-    "version":  "0.1.39",
-    "mimicReleaseNote":  "Fix bottom-nav swipe flicker: gesture-aware page commit, pill tracks scroll 1:1, selected = pill only",
+    "version":  "0.1.40",
+    "mimicReleaseNote":  "Bottom-nav pill: translate3d 1:1 track; distance-scaled tap scroll; Release -AndroidOnly",
     "description":  "Mimic Android shell 闂?Capacitor WebView hosting shared/web",
     "scripts":  {
                     "build:web":  "npm --prefix ../shared/web run build",
