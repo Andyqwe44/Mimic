@@ -1,8 +1,8 @@
 {
     "name":  "mimic-android",
     "private":  true,
-    "version":  "0.1.60",
-    "mimicReleaseNote":  "PagePager: 1..4 axis progress logs (x=3.42 Log→Settings)",
+    "version":  "0.1.61",
+    "mimicReleaseNote":  "PagePager: slop+H before drag; tap ignores nav; no snap-jump hitch",
     "description":  "Mimic Android shell — Capacitor WebView hosting shared/web",
     "scripts":  {
                     "build:web":  "npm --prefix ../shared/web run build",

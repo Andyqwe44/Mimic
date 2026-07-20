@@ -110,17 +110,21 @@ docs/
 
 | 操作 | 机制 |
 |------|------|
-| 手指横滑 + 松手 | `overflow-x` + `scroll-snap` |
-| 底栏点选 | `scrollTo({ behavior: 'smooth' })` |
+| 手指横滑（过 slop + H 轴）+ 松手 | `overflow-x`；松手瞬间开 `scroll-snap` settle，随后关掉 |
+| 底栏点选 | `disarmSnap` → rAF → `scrollTo({ behavior: 'smooth' })` |
+| 短触 / 未过 slop | **无效** — 不 cancel nav、不武装 settle |
 
-**最后一次用户动作胜出**（`actionSeq`）：点选只 `disarmSnap` 再 `scrollTo(smooth)` 改道（不 freeze / 不 overflow 锁）；`settleArmSeq=-1` 使旧 settle 不得 commit。**同目标已在飞**（finger snap 距目标 ≤0.5 页，或已有 smooth→同页）→ `adopt-snap` / `adopt-nav`，不打断。点选落地后 snap 保持关闭；finish 钉死 slot 杀残余 fling。
+**最后一次有效用户动作胜出**：点选一律有效；手指仅在过 `NAV.pagerAxisLockPx` 且 `resolvePagerAxis===h` 后才算。点选落地后 snap 保持关闭；`hold-correct` 每个 hold 最多一次。
 
-| # | 事件 | → Page | 说明 |
-|---|------|--------|------|
-| P1 | 底栏点选 C | **C** | disarm snap → smooth→C（无硬停） |
-| P2 | 半滑松手未完 + 点 C | **C** | 同上；旧 settle 不得 commit B |
-| P3 | 手指滑到底 | nearest | 仅 `settleArmSeq===actionSeq` 可 commit |
-| P4 | A→B 松手未完 + 再点 B | **B** | adopt 原 snap（armed 或 120ms 内仍在滚），不 restart |
+| # | 当前状态 | 事件 | → | 说明 |
+|---|----------|------|---|------|
+| P1 | 任意 | 底栏点选 C | **C** | disarm → rAF → smooth→C |
+| P2 | nav→C | pointerdown 未过 slop | **仍 C** | tap-ignore；必要时 nav-resume |
+| P3 | nav→C | 横滑过 slop | finger-drag | freeze 当前 x，snap 仍关（无跳格） |
+| P4 | finger-drag | finger↑ | nearest | 仅此次 drag 可 commit |
+| P5 | idle/hold | 短触未过 slop | 不变 | 不 fling |
+| P6 | snap 动画中 | 底栏点选 C | **C** | 同 P1 |
+| P7 | hold 后漂移 | — | pin×1 | 无 hold-correct 连打 |
 
 ### 实现落点
 
@@ -129,7 +133,7 @@ docs/
 | Auth / Call native | `pc/client/src/peer_session.cpp` · `android/.../PeerSession.kt` |
 | Roster | `server/server.js` `devicesForUser`（`online` + `state`） |
 | Banner #9 | `shared/web/src/components/IncomingCallBanner.tsx` |
-| Page 导航 | `App.tsx` `session_end` → `Peers`；`onPeerSessionStart` → `Monitor`；`PagePager` P1–P4 |
+| Page 导航 | `App.tsx` `session_end` → `Peers`；`onPeerSessionStart` → `Monitor`；`PagePager` P1–P7 |
 | UI 投影 | `PeerPanel.tsx` |
 
 ## Build & release (PC + Server)

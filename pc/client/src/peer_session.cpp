@@ -53,9 +53,12 @@ PeerRole g_role = PeerRole::Idle;
 PeerSessionInfo g_session;
 std::string g_peer_device_id;
 std::string g_control_mode = "human"; // human|ai
-std::string g_transport = "none";     // lan|p2p|none
+std::string g_transport = "none";     // lan|p2p|none  (lan = TCP control + UDP media)
 std::atomic<bool> g_media_ready{false};
 std::atomic<bool> g_ice_started{false};
+std::atomic<bool> g_lan_udp_started{false};
+/** After drop-old / unrecovered loss — only send keyframes until next IDR clears. */
+std::atomic<bool> g_media_broken{false};
 
 SOCKET g_sig_sock = INVALID_SOCKET;
 std::thread g_sig_reader;
@@ -466,44 +469,74 @@ void lan_stop_unlocked();
 bool open_signaling_ws(const std::string& http_base, const std::string& token);
 void schedule_ws_reconnect();
 
+void arm_media_broken_(const char* reason) {
+    g_media_broken.store(true);
+    if (g_cb.on_need_key) g_cb.on_need_key();
+    LOG("peer", "media_broken armed (%s) → force IDR", reason ? reason : "?");
+}
+
 void lan_send_frame_sync(uint8_t type, const uint8_t* data, size_t len) {
-    // Prefer reliable LAN TCP whenever the socket is up (H.264 + control).
-    // UDP is only for true P2P when LAN is down — fragmented H.264 over UDP
-    // causes macroblock corruption on any lost fragment (same-LAN tearing).
-    std::lock_guard<std::mutex> lk(g_lan_send_mtx);
-    if (g_lan_sock == INVALID_SOCKET) {
+    // Media (H.264): UDP primary (MPC2 FEC+NACK). Control JSON: TCP primary.
+    uint8_t flags = 0;
+    if (type == 1 && len >= 12) {
+        uint32_t f = 0;
+        memcpy(&f, data + 8, 4);
+        if (f & 1u) flags = 1;
+    }
+    if (type == 1) {
         if (peer_udp_ready()) {
-            if (peer_udp_send(type, data, len) && type == 1) {
+            if (peer_udp_send(type, data, len, flags)) {
                 uint32_t n = g_udp_h264_fallback.fetch_add(1) + 1;
                 if (n <= 3 || n % 120 == 0) {
-                    LOG("peer", "H264 via UDP fallback #%u bytes=%zu udp_reasm_to=%u",
-                        n, len, peer_udp_reasm_timeouts());
+                    LOG("peer", "H264 via UDP #%u bytes=%zu nack=%u fec=%u to=%u",
+                        n, len, peer_udp_nack_sent(), peer_udp_fec_recovered(),
+                        peer_udp_reasm_timeouts());
                 }
             }
+            return;
         }
-        return;
-    }
-    uint8_t hdr[5];
-    hdr[0] = type;
-    uint32_t n = (uint32_t)len;
-    memcpy(hdr + 1, &n, 4);
-    if (!send_all(g_lan_sock, (const char*)hdr, 5)) {
-        closesocket(g_lan_sock);
-        g_lan_sock = INVALID_SOCKET;
-        g_media_ready = false;
-        g_transport = "none";
-        LOG("peer", "LAN send failed → transport=none");
-        emit_ui(R"({"type":"peer_transport","mode":"none"})");
-        return;
-    }
-    if (len) send_all(g_lan_sock, (const char*)data, (int)len);
-    if (type == 1) {
+        // Fallback TCP only when UDP not locked yet.
+        std::lock_guard<std::mutex> lk(g_lan_send_mtx);
+        if (g_lan_sock == INVALID_SOCKET) return;
+        uint8_t hdr[5];
+        hdr[0] = type;
+        uint32_t n = (uint32_t)len;
+        memcpy(hdr + 1, &n, 4);
+        if (!send_all(g_lan_sock, (const char*)hdr, 5)) {
+            closesocket(g_lan_sock);
+            g_lan_sock = INVALID_SOCKET;
+            g_media_ready = false;
+            g_transport = "none";
+            LOG("peer", "LAN send failed → transport=none");
+            emit_ui(R"({"type":"peer_transport","mode":"none"})");
+            return;
+        }
+        if (len) send_all(g_lan_sock, (const char*)data, (int)len);
         uint32_t c = g_lan_h264_sent.fetch_add(1) + 1;
         if (c <= 3 || c % 120 == 0) {
-            LOG("peer", "H264 via LAN TCP #%u bytes=%zu dropped=%u",
+            LOG("peer", "H264 via LAN TCP fallback #%u bytes=%zu dropped=%u",
                 c, len, g_lan_h264_dropped.load());
         }
+        return;
     }
+    // JSON control: TCP first, else UDP.
+    if (g_lan_sock != INVALID_SOCKET) {
+        std::lock_guard<std::mutex> lk(g_lan_send_mtx);
+        if (g_lan_sock != INVALID_SOCKET) {
+            uint8_t hdr[5];
+            hdr[0] = type;
+            uint32_t n = (uint32_t)len;
+            memcpy(hdr + 1, &n, 4);
+            if (send_all(g_lan_sock, (const char*)hdr, 5)) {
+                if (len) send_all(g_lan_sock, (const char*)data, (int)len);
+                return;
+            }
+            closesocket(g_lan_sock);
+            g_lan_sock = INVALID_SOCKET;
+            LOG("peer", "LAN TCP control send failed");
+        }
+    }
+    if (peer_udp_ready()) peer_udp_send(type, data, len, 0);
 }
 
 void lan_writer_loop() {
@@ -542,14 +575,15 @@ void lan_stop_writer() {
 
 void lan_send_frame(uint8_t type, const uint8_t* data, size_t len) {
     if (type == 1) {
-        // Drop-old single slot — encode/WGC path must not block on TCP flush.
+        // Drop-old single slot — must not block encode; dropping arms force-IDR.
         {
             std::lock_guard<std::mutex> lk(g_lan_q_mtx);
             if (!g_lan_pending_h264.empty()) {
                 uint32_t d = g_lan_h264_dropped.fetch_add(1) + 1;
                 if (d <= 3 || d % 60 == 0) {
-                    LOG("peer", "LAN H264 drop-old #%u (keep latest)", d);
+                    LOG("peer", "H264 drop-old #%u (keep latest) → force IDR", d);
                 }
+                arm_media_broken_("drop-old");
             }
             g_lan_pending_h264.assign(data, data + len);
         }
@@ -819,6 +853,95 @@ void lan_stop_unlocked() {
         g_lan_accept.detach();
     }
     g_lan_port = 0;
+}
+
+void ensure_lan_udp_media() {
+    if (g_lan_udp_started.load() || peer_udp_ready()) return;
+    bool ok = peer_udp_start_lan(
+        [](uint8_t type, const std::vector<uint8_t>& payload) {
+            handle_lan_payload(type, payload);
+        },
+        []() {
+            // Keep transport=lan when TCP already up; media is now UDP.
+            if (g_transport == "none") g_transport = "lan";
+            g_media_ready = true;
+            emit_ui(R"({"type":"peer_transport","mode":"lan"})");
+            LOG("peer", "LAN UDP media ready (MPC2)");
+            if (g_cb.on_need_key) g_cb.on_need_key();
+        },
+        [](uint8_t type) {
+            if (type == 1) {
+                LOG("peer", "UDP reasm fail type=1 → need_key");
+                arm_media_broken_("reasm-fail");
+            }
+        });
+    if (ok) g_lan_udp_started = true;
+    else LOG_WARN("peer", "LAN UDP start failed");
+}
+
+std::string build_lan_offer_json() {
+    ensure_lan_udp_media();
+    g_lan_ips = collect_lan_ips();
+    uint16_t udp = peer_udp_local_port();
+    auto cands = peer_udp_local_cands();
+    char buf[128];
+    snprintf(buf, sizeof(buf),
+             "{\"kind\":\"lan_offer\",\"port\":%u,\"udpPort\":%u,\"ips\":[",
+             (unsigned)g_lan_port, (unsigned)udp);
+    std::string payload = buf;
+    for (size_t i = 0; i < g_lan_ips.size(); ++i) {
+        if (i) payload += ",";
+        payload += "\"" + g_lan_ips[i] + "\"";
+    }
+    payload += "],\"udpCands\":";
+    payload += peer_udp_cands_json(cands);
+    payload += ",\"media\":\"mpc2\"}";
+    return payload;
+}
+
+void apply_lan_udp_from_offer(const std::string& payload) {
+    ensure_lan_udp_media();
+    std::vector<PeerUdpCand> rem;
+    size_t a = payload.find("\"udpCands\":");
+    if (a != std::string::npos) {
+        a = payload.find('[', a);
+        if (a != std::string::npos) {
+            size_t e = payload.find(']', a);
+            if (e != std::string::npos)
+                peer_udp_parse_cands_json(payload.substr(a, e - a + 1), rem);
+        }
+    }
+    if (rem.empty()) {
+        // Fallback: peer ips + udpPort
+        uint16_t udp_port = 0;
+        size_t up = payload.find("\"udpPort\":");
+        if (up != std::string::npos) udp_port = (uint16_t)atoi(payload.c_str() + up + 10);
+        if (udp_port) {
+            size_t ia = payload.find("\"ips\":[");
+            if (ia != std::string::npos) {
+                ia += 7;
+                size_t ie = payload.find(']', ia);
+                std::string arr = payload.substr(ia, ie - ia);
+                size_t i = 0;
+                while (i < arr.size()) {
+                    size_t q1 = arr.find('"', i);
+                    if (q1 == std::string::npos) break;
+                    size_t q2 = arr.find('"', q1 + 1);
+                    if (q2 == std::string::npos) break;
+                    PeerUdpCand c;
+                    c.ip = arr.substr(q1 + 1, q2 - q1 - 1);
+                    c.port = udp_port;
+                    c.typ = "host";
+                    if (!c.ip.empty()) rem.push_back(c);
+                    i = q2 + 1;
+                }
+            }
+        }
+    }
+    if (!rem.empty()) {
+        peer_udp_set_remote_cands(rem);
+        LOG("peer", "LAN UDP punch toward %zu cands", rem.size());
+    }
 }
 
 void signal_send(const std::string& to_device, const std::string& payload_json) {

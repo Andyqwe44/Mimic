@@ -500,7 +500,7 @@ locales/: en.json, zh-CN.json, zh-TW.json
 
 **DevMode overlays（摘要 · 铁律 5）**：`display = demoOverlay ?? SSOT`。Demo（Agent/更新弹窗/自检）只写 overlay，禁止写真相。关 Dev = 清 overlay → 关能力（dump/Test Target/真自检）→ `get_agent_status` 重检。假更新弹窗纯前端，不调下载 API。细则 → `monitor-web.mdc`；史 → `CLAUDE.old.md`。
 
-**PagePager（摘要）**：横滑 = 原生 `overflow-x`+`scroll-snap`；底栏点选 = `scrollTo({behavior:'smooth'})`；冲突以 `actionSeq` 最后动作胜出（`settleArmSeq` / `holdIdx` / `hardStopScroll`）。状态表 → 根 [README.md](README.md)；史 → `CLAUDE.old.md`（2026-07-20）。
+**PagePager（摘要）**：横滑仅过 slop+H 轴有效；短触忽略；底栏点选 = disarm→rAF→`scrollTo(smooth)`；冲突以有效动作胜出（`pending|dragging`）。状态表 → 根 [README.md](README.md) P1–P7；史 → `CLAUDE.old.md`。
 
 ---
 

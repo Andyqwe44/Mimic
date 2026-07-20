@@ -1,5 +1,5 @@
 /**
- * peer_udp.cpp — STUN Binding client + UDP hole-punch + fragmented media.
+ * peer_udp.cpp — STUN Binding + UDP hole-punch + MPC2 (FEC + NACK).
  */
 #include "peer_udp.h"
 #include "../../logger/logger.h"
@@ -11,6 +11,7 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstring>
 #include <mutex>
@@ -22,16 +23,27 @@
 
 namespace {
 
-constexpr uint32_t kMagic = 0x3143504Du; // "MPC1" LE
+constexpr uint32_t kMagic = 0x3243504Du; // "MPC2" LE
+constexpr uint8_t kTypeH264 = 1;
+constexpr uint8_t kTypeJson = 2;
+constexpr uint8_t kTypeNack = 3;
+constexpr uint8_t kTypeFec = 4;
 constexpr uint8_t kTypePunch = 0xFF;
+constexpr uint8_t kFlagKey = 0x01;
+constexpr uint8_t kFlagHasFec = 0x02;
+constexpr size_t kHdr = 16;
 constexpr size_t kMaxFrag = 1100;
+constexpr int kFecK = 4;
+constexpr DWORD kReasmTimeoutMs = 80;
+constexpr DWORD kNackAfterMs = 20;
+constexpr int kMaxNackPerFrag = 2;
+constexpr size_t kSendRing = 32;
 constexpr uint32_t kStunMagic = 0x2112A442u;
-/** Drop incomplete UDP reassembly after this many ms (lost fragment). */
-constexpr DWORD kReasmTimeoutMs = 1200;
 
 SOCKET g_sock = INVALID_SOCKET;
 std::thread g_reader;
 std::thread g_puncher;
+std::thread g_reasm_timer;
 std::atomic<bool> g_run{false};
 std::mutex g_mtx;
 sockaddr_in g_peer = {};
@@ -46,33 +58,34 @@ PeerUdpReasmFailFn g_on_reasm_fail;
 std::atomic<uint32_t> g_msg_id{1};
 std::atomic<uint32_t> g_reasm_timeouts{0};
 std::atomic<uint32_t> g_udp_send_ok{0};
+std::atomic<uint32_t> g_nack_sent{0};
+std::atomic<uint32_t> g_fec_recovered{0};
 
 struct Reasm {
     uint16_t cnt = 0;
     uint8_t type = 0;
+    uint8_t flags = 0;
     std::vector<std::vector<uint8_t>> parts;
     std::vector<uint8_t> got;
+    std::vector<std::vector<uint8_t>> parity; // per FEC group
+    std::vector<uint8_t> parity_got;
     DWORD started_ms = 0;
+    bool nack_sent = false;
 };
-std::unordered_map<uint32_t, Reasm> g_reasm;
 
-void purge_stale_reasm(DWORD now) {
-    for (auto it = g_reasm.begin(); it != g_reasm.end(); ) {
-        if (now - it->second.started_ms > kReasmTimeoutMs) {
-            uint8_t dropped_type = it->second.type;
-            uint32_t n = g_reasm_timeouts.fetch_add(1) + 1;
-            if (n <= 5 || n % 30 == 0) {
-                LOG_WARN("peer", "UDP reasm timeout mid=%u type=%u frags=%u (total_timeouts=%u)",
-                         (unsigned)it->first, (unsigned)dropped_type,
-                         (unsigned)it->second.cnt, n);
-            }
-            it = g_reasm.erase(it);
-            if (g_on_reasm_fail) g_on_reasm_fail(dropped_type);
-        } else {
-            ++it;
-        }
-    }
-}
+struct SendFrame {
+    uint32_t frame_id = 0;
+    uint8_t type = 0;
+    uint8_t flags = 0;
+    uint16_t cnt = 0;
+    std::vector<std::vector<uint8_t>> parts;
+    std::vector<std::vector<uint8_t>> parity;
+    std::vector<uint8_t> nack_count; // per data frag
+};
+
+std::unordered_map<uint32_t, Reasm> g_reasm;
+std::vector<SendFrame> g_send_ring;
+size_t g_send_ring_pos = 0;
 
 bool send_to(const sockaddr_in& to, const uint8_t* data, size_t len) {
     if (g_sock == INVALID_SOCKET) return false;
@@ -87,6 +100,18 @@ sockaddr_in make_addr(const std::string& ip, uint16_t port) {
     return a;
 }
 
+void write_hdr(uint8_t* pkt, uint32_t frame_id, uint16_t idx, uint16_t cnt,
+               uint8_t type, uint8_t flags, uint16_t fec_g) {
+    uint32_t magic = kMagic;
+    memcpy(pkt, &magic, 4);
+    memcpy(pkt + 4, &frame_id, 4);
+    memcpy(pkt + 8, &idx, 2);
+    memcpy(pkt + 10, &cnt, 2);
+    pkt[12] = type;
+    pkt[13] = flags;
+    memcpy(pkt + 14, &fec_g, 2);
+}
+
 void lock_peer(const sockaddr_in& from) {
     bool was = g_peer_set.exchange(true);
     {
@@ -95,26 +120,184 @@ void lock_peer(const sockaddr_in& from) {
     }
     if (!was) {
         g_ready = true;
-        LOG("peer", "UDP P2P peer locked");
+        LOG("peer", "UDP peer locked (MPC2)");
         if (g_on_ready) g_on_ready();
     }
 }
 
 void send_punch_one(const PeerUdpCand& c) {
     if (c.ip.empty() || !c.port) return;
-    uint8_t pkt[16];
-    uint32_t magic = kMagic;
-    memcpy(pkt, &magic, 4);
-    uint32_t mid = 0;
-    memcpy(pkt + 4, &mid, 4);
-    uint16_t z = 0;
-    memcpy(pkt + 8, &z, 2);
-    memcpy(pkt + 10, &z, 2);
-    pkt[12] = kTypePunch;
-    pkt[13] = 0;
-    pkt[14] = 'P';
-    pkt[15] = 'K';
-    send_to(make_addr(c.ip, c.port), pkt, 16);
+    uint8_t pkt[18];
+    write_hdr(pkt, 0, 0, 0, kTypePunch, 0, 0);
+    pkt[16] = 'P';
+    pkt[17] = 'K';
+    send_to(make_addr(c.ip, c.port), pkt, 18);
+}
+
+bool try_fec_recover(Reasm& r) {
+    if (r.cnt == 0) return false;
+    int groups = (r.cnt + kFecK - 1) / kFecK;
+    bool any = false;
+    for (int g = 0; g < groups; ++g) {
+        if (g >= (int)r.parity_got.size() || !r.parity_got[g]) continue;
+        int missing = -1;
+        int miss_count = 0;
+        size_t max_len = r.parity[g].size();
+        for (int i = 0; i < kFecK; ++i) {
+            int idx = g * kFecK + i;
+            if (idx >= (int)r.cnt) break;
+            if (!r.got[idx]) {
+                missing = idx;
+                miss_count++;
+            } else if (r.parts[idx].size() > max_len) {
+                max_len = r.parts[idx].size();
+            }
+        }
+        if (miss_count != 1 || missing < 0) continue;
+        std::vector<uint8_t> recovered = r.parity[g];
+        if (recovered.size() < max_len) recovered.resize(max_len, 0);
+        for (int i = 0; i < kFecK; ++i) {
+            int idx = g * kFecK + i;
+            if (idx >= (int)r.cnt || idx == missing) continue;
+            const auto& p = r.parts[idx];
+            for (size_t b = 0; b < recovered.size(); ++b) {
+                uint8_t v = (b < p.size()) ? p[b] : 0;
+                recovered[b] ^= v;
+            }
+        }
+        // Trim trailing zeros only if other frags suggest shorter — keep parity length
+        // Use max of known sibling lengths as hint
+        size_t use_len = recovered.size();
+        for (int i = 0; i < kFecK; ++i) {
+            int idx = g * kFecK + i;
+            if (idx >= (int)r.cnt || idx == missing) continue;
+            if (r.parts[idx].size() > 0 && r.parts[idx].size() < use_len)
+                use_len = std::max(use_len, r.parts[idx].size()); // keep full XOR size
+        }
+        r.parts[missing] = std::move(recovered);
+        r.got[missing] = 1;
+        any = true;
+        g_fec_recovered.fetch_add(1);
+    }
+    return any;
+}
+
+bool reasm_complete(const Reasm& r) {
+    if (r.got.empty()) return false;
+    for (uint8_t g : r.got) if (!g) return false;
+    return true;
+}
+
+void emit_complete(uint32_t mid, Reasm& r) {
+    size_t total = 0;
+    for (auto& p : r.parts) total += p.size();
+    std::vector<uint8_t> body;
+    body.reserve(total);
+    for (auto& p : r.parts) body.insert(body.end(), p.begin(), p.end());
+    uint8_t t = r.type;
+    g_reasm.erase(mid);
+    if (g_on_payload) g_on_payload(t, body);
+}
+
+void send_nack_for(uint32_t frame_id, const Reasm& r) {
+    if (!g_ready.load()) return;
+    uint32_t bitmap = 0;
+    for (size_t i = 0; i < r.got.size() && i < 32; ++i) {
+        if (!r.got[i]) bitmap |= (1u << i);
+    }
+    if (bitmap == 0) return;
+    uint8_t payload[8];
+    memcpy(payload, &frame_id, 4);
+    memcpy(payload + 4, &bitmap, 4);
+    sockaddr_in peer;
+    {
+        std::lock_guard<std::mutex> lk(g_mtx);
+        peer = g_peer;
+    }
+    uint8_t pkt[kHdr + 8];
+    write_hdr(pkt, frame_id, 0, 1, kTypeNack, 0, 0);
+    memcpy(pkt + kHdr, payload, 8);
+    if (send_to(peer, pkt, kHdr + 8)) {
+        uint32_t n = g_nack_sent.fetch_add(1) + 1;
+        if (n <= 5 || n % 50 == 0)
+            LOG("peer", "UDP NACK frame=%u bitmap=0x%08x #%u", frame_id, bitmap, n);
+    }
+}
+
+void retransmit_nacked(uint32_t frame_id, uint32_t bitmap) {
+    std::lock_guard<std::mutex> lk(g_mtx);
+    SendFrame* sf = nullptr;
+    for (auto& f : g_send_ring) {
+        if (f.frame_id == frame_id) { sf = &f; break; }
+    }
+    if (!sf || sf->parts.empty()) return;
+    sockaddr_in peer = g_peer;
+    for (uint16_t i = 0; i < sf->cnt && i < 32; ++i) {
+        if (!(bitmap & (1u << i))) continue;
+        if (i >= sf->nack_count.size()) continue;
+        if (sf->nack_count[i] >= kMaxNackPerFrag) continue;
+        sf->nack_count[i]++;
+        const auto& chunk = sf->parts[i];
+        uint16_t fec_g = (uint16_t)(i / kFecK);
+        std::vector<uint8_t> pkt(kHdr + chunk.size());
+        write_hdr(pkt.data(), frame_id, i, sf->cnt, sf->type, sf->flags, fec_g);
+        if (!chunk.empty()) memcpy(pkt.data() + kHdr, chunk.data(), chunk.size());
+        send_to(peer, pkt.data(), pkt.size());
+    }
+}
+
+void purge_and_nack(DWORD now) {
+    std::vector<std::pair<uint8_t, std::vector<uint8_t>>> completed;
+    std::vector<std::pair<uint32_t, uint8_t>> failed;
+    std::vector<std::pair<uint32_t, Reasm>> nack_snap;
+    {
+        std::lock_guard<std::mutex> lk(g_mtx);
+        for (auto it = g_reasm.begin(); it != g_reasm.end(); ) {
+            Reasm& r = it->second;
+            DWORD age = now - r.started_ms;
+            try_fec_recover(r);
+            if (reasm_complete(r)) {
+                size_t total = 0;
+                for (auto& p : r.parts) total += p.size();
+                std::vector<uint8_t> body;
+                body.reserve(total);
+                for (auto& p : r.parts) body.insert(body.end(), p.begin(), p.end());
+                completed.push_back({r.type, std::move(body)});
+                it = g_reasm.erase(it);
+                continue;
+            }
+            if (age > kReasmTimeoutMs) {
+                failed.push_back({it->first, r.type});
+                it = g_reasm.erase(it);
+                continue;
+            }
+            if (!r.nack_sent && age >= kNackAfterMs && (r.type == kTypeH264 || r.type == kTypeJson)) {
+                r.nack_sent = true;
+                nack_snap.push_back({it->first, r});
+            }
+            ++it;
+        }
+    }
+    for (auto& c : completed) {
+        if (g_on_payload) g_on_payload(c.first, c.second);
+    }
+    for (auto& ns : nack_snap) send_nack_for(ns.first, ns.second);
+    for (auto& f : failed) {
+        uint32_t n = g_reasm_timeouts.fetch_add(1) + 1;
+        if (n <= 5 || n % 30 == 0) {
+            LOG_WARN("peer", "UDP reasm timeout frame=%u type=%u (total=%u)",
+                     f.first, (unsigned)f.second, n);
+        }
+        if (g_on_reasm_fail) g_on_reasm_fail(f.second);
+    }
+}
+
+void reasm_timer_loop() {
+    while (g_run.load()) {
+        Sleep(10);
+        if (!g_run.load()) break;
+        purge_and_nack(GetTickCount());
+    }
 }
 
 bool stun_binding_on_sock(SOCKET s, const std::string& host, uint16_t port, std::string& out_ip, uint16_t& out_port) {
@@ -143,12 +326,10 @@ bool stun_binding_on_sock(SOCKET s, const std::string& host, uint16_t port, std:
 
     if (sendto(s, (const char*)req, 20, 0, (sockaddr*)&dest, sizeof(dest)) != 20) return false;
 
-    // Temporarily block for STUN reply (reader not started yet).
     uint8_t resp[128];
     sockaddr_in from = {};
     int flen = sizeof(from);
     int n = recvfrom(s, (char*)resp, sizeof(resp), 0, (sockaddr*)&from, &flen);
-    // restore non-blocking-ish long timeout for reader
     DWORD tv_long = 500;
     setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv_long, sizeof(tv_long));
     if (n < 28) return false;
@@ -182,7 +363,7 @@ bool stun_binding_on_sock(SOCKET s, const std::string& host, uint16_t port, std:
 }
 
 void handle_datagram(const uint8_t* data, int n, const sockaddr_in& from) {
-    if (n < 14) return;
+    if (n < (int)kHdr) return;
     uint32_t magic = 0;
     memcpy(&magic, data, 4);
     if (magic != kMagic) return;
@@ -192,12 +373,14 @@ void handle_datagram(const uint8_t* data, int n, const sockaddr_in& from) {
     memcpy(&idx, data + 8, 2);
     memcpy(&cnt, data + 10, 2);
     uint8_t type = data[12];
-    const uint8_t* payload = data + 14;
-    int plen = n - 14;
+    uint8_t flags = data[13];
+    uint16_t fec_g = 0;
+    memcpy(&fec_g, data + 14, 2);
+    const uint8_t* payload = data + kHdr;
+    int plen = n - (int)kHdr;
 
     if (type == kTypePunch) {
         lock_peer(from);
-        // Reply punch so initiator locks us too.
         PeerUdpCand c;
         char ip[64];
         inet_ntop(AF_INET, &from.sin_addr, ip, sizeof(ip));
@@ -208,36 +391,75 @@ void handle_datagram(const uint8_t* data, int n, const sockaddr_in& from) {
         return;
     }
 
-    lock_peer(from);
-    if (cnt == 0) return;
-    if (idx >= cnt) return;
+    if (type == kTypeNack) {
+        lock_peer(from);
+        if (plen >= 8) {
+            uint32_t fid = 0, bitmap = 0;
+            memcpy(&fid, payload, 4);
+            memcpy(&bitmap, payload + 4, 4);
+            retransmit_nacked(fid, bitmap);
+        }
+        return;
+    }
 
+    lock_peer(from);
+
+    if (type == kTypeFec) {
+        std::lock_guard<std::mutex> lk(g_mtx);
+        auto it = g_reasm.find(mid);
+        if (it == g_reasm.end()) return;
+        Reasm& r = it->second;
+        int groups = (r.cnt + kFecK - 1) / kFecK;
+        if (fec_g >= groups) return;
+        if ((int)r.parity.size() < groups) {
+            r.parity.resize(groups);
+            r.parity_got.assign(groups, 0);
+        }
+        r.parity[fec_g].assign(payload, payload + plen);
+        r.parity_got[fec_g] = 1;
+        try_fec_recover(r);
+        if (reasm_complete(r)) {
+            size_t total = 0;
+            for (auto& p : r.parts) total += p.size();
+            std::vector<uint8_t> body;
+            body.reserve(total);
+            for (auto& p : r.parts) body.insert(body.end(), p.begin(), p.end());
+            uint8_t t = r.type;
+            g_reasm.erase(mid);
+            if (g_on_payload) g_on_payload(t, body);
+        }
+        return;
+    }
+
+    if (cnt == 0 || idx >= cnt) return;
+    if (type != kTypeH264 && type != kTypeJson) return;
+
+    bool complete = false;
     uint8_t t = 0;
     std::vector<uint8_t> body;
-    bool complete = false;
     {
         std::lock_guard<std::mutex> lk(g_mtx);
         DWORD now = GetTickCount();
-        purge_stale_reasm(now);
         auto& r = g_reasm[mid];
         if (r.parts.empty()) {
             r.cnt = cnt;
             r.type = type;
+            r.flags = flags;
             r.parts.resize(cnt);
             r.got.assign(cnt, 0);
+            int groups = (cnt + kFecK - 1) / kFecK;
+            r.parity.resize(groups);
+            r.parity_got.assign(groups, 0);
             r.started_ms = now;
         }
         if (idx < r.parts.size()) {
             r.parts[idx].assign(payload, payload + plen);
             r.got[idx] = 1;
         }
-        bool done = true;
+        try_fec_recover(r);
+        if (!reasm_complete(r)) return;
         size_t total = 0;
-        for (size_t i = 0; i < r.got.size(); ++i) {
-            if (!r.got[i]) { done = false; break; }
-            total += r.parts[i].size();
-        }
-        if (!done) return;
+        for (auto& p : r.parts) total += p.size();
         body.reserve(total);
         for (auto& p : r.parts) body.insert(body.end(), p.begin(), p.end());
         t = r.type;
@@ -273,11 +495,30 @@ void puncher_loop() {
     }
 }
 
-} // namespace
+std::vector<PeerUdpCand> collect_host_cands(uint16_t port) {
+    std::vector<PeerUdpCand> cands;
+    char hostname[256] = {};
+    gethostname(hostname, sizeof(hostname));
+    addrinfo hints = {}, *res = nullptr;
+    hints.ai_family = AF_INET;
+    if (getaddrinfo(hostname, nullptr, &hints, &res) == 0) {
+        for (addrinfo* p = res; p; p = p->ai_next) {
+            char ip[64];
+            inet_ntop(AF_INET, &((sockaddr_in*)p->ai_addr)->sin_addr, ip, sizeof(ip));
+            if (strncmp(ip, "127.", 4) == 0) continue;
+            PeerUdpCand c;
+            c.ip = ip;
+            c.port = port;
+            c.typ = "host";
+            cands.push_back(c);
+        }
+        freeaddrinfo(res);
+    }
+    return cands;
+}
 
-bool peer_udp_start(const std::string& stun_host, uint16_t stun_port,
-                    PeerUdpPayloadFn on_payload, PeerUdpReadyFn on_ready,
-                    PeerUdpReasmFailFn on_reasm_fail) {
+bool start_common(PeerUdpPayloadFn on_payload, PeerUdpReadyFn on_ready,
+                  PeerUdpReasmFailFn on_reasm_fail, const std::string& stun_host, uint16_t stun_port) {
     peer_udp_stop();
     g_on_payload = std::move(on_payload);
     g_on_ready = std::move(on_ready);
@@ -297,37 +538,21 @@ bool peer_udp_start(const std::string& stun_host, uint16_t stun_port,
     getsockname(g_sock, (sockaddr*)&local, &namelen);
     g_local_port = ntohs(local.sin_port);
 
-    std::vector<PeerUdpCand> cands;
-    // Host candidates from local adapters (best-effort via gethostname).
-    char hostname[256] = {};
-    gethostname(hostname, sizeof(hostname));
-    addrinfo hints = {}, *res = nullptr;
-    hints.ai_family = AF_INET;
-    if (getaddrinfo(hostname, nullptr, &hints, &res) == 0) {
-        for (addrinfo* p = res; p; p = p->ai_next) {
-            char ip[64];
-            inet_ntop(AF_INET, &((sockaddr_in*)p->ai_addr)->sin_addr, ip, sizeof(ip));
-            if (strncmp(ip, "127.", 4) == 0) continue;
-            PeerUdpCand c;
-            c.ip = ip;
-            c.port = g_local_port;
-            c.typ = "host";
-            cands.push_back(c);
-        }
-        freeaddrinfo(res);
-    }
+    std::vector<PeerUdpCand> cands = collect_host_cands(g_local_port);
 
-    std::string sip;
-    uint16_t sport = 0;
-    if (!stun_host.empty() && stun_binding_on_sock(g_sock, stun_host, stun_port, sip, sport)) {
-        PeerUdpCand c;
-        c.ip = sip;
-        c.port = sport;
-        c.typ = "srflx";
-        cands.push_back(c);
-        LOG("peer", "STUN srflx %s:%u", sip.c_str(), (unsigned)sport);
-    } else {
-        LOG_WARN("peer", "STUN binding failed host=%s:%u", stun_host.c_str(), (unsigned)stun_port);
+    if (!stun_host.empty()) {
+        std::string sip;
+        uint16_t sport = 0;
+        if (stun_binding_on_sock(g_sock, stun_host, stun_port, sip, sport)) {
+            PeerUdpCand c;
+            c.ip = sip;
+            c.port = sport;
+            c.typ = "srflx";
+            cands.push_back(c);
+            LOG("peer", "STUN srflx %s:%u", sip.c_str(), (unsigned)sport);
+        } else {
+            LOG_WARN("peer", "STUN binding failed host=%s:%u", stun_host.c_str(), (unsigned)stun_port);
+        }
     }
 
     {
@@ -335,14 +560,33 @@ bool peer_udp_start(const std::string& stun_host, uint16_t stun_port,
         g_local_cands = cands;
         g_remote_cands.clear();
         g_reasm.clear();
+        g_send_ring.clear();
+        g_send_ring.resize(kSendRing);
+        g_send_ring_pos = 0;
         g_peer_set = false;
         g_ready = false;
         memset(&g_peer, 0, sizeof(g_peer));
     }
     g_run = true;
     g_reader = std::thread(reader_loop);
-    LOG("peer", "UDP media listen port=%u cands=%zu", (unsigned)g_local_port, cands.size());
-    return !cands.empty() || g_local_port != 0;
+    g_reasm_timer = std::thread(reasm_timer_loop);
+    LOG("peer", "UDP MPC2 listen port=%u cands=%zu", (unsigned)g_local_port, cands.size());
+    return g_local_port != 0;
+}
+
+} // namespace
+
+bool peer_udp_start(const std::string& stun_host, uint16_t stun_port,
+                    PeerUdpPayloadFn on_payload, PeerUdpReadyFn on_ready,
+                    PeerUdpReasmFailFn on_reasm_fail) {
+    return start_common(std::move(on_payload), std::move(on_ready), std::move(on_reasm_fail),
+                        stun_host, stun_port);
+}
+
+bool peer_udp_start_lan(PeerUdpPayloadFn on_payload, PeerUdpReadyFn on_ready,
+                        PeerUdpReasmFailFn on_reasm_fail) {
+    return start_common(std::move(on_payload), std::move(on_ready), std::move(on_reasm_fail),
+                        "", 0);
 }
 
 void peer_udp_stop() {
@@ -357,6 +601,10 @@ void peer_udp_stop() {
         if (g_reader.get_id() != std::this_thread::get_id()) g_reader.join();
         else g_reader.detach();
     }
+    if (g_reasm_timer.joinable()) {
+        if (g_reasm_timer.get_id() != std::this_thread::get_id()) g_reasm_timer.join();
+        else g_reasm_timer.detach();
+    }
     if (g_puncher.joinable()) {
         if (g_puncher.get_id() != std::this_thread::get_id()) g_puncher.join();
         else g_puncher.detach();
@@ -365,6 +613,7 @@ void peer_udp_stop() {
     g_local_cands.clear();
     g_remote_cands.clear();
     g_reasm.clear();
+    g_send_ring.clear();
     g_local_port = 0;
     g_on_payload = nullptr;
     g_on_ready = nullptr;
@@ -385,26 +634,14 @@ void peer_udp_set_remote_cands(const std::vector<PeerUdpCand>& cands) {
         g_remote_cands = cands;
     }
     if (g_puncher.joinable()) {
-        // restart puncher
-        g_run = true;
-    }
-    if (g_puncher.joinable()) {
-        // join old if finished
-        if (g_ready.load()) return;
-    }
-    // Always spawn fresh punch bursts
-    if (g_puncher.joinable()) {
         try {
-            if (g_puncher.joinable() && g_puncher.get_id() != std::this_thread::get_id()) {
-                // previous may still be running — detach and start new
-                g_puncher.detach();
-            }
+            if (g_puncher.get_id() != std::this_thread::get_id()) g_puncher.detach();
         } catch (...) {}
     }
     g_puncher = std::thread(puncher_loop);
 }
 
-bool peer_udp_send(uint8_t type, const uint8_t* data, size_t len) {
+bool peer_udp_send(uint8_t type, const uint8_t* data, size_t len, uint8_t flags) {
     if (!g_ready.load() || g_sock == INVALID_SOCKET) return false;
     sockaddr_in peer;
     {
@@ -414,28 +651,75 @@ bool peer_udp_send(uint8_t type, const uint8_t* data, size_t len) {
     uint32_t mid = g_msg_id.fetch_add(1);
     uint16_t cnt = (uint16_t)((len + kMaxFrag - 1) / kMaxFrag);
     if (cnt == 0) cnt = 1;
+    if (cnt > 32) {
+        // Cap: oversized frames skip FEC grouping beyond bitmap; still send all frags
+    }
+    bool use_fec = (type == kTypeH264 || type == kTypeJson) && cnt > 1;
+    if (use_fec) flags = (uint8_t)(flags | kFlagHasFec);
+
+    SendFrame sf;
+    sf.frame_id = mid;
+    sf.type = type;
+    sf.flags = flags;
+    sf.cnt = cnt;
+    sf.parts.resize(cnt);
+    sf.nack_count.assign(cnt, 0);
+    int groups = (cnt + kFecK - 1) / kFecK;
+    sf.parity.resize(groups);
+
     for (uint16_t i = 0; i < cnt; ++i) {
         size_t off = (size_t)i * kMaxFrag;
         size_t chunk = (off >= len) ? 0 : (len - off < kMaxFrag ? len - off : kMaxFrag);
-        std::vector<uint8_t> pkt(14 + chunk);
-        uint32_t magic = kMagic;
-        memcpy(pkt.data(), &magic, 4);
-        memcpy(pkt.data() + 4, &mid, 4);
-        memcpy(pkt.data() + 8, &i, 2);
-        memcpy(pkt.data() + 10, &cnt, 2);
-        pkt[12] = type;
-        pkt[13] = 0;
-        if (chunk) memcpy(pkt.data() + 14, data + off, chunk);
+        sf.parts[i].assign(data + off, data + off + chunk);
+        uint16_t fec_g = (uint16_t)(i / kFecK);
+        std::vector<uint8_t> pkt(kHdr + chunk);
+        write_hdr(pkt.data(), mid, i, cnt, type, flags, fec_g);
+        if (chunk) memcpy(pkt.data() + kHdr, data + off, chunk);
         if (!send_to(peer, pkt.data(), pkt.size())) return false;
     }
+
+    if (use_fec) {
+        for (int g = 0; g < groups; ++g) {
+            size_t max_len = 0;
+            for (int i = 0; i < kFecK; ++i) {
+                int idx = g * kFecK + i;
+                if (idx >= (int)cnt) break;
+                if (sf.parts[idx].size() > max_len) max_len = sf.parts[idx].size();
+            }
+            std::vector<uint8_t> parity(max_len, 0);
+            for (int i = 0; i < kFecK; ++i) {
+                int idx = g * kFecK + i;
+                if (idx >= (int)cnt) break;
+                const auto& p = sf.parts[idx];
+                for (size_t b = 0; b < max_len; ++b) {
+                    uint8_t v = (b < p.size()) ? p[b] : 0;
+                    parity[b] ^= v;
+                }
+            }
+            sf.parity[g] = parity;
+            std::vector<uint8_t> pkt(kHdr + parity.size());
+            write_hdr(pkt.data(), mid, 0, cnt, kTypeFec, flags, (uint16_t)g);
+            if (!parity.empty()) memcpy(pkt.data() + kHdr, parity.data(), parity.size());
+            if (!send_to(peer, pkt.data(), pkt.size())) return false;
+        }
+    }
+
+    {
+        std::lock_guard<std::mutex> lk(g_mtx);
+        g_send_ring[g_send_ring_pos % kSendRing] = std::move(sf);
+        g_send_ring_pos++;
+    }
+
     uint32_t n = g_udp_send_ok.fetch_add(1) + 1;
     if (type == 1 && (n <= 3 || n % 120 == 0)) {
-        LOG("peer", "UDP H264 send #%u bytes=%zu frags=%u", n, len, (unsigned)cnt);
+        LOG("peer", "UDP H264 send #%u bytes=%zu frags=%u fec=%d", n, len, (unsigned)cnt, (int)use_fec);
     }
     return true;
 }
 
 uint32_t peer_udp_reasm_timeouts() { return g_reasm_timeouts.load(); }
+uint32_t peer_udp_nack_sent() { return g_nack_sent.load(); }
+uint32_t peer_udp_fec_recovered() { return g_fec_recovered.load(); }
 
 std::string peer_udp_cands_json(const std::vector<PeerUdpCand>& cands) {
     std::string s = "[";
