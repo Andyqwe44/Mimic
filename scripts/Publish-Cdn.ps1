@@ -110,11 +110,25 @@ if ($doAndroid) {
         Write-Step 'pack MimicAndroid (missing local tree)'
         & "$PSScriptRoot\Pack-MimicAndroid.ps1"
     }
-    Write-Step 'scp android tree'
-    ssh -o BatchMode=yes $SshHost "cmd /c if exist C:\mimic\cdn\android rd /s /q C:\mimic\cdn\android & mkdir C:\mimic\cdn\android"
-    scp -r "$androidDir\*" "${SshHost}:C:/mimic/cdn/android/"
+    $ajLocal = Get-Content -Raw (Join-Path $androidDir 'version.json') | ConvertFrom-Json
+    $androidApp = [string]$ajLocal.app
+    $setupName = [string]$ajLocal.setup_apk
+    $clientName = [string]$ajLocal.client_apk
+    if (-not $setupName) { $setupName = "MimicAndroid_Setup_v$androidApp.apk" }
+    if (-not $clientName) { $clientName = "MimicClient_Android_v$androidApp.apk" }
+    # Only current version — release\MimicAndroid accumulates old APKs; scp -r * hangs for minutes.
+    $androidFiles = @(
+        (Join-Path $androidDir 'version.json'),
+        (Join-Path $androidDir 'INSTALL.txt'),
+        (Join-Path $androidDir $setupName),
+        (Join-Path $androidDir $clientName)
+    ) | Where-Object { Test-Path $_ }
+    if ($androidFiles.Count -lt 2) { throw "missing current Android artifacts in $androidDir" }
+    Write-Step "scp android v$androidApp ($($androidFiles.Count) files)"
+    ssh -o BatchMode=yes $SshHost "cmd /c if not exist C:\mimic\cdn\android mkdir C:\mimic\cdn\android"
+    scp @androidFiles "${SshHost}:C:/mimic/cdn/android/"
     if ($LASTEXITCODE) { throw 'scp android failed' }
-    $androidZip = Join-Path $root "release\MimicAndroid_Setup_v$((Get-Content -Raw (Join-Path $androidDir 'version.json') | ConvertFrom-Json).app).zip"
+    $androidZip = Join-Path $root "release\MimicAndroid_Setup_v$androidApp.zip"
     if (Test-Path $androidZip) {
         scp $androidZip "${SshHost}:C:/mimic/cdn/android/"
     }

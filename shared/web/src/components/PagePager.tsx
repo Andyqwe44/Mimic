@@ -1,5 +1,6 @@
 // Paged horizontal track — native overflow-x + CSS scroll-snap (same compositor path as vertical).
-// Finger drag is browser scrolling (60/120fps). JS only syncs the nav pill + commits page index.
+// Finger drag is browser scrolling (60/120fps). Nav tap uses native smooth scroll (not rAF scrollLeft).
+// JS only syncs the nav pill + commits page index from finger settles.
 import {
   Children,
   useEffect,
@@ -77,24 +78,20 @@ function clampIndex(i: number, pageCount: number): number {
   return Math.max(0, Math.min(pageCount - 1, i))
 }
 
-/** Solve cubic-bezier Y for time t in [0,1] (CSS easing). */
-function bezierEase(t: number, x1: number, y1: number, x2: number, y2: number): number {
-  if (t <= 0) return 0
-  if (t >= 1) return 1
-  let x = t
-  for (let i = 0; i < 6; i++) {
-    const cx = 3 * x1
-    const bx = 3 * (x2 - x1) - cx
-    const ax = 1 - cx - bx
-    const dx = ((ax * x + bx) * x + cx) * x - t
-    const d = (3 * ax * x + 2 * bx) * x + cx
-    if (Math.abs(d) < 1e-6) break
-    x -= dx / d
-  }
-  const cy = 3 * y1
-  const by = 3 * (y2 - y1) - cy
-  const ay = 1 - cy - by
-  return ((ay * x + by) * x + cy) * x
+/**
+ * Hard-stop Android WebView fling / snap inertia.
+ * Assigning scrollLeft alone often loses to an in-flight fling; briefly locking
+ * overflow forces the scroller to drop momentum before programmatic navigation.
+ */
+function stopScrollMomentum(vp: HTMLElement) {
+  const x = vp.scrollLeft
+  const prev = vp.style.overflowX
+  vp.style.overflowX = 'hidden'
+  vp.scrollLeft = x
+  // Force reflow so the overflow lock takes effect before we restore.
+  void vp.offsetWidth
+  vp.style.overflowX = prev || ''
+  vp.scrollLeft = x
 }
 
 export function PagePager({
@@ -120,28 +117,37 @@ export function PagePager({
   const onPageChangeRef = useRef(onPageChange)
   onPageChangeRef.current = onPageChange
 
-  const animRaf = useRef(0)
   const reduceMotion = useRef(prefersReducedMotion())
-  /** Ignore next page-prop scroll (we already scrolled / committed). */
+  /** Ignore next page-prop scroll (we already scrolled / committed from finger). */
   const skipPropScroll = useRef(false)
   /** True while finger is down on the pager. */
   const fingerDown = useRef(false)
   /** True while snap inertia may still be running after lift. */
   const userScrolling = useRef(false)
-  /** True during bottom-nav tap rAF animation (ignore settle / keep snap off). */
+  /**
+   * Nav-tap / external page target. While set, settle must NOT commit a different
+   * page from mid-fling scrollLeft (fixes Settings→Peers race in logs).
+   */
+  const navIntent = useRef<number | null>(null)
+  /** True while a nav-driven scroll is in flight. */
   const programmaticAnim = useRef(false)
   const settleTimer = useRef(0)
+  const intentWatchdog = useRef(0)
 
   const progressHost = () => progressHostRef?.current ?? null
 
-  const cancelAnim = () => {
-    if (animRaf.current) {
-      cancelAnimationFrame(animRaf.current)
-      animRaf.current = 0
+  const clearSettleTimer = () => {
+    if (settleTimer.current) {
+      window.clearTimeout(settleTimer.current)
+      settleTimer.current = 0
     }
-    programmaticAnim.current = false
-    const vp = viewportRef.current
-    if (vp) vp.style.scrollSnapType = 'x mandatory'
+  }
+
+  const clearIntentWatchdog = () => {
+    if (intentWatchdog.current) {
+      window.clearTimeout(intentWatchdog.current)
+      intentWatchdog.current = 0
+    }
   }
 
   const syncPill = (scrollLeft: number, dragging: boolean) => {
@@ -152,6 +158,7 @@ export function PagePager({
     writeNavProgress(progressHost(), p, dragging)
   }
 
+  /** Finger-only: scroll position is SSOT → React page. */
   const commitIndex = (next: number) => {
     const i = clampIndex(next, pageCount)
     if (i !== indexRef.current) {
@@ -162,53 +169,71 @@ export function PagePager({
   }
 
   /**
-   * Bottom-nav tap: fixed-duration ease-out; panel + pill lockstep.
-   * Longer jumps reach higher peak speed; wall-clock time stays the same.
-   * Temporarily disable scroll-snap so the browser doesn't fight the rAF curve.
+   * Finish nav intent: snap exactly to target, re-enable snap, never commit away.
+   * React page was already set by Nav / setPage — scroll follows, does not lead.
+   */
+  const finishNavIntent = (reason: string) => {
+    const vp = viewportRef.current
+    const w = widthRef.current
+    const target = navIntent.current
+    clearIntentWatchdog()
+    clearSettleTimer()
+    programmaticAnim.current = false
+    if (target === null || !vp || w <= 0) {
+      navIntent.current = null
+      if (vp) vp.style.scrollSnapType = 'x mandatory'
+      return
+    }
+    const exact = target * w
+    // Exact slot BEFORE re-enabling snap — otherwise snap may jump to a neighbor.
+    vp.style.scrollSnapType = 'none'
+    vp.scrollLeft = exact
+    syncPill(exact, false)
+    navIntent.current = null
+    userScrolling.current = false
+    vp.style.scrollSnapType = 'x mandatory'
+    addLog(`[pager] intent-done idx=${target} (${reason})`)
+  }
+
+  /**
+   * Bottom-nav tap: stop fling → native smooth scroll (compositor) → intent lock.
+   * Pill stays in lockstep via scroll events (same path as finger drag).
    */
   const animateScrollTo = (targetIdx: number, durationMs: number) => {
     const vp = viewportRef.current
     const w = widthRef.current
     if (!vp || w <= 0) return
-    cancelAnim()
+
+    clearSettleTimer()
+    clearIntentWatchdog()
+    stopScrollMomentum(vp)
+
     const targetLeft = targetIdx * w
     const from = vp.scrollLeft
+    navIntent.current = targetIdx
+    userScrolling.current = false
+
     if (reduceMotion.current || Math.abs(from - targetLeft) < 1) {
+      vp.style.scrollSnapType = 'none'
       vp.scrollLeft = targetLeft
       syncPill(targetLeft, false)
+      finishNavIntent('instant')
       return
     }
+
     programmaticAnim.current = true
     vp.style.scrollSnapType = 'none'
-    if (settleTimer.current) {
-      window.clearTimeout(settleTimer.current)
-      settleTimer.current = 0
-    }
-    const [x1, y1, x2, y2] = NAV.tapEase
-    const t0 = performance.now()
-    const tick = (now: number) => {
-      if (fingerDown.current) {
-        animRaf.current = 0
-        programmaticAnim.current = false
-        vp.style.scrollSnapType = 'x mandatory'
-        return
+    // Native smooth scroll — compositor path (matches finger FPS). Avoids rAF
+    // scrollLeft which forces main-thread layout every frame on Android WebView.
+    vp.scrollTo({ left: targetLeft, behavior: 'smooth' })
+
+    // Watchdog: Android may omit scrollend or leave us short of the target.
+    intentWatchdog.current = window.setTimeout(() => {
+      intentWatchdog.current = 0
+      if (navIntent.current === targetIdx) {
+        finishNavIntent('watchdog')
       }
-      const t = Math.min(1, (now - t0) / durationMs)
-      const e = bezierEase(t, x1, y1, x2, y2)
-      const left = from + (targetLeft - from) * e
-      vp.scrollLeft = left
-      syncPill(left, true)
-      if (t < 1) {
-        animRaf.current = requestAnimationFrame(tick)
-        return
-      }
-      animRaf.current = 0
-      vp.scrollLeft = targetLeft
-      syncPill(targetLeft, false)
-      programmaticAnim.current = false
-      vp.style.scrollSnapType = 'x mandatory'
-    }
-    animRaf.current = requestAnimationFrame(tick)
+    }, Math.max(durationMs + 80, 280))
   }
 
   useEffect(() => {
@@ -230,7 +255,8 @@ export function PagePager({
       invalidateNavPillLayout()
       // Keep current page after resize (don't animate).
       if (prevW > 0 && Math.abs(prevW - w) > 0.5) {
-        vp.scrollLeft = indexRef.current * w
+        const i = navIntent.current ?? indexRef.current
+        vp.scrollLeft = i * w
       }
       syncPill(vp.scrollLeft, false)
     }
@@ -250,8 +276,12 @@ export function PagePager({
     const w = widthRef.current
     if (!vp || w <= 0) return
     const targetLeft = index * w
-    if (Math.abs(vp.scrollLeft - targetLeft) < 1) {
+    if (Math.abs(vp.scrollLeft - targetLeft) < 1 && navIntent.current === null) {
       syncPill(targetLeft, false)
+      return
+    }
+    // Already animating to this slot — keep intent, don't restart.
+    if (navIntent.current === index && programmaticAnim.current) {
       return
     }
     const delta = Math.abs(index - progressRef.current)
@@ -265,13 +295,25 @@ export function PagePager({
     if (!vp) return
 
     const settleFromScroll = () => {
+      // Nav tap owns the destination until finishNavIntent — never commit nearest
+      // from a mid-fling scrollLeft (log: Settings→Peers / Monitor→Settings races).
+      if (navIntent.current !== null || programmaticAnim.current) {
+        const w = widthRef.current
+        const target = navIntent.current ?? indexRef.current
+        if (w > 0 && Math.abs(vp.scrollLeft - target * w) <= 2) {
+          finishNavIntent('scrollend')
+        }
+        // else: still moving toward intent — wait for scrollend / watchdog
+        return
+      }
+
       const w = widthRef.current
       if (w <= 0) return
       const nearest = clampIndex(Math.round(vp.scrollLeft / w), pageCount)
-      // Snap may still be settling — force exact slot if slightly off.
       const exact = nearest * w
       if (Math.abs(vp.scrollLeft - exact) > 1) {
-        vp.scrollTo({ left: exact, behavior: 'smooth' })
+        // Instant snap — smooth here would race with a subsequent nav tap.
+        vp.scrollLeft = exact
       }
       syncPill(vp.scrollLeft, false)
       commitIndex(nearest)
@@ -279,39 +321,50 @@ export function PagePager({
     }
 
     const onScroll = () => {
-      syncPill(vp.scrollLeft, fingerDown.current || userScrolling.current || programmaticAnim.current)
-      if (fingerDown.current || programmaticAnim.current) return
-      if (settleTimer.current) window.clearTimeout(settleTimer.current)
+      const dragging = fingerDown.current
+        || userScrolling.current
+        || programmaticAnim.current
+        || navIntent.current !== null
+      syncPill(vp.scrollLeft, dragging)
+      if (fingerDown.current) return
+      if (navIntent.current !== null || programmaticAnim.current) {
+        // Near target → finish early (some WebViews never fire scrollend).
+        const w = widthRef.current
+        const target = navIntent.current
+        if (w > 0 && target !== null && Math.abs(vp.scrollLeft - target * w) <= 1) {
+          finishNavIntent('near')
+        }
+        return
+      }
+      clearSettleTimer()
       // Fallback when scrollend is missing / delayed (older WebViews).
       settleTimer.current = window.setTimeout(settleFromScroll, 100)
     }
 
     const onScrollEnd = () => {
-      if (fingerDown.current || programmaticAnim.current) return
-      if (settleTimer.current) {
-        window.clearTimeout(settleTimer.current)
-        settleTimer.current = 0
-      }
+      if (fingerDown.current) return
+      clearSettleTimer()
       settleFromScroll()
     }
 
     const onPointerDown = () => {
-      fingerDown.current = true
-      userScrolling.current = true
-      cancelAnim()
-      // cancelAnim clears flags via programmatic reset; keep finger-down true
-      fingerDown.current = true
-      userScrolling.current = true
-      if (settleTimer.current) {
-        window.clearTimeout(settleTimer.current)
-        settleTimer.current = 0
+      // User takes over — cancel nav intent so finger settle can commit.
+      if (navIntent.current !== null || programmaticAnim.current) {
+        clearIntentWatchdog()
+        programmaticAnim.current = false
+        navIntent.current = null
+        addLog('[pager] intent-cancel (finger)')
       }
+      fingerDown.current = true
+      userScrolling.current = true
+      clearSettleTimer()
+      vp.style.scrollSnapType = 'x mandatory'
     }
     const onPointerUp = () => {
       fingerDown.current = false
       userScrolling.current = true
       // Snap may run after lift — settle via scrollend / debounce.
-      if (settleTimer.current) window.clearTimeout(settleTimer.current)
+      clearSettleTimer()
       settleTimer.current = window.setTimeout(settleFromScroll, 120)
     }
 
@@ -333,8 +386,10 @@ export function PagePager({
       vp.removeEventListener('pointerdown', onPointerDown)
       vp.removeEventListener('pointerup', onPointerUp)
       vp.removeEventListener('pointercancel', onPointerUp)
-      if (settleTimer.current) window.clearTimeout(settleTimer.current)
-      cancelAnim()
+      clearSettleTimer()
+      clearIntentWatchdog()
+      programmaticAnim.current = false
+      navIntent.current = null
     }
   }, [pageCount, progressHostRef])
 

@@ -100,6 +100,18 @@ docs/
 
 **#9 要点**：`IncomingCallBanner` 底部导火索进度条，`INCOMING_TIMEOUT_MS = 10000`。
 
+### Page 导航（底部栏 / 横滑 · `PagePager`）
+
+手指横滑与底栏点选是两条路径；**点选期间 scroll 不得按 nearest 覆盖 React page**（否则半滑 + 点「设置」会落到对等/日志）。
+
+| # | 当前 | 事件 | → Page | scroll / pill | 说明 |
+|---|------|------|--------|---------------|------|
+| P1 | 任意主页 | 底栏点选 `setPage(T)` | **T** | 停 fling → native smooth → `navIntent=T` | page 已是 T；scroll 只跟随 |
+| P2 | `navIntent=T` | scrollend / 到位 / watchdog | **T**（不变） | 精确 `scrollLeft=T·w`，清 intent | **禁止** `commit(nearest≠T)` |
+| P3 | `navIntent=T` | 手指按下 pager | 保持至松手 settle | 取消 intent，交还手指 | 用户接管 |
+| P4 | 无 intent | 手指滑 + settle | `round(scrollLeft/w)` | snap 到整数格 | 手指路径：scroll → page |
+| P5 | 滑向 Peers 未完成 | 底栏点 Settings | **Settings** | 同 P1；丢弃半页 nearest | 修 Settings→Peers 竞态 |
+
 ### 实现落点
 
 | 层 | 代码 |
@@ -107,7 +119,7 @@ docs/
 | Auth / Call native | `pc/client/src/peer_session.cpp` · `android/.../PeerSession.kt` |
 | Roster | `server/server.js` `devicesForUser`（`online` + `state`） |
 | Banner #9 | `shared/web/src/components/IncomingCallBanner.tsx` |
-| Page 导航 | `App.tsx` `session_end` → `Peers`；`onPeerSessionStart` → `Monitor` |
+| Page 导航 | `App.tsx` `session_end` → `Peers`；`onPeerSessionStart` → `Monitor`；`PagePager` P1–P5 |
 | UI 投影 | `PeerPanel.tsx` |
 
 ## Build & release (PC + Server)
