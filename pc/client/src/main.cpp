@@ -463,7 +463,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         json += "}";
         PostJsonToWebView(json);
         if (up.succeeded) {
-            if (update_launch_updater()) { Sleep(200); PostQuitMessage(0); }
+            if (update_launch_updater()) {
+                // Hard exit — PostQuitMessage alone can stall on WebView2 teardown,
+                // leaving the exe locked so updater CopyFile fails (ERROR_SHARING_VIOLATION).
+                Sleep(300);
+                ExitProcess(0);
+            }
         }
         break;
     }

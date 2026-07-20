@@ -276,12 +276,27 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
     }
     ulog("staging=%s  oldPid=%lu", stagingDir, (unsigned long)oldPid);
 
-    HANDLE hProc = OpenProcess(SYNCHRONIZE, FALSE, oldPid);
+    HANDLE hProc = OpenProcess(SYNCHRONIZE | PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION,
+                               FALSE, oldPid);
     if (hProc) {
-        ulog("waiting for pid %lu to exit (<=30s)...", (unsigned long)oldPid);
-        if (WaitForSingleObject(hProc, 30000) == WAIT_TIMEOUT) {
-            ulog("pid wait TIMEOUT -> terminating");
-            TerminateProcess(hProc, 0);
+        ulog("waiting for pid %lu to exit (<=60s)...", (unsigned long)oldPid);
+        if (WaitForSingleObject(hProc, 60000) == WAIT_TIMEOUT) {
+            ulog("pid wait TIMEOUT -> TerminateProcess");
+            if (!TerminateProcess(hProc, 1)) {
+                ulog("TerminateProcess failed err=%lu", (unsigned long)GetLastError());
+            }
+            // Wait for the kill to actually release file locks.
+            if (WaitForSingleObject(hProc, 15000) == WAIT_TIMEOUT) {
+                ulog("ERROR: pid %lu still alive after TerminateProcess — abort apply",
+                     (unsigned long)oldPid);
+                CloseHandle(hProc);
+                MessageBoxA(nullptr,
+                    "Cannot stop the running Mimic Client to apply the update.\n"
+                    "Close Mimic Client completely, then try Check Update again.",
+                    "Mimic Updater", MB_ICONERROR);
+                return 3;
+            }
+            ulog("pid terminated");
         } else {
             ulog("pid exited");
         }
@@ -326,6 +341,40 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
     ulog("copying staging -> install (skip bin/updater.exe) ...");
     int copied = copy_staging(stagingDir, installDir, "");
     ulog("copied %d files total", copied);
+
+    // Critical: if mimic_client.exe is still the old binary, do not claim success.
+    {
+        char stagedExe[MAX_PATH], installedExe[MAX_PATH];
+        snprintf(stagedExe, MAX_PATH, "%s\\bin\\mimic_client.exe", stagingDir);
+        snprintf(installedExe, MAX_PATH, "%s\\bin\\mimic_client.exe", installDir);
+        if (GetFileAttributesA(stagedExe) != INVALID_FILE_ATTRIBUTES) {
+            HANDLE hs = CreateFileA(stagedExe, GENERIC_READ, FILE_SHARE_READ, nullptr,
+                                    OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            HANDLE hd = CreateFileA(installedExe, GENERIC_READ, FILE_SHARE_READ, nullptr,
+                                    OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            bool mismatch = true;
+            if (hs != INVALID_HANDLE_VALUE && hd != INVALID_HANDLE_VALUE) {
+                LARGE_INTEGER ss{}, sd{};
+                if (GetFileSizeEx(hs, &ss) && GetFileSizeEx(hd, &sd) && ss.QuadPart == sd.QuadPart)
+                    mismatch = false; // size match is enough after CopyFile; sha checked at download
+            }
+            if (hs != INVALID_HANDLE_VALUE) CloseHandle(hs);
+            if (hd != INVALID_HANDLE_VALUE) CloseHandle(hd);
+            // Re-copy once if first attempt left a locked/stale exe.
+            if (mismatch || GetFileAttributesA(installedExe) == INVALID_FILE_ATTRIBUTES) {
+                ulog("retry copy mimic_client.exe after lock release...");
+                Sleep(1000);
+                if (!copy_file(stagedExe, installedExe)) {
+                    ulog("ERROR: mimic_client.exe apply failed — leaving staging intact");
+                    MessageBoxA(nullptr,
+                        "Failed to replace mimic_client.exe (file in use).\n"
+                        "Close all Mimic windows and retry Check Update.",
+                        "Mimic Updater", MB_ICONERROR);
+                    return 4;
+                }
+            }
+        }
+    }
 
     sync_deletions(installDir);
 
