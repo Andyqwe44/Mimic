@@ -147,16 +147,14 @@ export const NAV = {
   settleMs: 300,
   settleEase: 'cubic-bezier(0.25, 0.85, 0.3, 1)',
   /**
-   * Unified page transition (finger settle + nav tap) — same curve & duration.
-   * Approximates the old native scroll-snap settle feel (ViewPager2-ish ease-out).
-   * Distance only changes peak speed; wall-clock time stays fixed.
+   * Nav tap uses native scrollTo({ behavior:'smooth' }) — browser owns curve/duration.
+   * This is only a watchdog ceiling if scrollend never fires (some Android WebViews).
    */
+  tapSmoothWatchdogMs: 500,
+  /** @deprecated unused — native smooth owns timing */
   pageAnimMs: 220,
-  /** cubic-bezier — snappy ease-out (was pagerSnapEase) */
   pageAnimEase: [0.22, 0.9, 0.28, 1] as const,
-  /** @deprecated alias — use pageAnimMs */
   tapDurMs: 220,
-  /** @deprecated alias — use pageAnimEase */
   tapEase: [0.22, 0.9, 0.28, 1] as const,
   /** grid gap-1 between bottom tabs */
   bottomGap: 'gap-1',
@@ -208,9 +206,9 @@ export function resolvePagerAxis(
   return 'v'
 }
 
-/** Fixed page-anim duration (ms) — distance only changes peak velocity, not time. */
+/** @deprecated — nav tap uses native smooth; kept for callers that still import it. */
 export function navTapDurationMs(_pageDelta?: number): number {
-  return NAV.pageAnimMs
+  return NAV.tapSmoothWatchdogMs
 }
 
 /**

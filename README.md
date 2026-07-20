@@ -102,16 +102,20 @@ docs/
 
 ### Page 导航（底部栏 / 横滑 · `PagePager`）
 
-**同一套接口**：手指松手 settle 与底栏点选都走 `animateTo(target)`（`transform` + `NAV.pageAnimMs` / `pageAnimEase`）。可随时打断，无 scroll-snap 双轨闪现。最后一次操作胜出。
+两条路径都走**浏览器原生滚动**（合成器），不是 JS `ease` rAF：
 
-| # | 当前 | 事件 | → Page | 动画 | 说明 |
-|---|------|------|--------|------|------|
-| P1 | 任意 | 底栏点选 T（`navSeq++`） | **T** | `animateTo(T)` from 当前 progress | 含同页再点 |
-| P2 | 动画中 | 再点选 U / 手指按下 | **U** / 跟手 | 取消 rAF → 新 `animateTo` 或拖拽 | 无闪现 |
-| P3 | 手指横滑中 | 松手 | snap 目标页 | `animateTo`（同曲线） | fling/距离选页 |
-| P4 | 手指横滑中 | 点选 T | **T** | 弃手势 → `animateTo(T)` | 点选胜出 |
+| 操作 | 机制 | 曲线 / 时长 |
+|------|------|-------------|
+| 手指横滑 + 松手 | `overflow-x` + `scroll-snap: mandatory` | Chromium snap/惯性（**非** CSS ease；时长随滑速变） |
+| 底栏点选 | `scrollTo({ behavior: 'smooth' })` | 浏览器 native smooth（同样非我们自写的 ease） |
 
-时长：**220ms**；曲线：`cubic-bezier(0.22, 0.9, 0.28, 1)`（ease-out，近似原 scroll-snap 落格手感）。
+**最后一次操作胜出**；点选后 `settleAllowed=false`，禁止旧滑动的 `scrollend` 再 `commit` 错页（防闪现）。
+
+| # | 事件 | → Page | 说明 |
+|---|------|--------|------|
+| P1 | 底栏点选 T（`navSeq++`） | **T** | 冻 fling → native smooth → T |
+| P2 | 半滑中再点 T/U | **T/U** | 同上；废弃未完成 snap settle |
+| P3 | 手指滑 + settle | nearest | 仅 `settleAllowed`（pointerdown 后）可 commit |
 
 ### 实现落点
 

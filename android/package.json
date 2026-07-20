@@ -1,8 +1,8 @@
 {
     "name":  "mimic-android",
     "private":  true,
-    "version":  "0.1.54",
-    "mimicReleaseNote":  "PagePager: unified animateTo (220ms ease-out) for swipe+tap, no snap flash",
+    "version":  "0.1.55",
+    "mimicReleaseNote":  "PagePager: restore native scroll-snap; nav tap uses scrollTo smooth",
     "description":  "Mimic Android shell 闂?Capacitor WebView hosting shared/web",
     "scripts":  {
                     "build:web":  "npm --prefix ../shared/web run build",
