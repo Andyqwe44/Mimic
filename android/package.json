@@ -1,12 +1,12 @@
 {
     "name":  "mimic-android",
     "private":  true,
-    "version":  "0.1.63",
+    "version":  "0.1.62",
     "mimicReleaseNote":  "PagePager: unified animateTo(native smooth); no snap settle race",
-    "description":  "Mimic Android shell — Capacitor WebView hosting shared/web",
+    "description":  "Mimic Android shell 鈥?Capacitor WebView hosting shared/web",
     "scripts":  {
                     "build:web":  "npm --prefix ../shared/web run build",
-                    "sync":  "npm run build:web && npx cap sync android",
+                    "sync":  "npm run build:web \u0026\u0026 npx cap sync android",
                     "open":  "npx cap open android",
                     "update:check":  "node ./tools/print-update-url.mjs"
                 },
