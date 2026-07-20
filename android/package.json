@@ -1,8 +1,8 @@
 {
     "name":  "mimic-android",
     "private":  true,
-    "version":  "0.1.53",
-    "mimicReleaseNote":  "PagePager: 350ms ease rAF, navSeq last-tap-wins (same-page retap)",
+    "version":  "0.1.54",
+    "mimicReleaseNote":  "PagePager: unified animateTo (220ms ease-out) for swipe+tap, no snap flash",
     "description":  "Mimic Android shell 闂?Capacitor WebView hosting shared/web",
     "scripts":  {
                     "build:web":  "npm --prefix ../shared/web run build",

@@ -1,5 +1,5 @@
-// Paged horizontal track — native overflow-x + CSS scroll-snap for finger drag.
-// Nav tap: fixed-duration CSS `ease` rAF from *current* scrollLeft → target (last tap wins).
+// Unified page track — ONE animateTo() for finger settle + bottom-nav tap.
+// Position = transform translate3d (no native scroll-snap) so interrupts never flash.
 import {
   Children,
   useEffect,
@@ -8,7 +8,12 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react'
-import { NAV, navTapDurationMs } from '../lib/design'
+import {
+  NAV,
+  navTapDurationMs,
+  resolvePagerAxis,
+  rubberBandPage,
+} from '../lib/design'
 import { PRIMARY_PAGES, pageIndex, type AppPage } from '../lib/pages'
 import { addLog } from '../lib/bridge'
 
@@ -97,14 +102,28 @@ function bezierEase(t: number, x1: number, y1: number, x2: number, y2: number): 
   return ((ay * x + by) * x + cy) * x
 }
 
-/**
- * Freeze scroll position (drop fling) without overflow:hidden flash.
- * Snap must already be off; instant assign beats in-flight momentum on Chromium.
- */
-function freezeScroll(vp: HTMLElement) {
-  const x = vp.scrollLeft
-  vp.scrollTo({ left: x, behavior: 'auto' })
-  vp.scrollLeft = x
+type VelSample = { t: number; p: number }
+
+function pickSnapTarget(
+  progress: number,
+  velocity: number,
+  pageCount: number,
+): number {
+  const fling = NAV.pagerFlingPagesPerMs
+  let target: number
+  // velocity > 0: content moving to higher index (finger left)
+  if (velocity >= fling) {
+    target = Math.ceil(progress - 1e-6)
+  } else if (velocity <= -fling) {
+    target = Math.floor(progress + 1e-6)
+  } else {
+    const base = Math.floor(progress)
+    const frac = progress - base
+    if (frac >= 1 - NAV.pagerSnapThreshold) target = base + 1
+    else if (frac <= NAV.pagerSnapThreshold) target = base
+    else target = Math.round(progress)
+  }
+  return clampIndex(target, pageCount)
 }
 
 export function PagePager({
@@ -126,6 +145,7 @@ export function PagePager({
   const index = clampIndex(pageIndex(page), pageCount)
 
   const viewportRef = useRef<HTMLDivElement>(null)
+  const trackRef = useRef<HTMLDivElement>(null)
   const widthRef = useRef(0)
   const progressRef = useRef(index)
   const indexRef = useRef(index)
@@ -136,29 +156,21 @@ export function PagePager({
   const animRaf = useRef(0)
   const animToken = useRef(0)
   const reduceMotion = useRef(prefersReducedMotion())
-  /** Ignore next page-prop scroll (we already scrolled / committed from finger). */
+  /** Ignore next page-prop scroll (finger already animated / committed). */
   const skipPropScroll = useRef(false)
-  /** True while finger is down on the pager. */
-  const fingerDown = useRef(false)
-  /** True while snap inertia may still be running after lift. */
-  const userScrolling = useRef(false)
-  /**
-   * Nav-tap target. While set, settle must NOT commit a different page from
-   * mid-fling scrollLeft (last nav tap wins over incomplete swipe).
-   */
-  const navIntent = useRef<number | null>(null)
-  /** True during nav-tap rAF ease. */
-  const programmaticAnim = useRef(false)
-  const settleTimer = useRef(0)
+  /** True while a shared animateTo is running (finger settle or nav tap). */
+  const animating = useRef(false)
+  /** Finger gesture state */
+  const finger = useRef<{
+    id: number
+    startX: number
+    startY: number
+    startP: number
+    axis: 'none' | 'h' | 'v'
+    samples: VelSample[]
+  } | null>(null)
 
   const progressHost = () => progressHostRef?.current ?? null
-
-  const clearSettleTimer = () => {
-    if (settleTimer.current) {
-      window.clearTimeout(settleTimer.current)
-      settleTimer.current = 0
-    }
-  }
 
   const cancelAnim = () => {
     if (animRaf.current) {
@@ -166,18 +178,20 @@ export function PagePager({
       animRaf.current = 0
     }
     animToken.current += 1
-    programmaticAnim.current = false
+    animating.current = false
   }
 
-  const syncPill = (scrollLeft: number, dragging: boolean) => {
-    const w = widthRef.current
-    if (w <= 0) return
-    const p = scrollLeft / w
+  /** Apply fractional page progress to track + pill (single paint path). */
+  const applyProgress = (p: number, dragging: boolean) => {
     progressRef.current = p
+    const track = trackRef.current
+    const w = widthRef.current
+    if (track && w > 0) {
+      track.style.transform = `translate3d(${-p * w}px,0,0)`
+    }
     writeNavProgress(progressHost(), p, dragging)
   }
 
-  /** Finger-only: scroll position is SSOT → React page. */
   const commitIndex = (next: number) => {
     const i = clampIndex(next, pageCount)
     if (i !== indexRef.current) {
@@ -188,102 +202,64 @@ export function PagePager({
   }
 
   /**
-   * End nav intent at exact slot. If already there (ease last frame), skip
-   * reassignment — that was the end-of-anim hitch with native smooth + snap.
+   * Shared transition — finger settle AND nav tap both call this.
+   * Interrupting = cancelAnim + new animateTo from current progress (no flash).
    */
-  const finishNavIntent = (reason: string) => {
-    const vp = viewportRef.current
+  const animateTo = (
+    targetIdx: number,
+    opts?: { commit?: boolean; reason?: string },
+  ) => {
     const w = widthRef.current
-    const target = navIntent.current
-    clearSettleTimer()
+    if (w <= 0) return
+    const target = clampIndex(targetIdx, pageCount)
+    const from = progressRef.current
+    const durationMs = navTapDurationMs(Math.abs(target - from))
+    const commit = opts?.commit !== false
+    const reason = opts?.reason ?? 'anim'
+
     cancelAnim()
-    if (target === null || !vp || w <= 0) {
-      navIntent.current = null
-      if (vp) vp.style.scrollSnapType = 'x mandatory'
-      return
-    }
-    const exact = target * w
-    vp.style.scrollSnapType = 'none'
-    if (Math.abs(vp.scrollLeft - exact) > 0.5) {
-      vp.scrollLeft = exact
-    }
-    syncPill(exact, false)
-    navIntent.current = null
-    userScrolling.current = false
-    vp.style.scrollSnapType = 'x mandatory'
-    addLog(`[pager] intent-done idx=${target} (${reason})`)
-  }
+    finger.current = null
 
-  /**
-   * Bottom-nav tap: freeze fling → CSS `ease` rAF from current offset → target.
-   * Distance only changes peak speed; wall-clock duration is fixed (tapDurMs).
-   */
-  const animateScrollTo = (targetIdx: number, durationMs: number) => {
-    const vp = viewportRef.current
-    const w = widthRef.current
-    if (!vp || w <= 0) return
-
-    clearSettleTimer()
-    cancelAnim()
-
-    // Disable snap first so freeze/assign aren't fought by snap inertia.
-    vp.style.scrollSnapType = 'none'
-    freezeScroll(vp)
-
-    const targetLeft = targetIdx * w
-    const from = vp.scrollLeft
-    navIntent.current = targetIdx
-    // Nav tap preempts an in-progress finger gesture (last action wins).
-    fingerDown.current = false
-    userScrolling.current = false
-
-    if (reduceMotion.current || Math.abs(from - targetLeft) < 1) {
-      vp.scrollLeft = targetLeft
-      syncPill(targetLeft, false)
-      finishNavIntent('instant')
+    if (reduceMotion.current || Math.abs(from - target) < 0.001) {
+      applyProgress(target, false)
+      if (commit) commitIndex(target)
+      addLog(`[pager] snap→${PRIMARY_PAGES[target]} (${reason})`)
       return
     }
 
-    programmaticAnim.current = true
+    animating.current = true
     const token = animToken.current
-    const [x1, y1, x2, y2] = NAV.tapEase
+    const [x1, y1, x2, y2] = NAV.pageAnimEase
     const t0 = performance.now()
     addLog(
-      `[pager] ease→${PRIMARY_PAGES[targetIdx]} from=${(from / w).toFixed(2)} `
-      + `Δ=${(Math.abs(targetLeft - from) / w).toFixed(2)} ${durationMs}ms`,
+      `[pager] ease→${PRIMARY_PAGES[target]} from=${from.toFixed(2)} `
+      + `Δ=${Math.abs(target - from).toFixed(2)} ${durationMs}ms (${reason})`,
     )
 
     const tick = (now: number) => {
-      if (token !== animToken.current || fingerDown.current) {
-        animRaf.current = 0
-        programmaticAnim.current = false
-        return
-      }
-      if (navIntent.current !== targetIdx) {
+      if (token !== animToken.current) {
         animRaf.current = 0
         return
       }
       const t = Math.min(1, (now - t0) / durationMs)
       const e = bezierEase(t, x1, y1, x2, y2)
-      const left = from + (targetLeft - from) * e
-      vp.scrollLeft = left
-      syncPill(left, true)
+      applyProgress(from + (target - from) * e, true)
       if (t < 1) {
         animRaf.current = requestAnimationFrame(tick)
         return
       }
       animRaf.current = 0
-      // Last frame is already at targetLeft via e=1; finish without second jump.
-      vp.scrollLeft = targetLeft
-      syncPill(targetLeft, false)
-      programmaticAnim.current = false
-      navIntent.current = null
-      userScrolling.current = false
-      vp.style.scrollSnapType = 'x mandatory'
-      addLog(`[pager] intent-done idx=${targetIdx} (ease)`)
+      animating.current = false
+      applyProgress(target, false)
+      if (commit) commitIndex(target)
+      addLog(`[pager] intent-done idx=${target} (${reason})`)
     }
     animRaf.current = requestAnimationFrame(tick)
   }
+
+  // Keep animateTo stable for event handlers via ref.
+  const animateToRef = useRef(animateTo)
+  animateToRef.current = animateTo
 
   useEffect(() => {
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
@@ -303,10 +279,10 @@ export function PagePager({
       widthRef.current = w
       invalidateNavPillLayout()
       if (prevW > 0 && Math.abs(prevW - w) > 0.5) {
-        const i = navIntent.current ?? indexRef.current
-        vp.scrollLeft = i * w
+        applyProgress(progressRef.current, false)
+      } else {
+        applyProgress(progressRef.current, false)
       }
-      syncPill(vp.scrollLeft, false)
     }
     measure()
     const ro = new ResizeObserver(measure)
@@ -314,135 +290,150 @@ export function PagePager({
     return () => ro.disconnect()
   }, [progressHostRef])
 
-  // Bottom-nav / external page change → ease from *current* scroll to slot.
-  // navSeq bumps on every nav tap (including same page) so retap cancels swipe.
+  // Nav tap / external page change → same animateTo as finger settle.
   useLayoutEffect(() => {
     if (skipPropScroll.current) {
       skipPropScroll.current = false
       return
     }
-    const vp = viewportRef.current
-    const w = widthRef.current
-    if (!vp || w <= 0) return
-    const targetLeft = index * w
-    // Already on slot and idle — skip (same-page retap at rest is a no-op).
-    // Mid-swipe retap: scrollLeft ≠ target → fall through and ease back.
-    if (
-      Math.abs(vp.scrollLeft - targetLeft) < 1
-      && navIntent.current === null
-      && !programmaticAnim.current
-    ) {
-      syncPill(targetLeft, false)
+    if (widthRef.current <= 0) {
+      progressRef.current = index
       return
     }
-    const delta = Math.abs(index - (w > 0 ? vp.scrollLeft / w : progressRef.current))
-    addLog(`[pager] prop→scroll idx=${index} from=${(vp.scrollLeft / w).toFixed(2)} seq=${navSeq}`)
-    animateScrollTo(index, navTapDurationMs(delta))
+    // At rest on target — no-op (same-page retap at rest).
+    if (
+      !animating.current
+      && !finger.current
+      && Math.abs(progressRef.current - index) < 0.001
+    ) {
+      return
+    }
+    // Nav owns React page already — animate track only (don't re-commit).
+    animateToRef.current(index, { commit: false, reason: `nav seq=${navSeq}` })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [index, navSeq])
 
+  // Finger drag — same progress + animateTo pipeline (no native scroll).
   useEffect(() => {
     const vp = viewportRef.current
     if (!vp) return
 
-    const settleFromScroll = () => {
-      // Nav tap owns destination — never commit nearest over an active intent.
-      if (navIntent.current !== null || programmaticAnim.current) return
+    const onPointerDown = (e: PointerEvent) => {
+      if (e.pointerType === 'mouse' && e.button !== 0) return
+      // Last action wins: finger interrupts in-flight ease.
+      cancelAnim()
+      finger.current = {
+        id: e.pointerId,
+        startX: e.clientX,
+        startY: e.clientY,
+        startP: progressRef.current,
+        axis: 'none',
+        samples: [{ t: performance.now(), p: progressRef.current }],
+      }
+    }
 
+    const onPointerMove = (e: PointerEvent) => {
+      const g = finger.current
+      if (!g || g.id !== e.pointerId) return
       const w = widthRef.current
       if (w <= 0) return
-      const nearest = clampIndex(Math.round(vp.scrollLeft / w), pageCount)
-      const exact = nearest * w
-      if (Math.abs(vp.scrollLeft - exact) > 1) {
-        vp.scrollLeft = exact
+      const dx = e.clientX - g.startX
+      const dy = e.clientY - g.startY
+      if (g.axis === 'none') {
+        g.axis = resolvePagerAxis(Math.abs(dx), Math.abs(dy))
+        if (g.axis === 'none') return
+        if (g.axis === 'v') {
+          // Vertical — release to child scrollers; abandon pager gesture.
+          finger.current = null
+          return
+        }
+        // Horizontal lock — capture so moves keep arriving.
+        try { vp.setPointerCapture(e.pointerId) } catch { /* */ }
       }
-      syncPill(vp.scrollLeft, false)
-      commitIndex(nearest)
-      userScrolling.current = false
+      if (g.axis !== 'h') return
+      e.preventDefault()
+      // Finger left → higher page index
+      const raw = g.startP - dx / w
+      const p = rubberBandPage(raw, pageCount)
+      const now = performance.now()
+      g.samples.push({ t: now, p })
+      if (g.samples.length > 8) g.samples.shift()
+      applyProgress(p, true)
     }
 
-    const onScroll = () => {
-      const dragging = fingerDown.current
-        || userScrolling.current
-        || programmaticAnim.current
-        || navIntent.current !== null
-      syncPill(vp.scrollLeft, dragging)
-      if (fingerDown.current || programmaticAnim.current || navIntent.current !== null) return
-      clearSettleTimer()
-      settleTimer.current = window.setTimeout(settleFromScroll, 100)
-    }
+    const endGesture = (e: PointerEvent) => {
+      const g = finger.current
+      if (!g || g.id !== e.pointerId) return
+      finger.current = null
+      try { vp.releasePointerCapture(e.pointerId) } catch { /* */ }
+      if (g.axis !== 'h') return
 
-    const onScrollEnd = () => {
-      if (fingerDown.current || programmaticAnim.current || navIntent.current !== null) return
-      clearSettleTimer()
-      settleFromScroll()
-    }
-
-    const onPointerDown = () => {
-      // User takes over — cancel nav ease so finger settle can commit.
-      if (navIntent.current !== null || programmaticAnim.current) {
-        cancelAnim()
-        navIntent.current = null
-        addLog('[pager] intent-cancel (finger)')
+      const now = performance.now()
+      const stale = NAV.pagerFlingStaleMs
+      const samples = g.samples.filter((s) => now - s.t <= stale)
+      let velocity = 0
+      if (samples.length >= 2) {
+        const a = samples[0]
+        const b = samples[samples.length - 1]
+        const dt = b.t - a.t
+        if (dt >= NAV.pagerFlingMinMs) {
+          velocity = (b.p - a.p) / dt
+        }
       }
-      fingerDown.current = true
-      userScrolling.current = true
-      clearSettleTimer()
-      vp.style.scrollSnapType = 'x mandatory'
-    }
-    const onPointerUp = () => {
-      fingerDown.current = false
-      userScrolling.current = true
-      clearSettleTimer()
-      settleTimer.current = window.setTimeout(settleFromScroll, 120)
+      const moved = Math.abs(progressRef.current - g.startP)
+      if (moved < NAV.pagerFlingMinDelta && Math.abs(velocity) < NAV.pagerFlingPagesPerMs) {
+        // Tiny nudge — snap back to start page of gesture (or nearest).
+        const target = pickSnapTarget(progressRef.current, 0, pageCount)
+        animateToRef.current(target, { commit: true, reason: 'finger' })
+        return
+      }
+      const target = pickSnapTarget(progressRef.current, velocity, pageCount)
+      animateToRef.current(target, { commit: true, reason: 'finger' })
     }
 
-    vp.addEventListener('scroll', onScroll, { passive: true })
-    vp.addEventListener('scrollend', onScrollEnd as EventListener)
     vp.addEventListener('pointerdown', onPointerDown, { passive: true })
-    vp.addEventListener('pointerup', onPointerUp, { passive: true })
-    vp.addEventListener('pointercancel', onPointerUp, { passive: true })
-    addLog(`[pager] native-scroll ready pages=${pageCount} idx=${indexRef.current}`)
-    if (widthRef.current > 0) {
-      vp.scrollLeft = indexRef.current * widthRef.current
-      syncPill(vp.scrollLeft, false)
-    }
+    vp.addEventListener('pointermove', onPointerMove, { passive: false })
+    vp.addEventListener('pointerup', endGesture, { passive: true })
+    vp.addEventListener('pointercancel', endGesture, { passive: true })
+    addLog(`[pager] unified ready pages=${pageCount} idx=${indexRef.current} `
+      + `${NAV.pageAnimMs}ms ease`)
+    applyProgress(indexRef.current, false)
 
     return () => {
-      vp.removeEventListener('scroll', onScroll)
-      vp.removeEventListener('scrollend', onScrollEnd as EventListener)
       vp.removeEventListener('pointerdown', onPointerDown)
-      vp.removeEventListener('pointerup', onPointerUp)
-      vp.removeEventListener('pointercancel', onPointerUp)
-      clearSettleTimer()
+      vp.removeEventListener('pointermove', onPointerMove)
+      vp.removeEventListener('pointerup', endGesture)
+      vp.removeEventListener('pointercancel', endGesture)
       cancelAnim()
-      navIntent.current = null
+      finger.current = null
     }
   }, [pageCount, progressHostRef])
 
   return (
     <div
       ref={viewportRef}
-      className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden"
+      className="flex-1 min-h-0 overflow-hidden"
       data-page-pager
       style={{
-        scrollSnapType: 'x mandatory',
-        WebkitOverflowScrolling: 'touch',
-        overscrollBehaviorX: 'contain',
-        scrollbarWidth: 'none',
-        msOverflowStyle: 'none',
+        touchAction: 'pan-y',
+        overscrollBehaviorX: 'none',
       }}
     >
-      <div className="flex h-full w-full">
+      <div
+        ref={trackRef}
+        className="flex h-full will-change-transform"
+        style={{
+          width: `${pageCount * 100}%`,
+          transform: 'translate3d(0,0,0)',
+        }}
+      >
         {panels.map((panel, i) => (
           <div
             key={PRIMARY_PAGES[i] ?? i}
             className="h-full shrink-0 flex flex-col min-h-0 overflow-hidden"
             style={{
-              flex: '0 0 100%',
-              width: '100%',
-              scrollSnapAlign: 'start',
-              scrollSnapStop: 'always',
+              width: `${100 / pageCount}%`,
+              flex: `0 0 ${100 / pageCount}%`,
             }}
             aria-hidden={i !== index}
           >

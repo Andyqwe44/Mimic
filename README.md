@@ -102,16 +102,16 @@ docs/
 
 ### Page 导航（底部栏 / 横滑 · `PagePager`）
 
-手指横滑与底栏点选是两条路径；**最后一次用户动作胜出**。点选用 CSS `ease` 定时长（`NAV.tapDurMs`）rAF，从**当前** `scrollLeft` 插值到目标（半滑再点不闪切）。
+**同一套接口**：手指松手 settle 与底栏点选都走 `animateTo(target)`（`transform` + `NAV.pageAnimMs` / `pageAnimEase`）。可随时打断，无 scroll-snap 双轨闪现。最后一次操作胜出。
 
-| # | 当前 | 事件 | → Page | scroll / pill | 说明 |
-|---|------|------|--------|---------------|------|
-| P1 | 任意 | 底栏点选 T（`navSeq++`） | **T** | 冻 fling → ease(当前→T·w) | 含同页再点；page 已是 T 也重跑 |
-| P2 | `navIntent=T` | ease 结束 | **T**（不变） | 末帧即到位，清 intent | **禁止** `commit(nearest≠T)` |
-| P3 | `navIntent=T` | 手指按下 pager | 保持至松手 settle | 取消 intent，交还手指 | 用户接管 |
-| P4 | 无 intent | 手指滑 + settle | `round(scrollLeft/w)` | snap 到整数格 | 手指路径：scroll → page |
-| P5 | Settings 半滑向 Log | 再点 Settings | **Settings** | ease 回到 Settings | 同页 `navSeq` 避免 settle→Log |
-| P6 | 半滑向任意 | 点选其它页 U | **U** | ease(半页位置→U) | 距离差驱动同一 ease 曲线 |
+| # | 当前 | 事件 | → Page | 动画 | 说明 |
+|---|------|------|--------|------|------|
+| P1 | 任意 | 底栏点选 T（`navSeq++`） | **T** | `animateTo(T)` from 当前 progress | 含同页再点 |
+| P2 | 动画中 | 再点选 U / 手指按下 | **U** / 跟手 | 取消 rAF → 新 `animateTo` 或拖拽 | 无闪现 |
+| P3 | 手指横滑中 | 松手 | snap 目标页 | `animateTo`（同曲线） | fling/距离选页 |
+| P4 | 手指横滑中 | 点选 T | **T** | 弃手势 → `animateTo(T)` | 点选胜出 |
+
+时长：**220ms**；曲线：`cubic-bezier(0.22, 0.9, 0.28, 1)`（ease-out，近似原 scroll-snap 落格手感）。
 
 ### 实现落点
 

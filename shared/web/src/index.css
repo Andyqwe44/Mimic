@@ -181,9 +181,10 @@ svg.lucide {
   }
 }
 
-/* PagePager uses native overflow-x + scroll-snap; hide scrollbar chrome. */
-[data-page-pager]::-webkit-scrollbar {
-  display: none;
+/* PagePager: transform track (no native overflow-x scrollbar). */
+[data-page-pager] {
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 /* ── Skeleton screen shimmer (startup placeholder) ── */

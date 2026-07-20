@@ -147,12 +147,17 @@ export const NAV = {
   settleMs: 300,
   settleEase: 'cubic-bezier(0.25, 0.85, 0.3, 1)',
   /**
-   * Bottom-nav tap: fixed duration for any distance (far jumps = higher peak speed).
-   * CSS `ease` — slight ease-in, then soft decelerate (browser default transition feel).
+   * Unified page transition (finger settle + nav tap) — same curve & duration.
+   * Approximates the old native scroll-snap settle feel (ViewPager2-ish ease-out).
+   * Distance only changes peak speed; wall-clock time stays fixed.
    */
-  tapDurMs: 350,
-  /** cubic-bezier matching CSS `ease` */
-  tapEase: [0.25, 0.1, 0.25, 1] as const,
+  pageAnimMs: 220,
+  /** cubic-bezier — snappy ease-out (was pagerSnapEase) */
+  pageAnimEase: [0.22, 0.9, 0.28, 1] as const,
+  /** @deprecated alias — use pageAnimMs */
+  tapDurMs: 220,
+  /** @deprecated alias — use pageAnimEase */
+  tapEase: [0.22, 0.9, 0.28, 1] as const,
   /** grid gap-1 between bottom tabs */
   bottomGap: 'gap-1',
   bottomGapRem: 0.25,
@@ -178,7 +183,9 @@ export const NAV = {
   pagerFlingMinDelta: 0.12,
   pagerFlingMinMs: 80,
   pagerReverseCancel: 0.12,
+  /** @deprecated alias — use pageAnimMs */
   pagerSnapMs: 220,
+  /** @deprecated alias — use pageAnimEase */
   pagerSnapEase: [0.22, 0.9, 0.28, 1] as const,
   /** Android long-press tooltip (PC keeps hover 300ms) */
   tooltipHoverMs: 300,
@@ -201,9 +208,9 @@ export function resolvePagerAxis(
   return 'v'
 }
 
-/** Fixed tap duration (ms) — distance only changes peak velocity, not time. */
+/** Fixed page-anim duration (ms) — distance only changes peak velocity, not time. */
 export function navTapDurationMs(_pageDelta?: number): number {
-  return NAV.tapDurMs
+  return NAV.pageAnimMs
 }
 
 /**
