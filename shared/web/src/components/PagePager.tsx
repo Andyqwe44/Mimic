@@ -121,9 +121,9 @@ function describeTarget(t: EventTarget | null): string {
 
 /**
  * Clash Royale–like settle:
- * - ~20% distance commits neighbor
- * - fast fling commits early
- * - 折返 (retreat from peak) cancels back to start page
+ * - ~18% distance commits
+ * - fling only if already moved a real distance + lasting gesture (logs: dx≈15 false flings)
+ * - 折返 cancels to start
  */
 function snapTarget(
   progress: number,
@@ -132,6 +132,7 @@ function snapTarget(
   startPage: number,
   peakProgress: number,
   moveAgeMs: number,
+  gestureMs: number,
 ): { target: number; reason: string } {
   if (pageCount <= 0) return { target: 0, reason: 'empty' }
   if (progress < 0) return { target: 0, reason: 'edgeL' }
@@ -143,7 +144,6 @@ function snapTarget(
   const thr = NAV.pagerSnapThreshold
   const retreated = Math.abs(peakDelta) - Math.abs(delta)
 
-  // 折返: went out then came back toward start → cancel if still under commit thr
   if (retreated >= NAV.pagerReverseCancel && Math.abs(delta) < thr) {
     return {
       target: start,
@@ -151,14 +151,15 @@ function snapTarget(
     }
   }
 
-  const flingFresh = moveAgeMs <= NAV.pagerFlingStaleMs
+  const flingOk = moveAgeMs <= NAV.pagerFlingStaleMs
+    && gestureMs >= NAV.pagerFlingMinMs
+    && Math.abs(delta) >= NAV.pagerFlingMinDelta
   const fling = NAV.pagerFlingPagesPerMs
-  const minD = NAV.pagerFlingMinDelta
-  if (flingFresh && velocity >= fling && delta > minD) {
-    return { target: clampIndex(start + 1, pageCount), reason: `fling+ v=${velocity.toFixed(5)}` }
+  if (flingOk && velocity >= fling && delta > 0) {
+    return { target: clampIndex(start + 1, pageCount), reason: `fling+ v=${velocity.toFixed(5)} Δ=${delta.toFixed(2)}` }
   }
-  if (flingFresh && velocity <= -fling && delta < -minD) {
-    return { target: clampIndex(start - 1, pageCount), reason: `fling- v=${velocity.toFixed(5)}` }
+  if (flingOk && velocity <= -fling && delta < 0) {
+    return { target: clampIndex(start - 1, pageCount), reason: `fling- v=${velocity.toFixed(5)} Δ=${delta.toFixed(2)}` }
   }
 
   if (delta >= thr) {
@@ -208,6 +209,7 @@ export function PagePager({
   const peakProgress = useRef(0)
   const lastX = useRef(0)
   const lastT = useRef(0)
+  const gestureStartT = useRef(0)
   const velocity = useRef(0)
   const windowListening = useRef(false)
   const lastMoveLogT = useRef(0)
@@ -334,7 +336,9 @@ export function PagePager({
     }
 
     const settleHorizontal = () => {
-      const moveAge = performance.now() - lastT.current
+      const now = performance.now()
+      const moveAge = now - lastT.current
+      const gestureMs = now - gestureStartT.current
       const { target, reason } = snapTarget(
         progressRef.current,
         velocity.current,
@@ -342,11 +346,12 @@ export function PagePager({
         startPage.current,
         peakProgress.current,
         moveAge,
+        gestureMs,
       )
       addLog(
         `[pager] up axis=h page=${PRIMARY_PAGES[startPage.current]} `
         + `p=${progressRef.current.toFixed(3)} peak=${peakProgress.current.toFixed(3)} `
-        + `v=${velocity.current.toFixed(5)} age=${moveAge.toFixed(0)} `
+        + `v=${velocity.current.toFixed(5)} age=${moveAge.toFixed(0)} gest=${gestureMs.toFixed(0)} `
         + `→${PRIMARY_PAGES[target] ?? target} (${reason}) `
         + `noSwipe=${hitNoSwipe.current}`,
       )
@@ -363,12 +368,17 @@ export function PagePager({
         addLog(`[pager] end ignore id=${id} active=${pointerId.current} why=${why}`)
         return
       }
-      const wasH = axisLocked.current === 'h'
+      let wasH = axisLocked.current === 'h'
+      // pointercancel before axis lock but finger already moved → still settle (half-swipe bug).
+      const moved = Math.abs(progressRef.current - startProgress.current)
+      if (!wasH && axisLocked.current === 'none' && moved >= 0.03) {
+        wasH = true
+        addLog(`[pager] ${why}: promote none→H moved=${moved.toFixed(3)}`)
+      }
       const wasAxis = axisLocked.current
       pointerId.current = null
       dragging.current = false
       axisLocked.current = 'none'
-      try { viewportRef.current?.releasePointerCapture(id) } catch { /* not capturing */ }
       detachWindow()
       if (wasH) settleHorizontal()
       else {
@@ -393,7 +403,6 @@ export function PagePager({
         const ady = Math.abs(dy)
         if (adx < NAV.pagerAxisLockPx && ady < NAV.pagerAxisLockPx) return
 
-        // Prefer horizontal unless vertical clearly dominates (scrollable pages).
         const verticalWins = ady > adx * NAV.pagerVerticalBias
         if (verticalWins) {
           axisLocked.current = 'v'
@@ -408,17 +417,11 @@ export function PagePager({
           return
         }
         axisLocked.current = 'h'
+        // No setPointerCapture — Android WebView cancels the gesture (see logs: pointercancel).
         addLog(
           `[pager] axis=H adx=${adx.toFixed(0)} ady=${ady.toFixed(0)} `
-          + `noSwipe=${hitNoSwipe.current} tgt=${describeTarget(e.target)} → capture`,
+          + `noSwipe=${hitNoSwipe.current} tgt=${describeTarget(e.target)}`,
         )
-        // Steal from AbsolutePointerOverlay / touch-none children after H lock.
-        const cap = viewportRef.current
-        if (cap) {
-          try { cap.setPointerCapture(e.pointerId) } catch (err) {
-            addLog(`[pager] setPointerCapture fail: ${String(err)}`)
-          }
-        }
       }
 
       if (axisLocked.current !== 'h') return
@@ -433,7 +436,6 @@ export function PagePager({
 
       const raw = startProgress.current - dx / w
       const p = rubberBandPage(raw, pageCount)
-      // Track peak excursion from start (for 折返).
       if (Math.abs(p - startPage.current) >= Math.abs(peakProgress.current - startPage.current)) {
         peakProgress.current = p
       }
@@ -453,6 +455,24 @@ export function PagePager({
       endPointer(e.pointerId, e.type)
     }
 
+    /** Block native vertical scroll once horizontal intent is clear (avoids H/V fight). */
+    const onTouchMove = (e: TouchEvent) => {
+      if (!dragging.current || pointerId.current === null) return
+      if (axisLocked.current === 'h') {
+        e.preventDefault()
+        return
+      }
+      if (axisLocked.current !== 'none' || e.touches.length !== 1) return
+      const t = e.touches[0]
+      const adx = Math.abs(t.clientX - startX.current)
+      const ady = Math.abs(t.clientY - startY.current)
+      if (adx >= NAV.pagerAxisLockPx && adx > ady * NAV.pagerVerticalBias) {
+        axisLocked.current = 'h'
+        e.preventDefault()
+        addLog(`[pager] touchmove→H adx=${adx.toFixed(0)} ady=${ady.toFixed(0)}`)
+      }
+    }
+
     const onPointerDown = (e: PointerEvent) => {
       if (e.pointerType === 'mouse' && e.button !== 0) return
       if (pointerId.current !== null) {
@@ -464,9 +484,8 @@ export function PagePager({
         ? e.target.closest('[data-no-page-swipe]')
         : null
       hitNoSwipe.current = !!noSwipeEl
-      // Still track — H swipe must work over remote overlays; log for diagnosis.
       if (noSwipeEl) {
-        addLog(`[pager] down on no-swipe zone (will steal if axis=H) tgt=${describeTarget(e.target)}`)
+        addLog(`[pager] down on no-swipe zone tgt=${describeTarget(e.target)}`)
       }
 
       cancelAnim()
@@ -480,6 +499,7 @@ export function PagePager({
       peakProgress.current = progressRef.current
       lastX.current = e.clientX
       lastT.current = e.timeStamp
+      gestureStartT.current = performance.now()
       velocity.current = 0
       lastMoveLogT.current = 0
 
@@ -497,13 +517,14 @@ export function PagePager({
       }
     }
 
-    // Capture phase: see events before AbsolutePointerOverlay setPointerCapture.
     vp.addEventListener('pointerdown', onPointerDown, { capture: true, passive: true })
+    vp.addEventListener('touchmove', onTouchMove, { capture: true, passive: false })
     addLog(`[pager] listeners ready pages=${pageCount} idx=${indexRef.current}`)
     paint(indexRef.current, false)
 
     return () => {
       vp.removeEventListener('pointerdown', onPointerDown, true)
+      vp.removeEventListener('touchmove', onTouchMove, true)
       detachWindow()
       cancelAnim()
     }

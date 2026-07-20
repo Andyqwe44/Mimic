@@ -135,10 +135,10 @@ export const NAV = {
   sideCompact: 'w-14',    // 56px — tablet icon rail
   /** Bottom tab bar content height (safe-area applied outside) */
   bottomH: 'h-14',        // 56px
-  touchMin: 'min-h-11',   // 44px touch target
-  /** Sliding focus pill — shorter than touch target so it sits higher */
-  pillH: 'h-9',           // 36px
-  pillTop: 'top-1.5',     // 6px from content top
+  touchMin: 'min-h-11',   // 44px hit area (no gray press chrome)
+  /** Sliding focus pill — slightly taller + lower than before */
+  pillH: 'h-10',          // 40px
+  pillTop: 'top-2',       // 8px from content top
   /** Thin accent ring — rgba token (not opacity color-mix) */
   pillRing: 'ring-[0.5px] ring-inset ring-accent-ring',
   /** Soft fill for sliding focus pill — rgba token */
@@ -158,28 +158,21 @@ export const NAV = {
   bottomGapRem: 0.25,
   /**
    * Paged horizontal track (Clash Royale–style).
-   * Drag = 1:1; snap on release via distance OR fling; reverse (折返) cancels.
+   * Logs showed tiny dx≈15 + weak fling falsely committing — tighten fling gates.
    */
-  /** Axis lock deadzone (px) before choosing H vs V */
-  pagerAxisLockPx: 10,
-  /** Prefer H unless V clearly dominates (reduces scrollable-page false V locks) */
-  pagerVerticalBias: 1.15,
-  /** Overscroll past first/last page: displayed offset *= resistance */
+  pagerAxisLockPx: 12,
+  /** Prefer H unless V clearly dominates */
+  pagerVerticalBias: 1.25,
   pagerRubber: 0.38,
-  /** Cap edge stretch as a fraction of one page width */
   pagerRubberMax: 0.28,
-  /** Commit neighbor when |delta| from start page ≥ this (≈20% screen — not 50%) */
-  pagerSnapThreshold: 0.2,
-  /** Fling: pages/ms; only if move is fresh (pagerFlingStaleMs) */
-  pagerFlingPagesPerMs: 0.0009,
-  pagerFlingStaleMs: 90,
-  pagerFlingMinDelta: 0.04,
-  /**
-   * Reverse cancel (折返): if peak excursion − current |delta| ≥ this
-   * and release is still below snap threshold → spring back to start page.
-   */
+  /** ~18% width to commit by distance */
+  pagerSnapThreshold: 0.18,
+  /** Fling must be clearly fast AND already moved a real distance (see minDelta/minMs) */
+  pagerFlingPagesPerMs: 0.0022,
+  pagerFlingStaleMs: 60,
+  pagerFlingMinDelta: 0.14,
+  pagerFlingMinMs: 90,
   pagerReverseCancel: 0.1,
-  /** Snap settle ms */
   pagerSnapMs: 220,
   pagerSnapEase: [0.22, 0.9, 0.28, 1] as const,
 } as const

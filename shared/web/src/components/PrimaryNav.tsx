@@ -85,7 +85,7 @@ export function PrimaryNav({
                   aria-current={active ? 'page' : undefined}
                   onClick={() => select(it.id)}
                   className={`w-full ${NAV.touchMin} flex flex-col items-center justify-center gap-0.5 px-1
-                    ${RADIUS.lg} text-text-secondary active:bg-bg-hover`}
+                    ${RADIUS.lg} text-text-secondary`}
                 >
                   {it.icon}
                   <span className={`${TEXT.tiny} font-medium truncate max-w-full`}>{it.label}</span>
