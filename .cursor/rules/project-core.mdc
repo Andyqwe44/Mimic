@@ -19,12 +19,13 @@ alwaysApply: true
 3. **存档** = 更新 README + 更新 CLAUDE.md/本规则相关摘要 + commit（用户明确要求时）。
 4. **禁止原生 HTML `title`** — 只用 `<Tooltip text="...">`。
 5. **禁止欺骗** — C++/原生不静默改参数；失败返回 `{"ok":false,"error":"..."}`；前端画的 = 实际发的。
-6. **前端交互优化** — 先状态转换表 → 等用户确认 → 再改码。
+6. **前端交互优化** — 先状态转换表 → 等用户确认 → 再改码 → **同步 README**（见 12）。
 7. **CLAUDE.md 精简** — 详细历史进 `CLAUDE.old.md`；Cursor 细则在 `.cursor/rules/`。
 8. **版本真相源** — PC 只改 `pc/client/src/version.h`；Server 改 `server/package.json`；Android 改 `android/package.json` + `android/version.json`（lib DLL 用 Build.ps1 `$LibVer`）。
 9. **跨进程参数不加引号包路径**；被调进程必须剥两端引号。
 10. **禁止编造工具返回值** — 未调用就说未调用；关键结论先 `git` 核实。
 11. **改完直接发版** — 功能/修复合入后默认跑 `Release.ps1`（相关端）上 CDN；**不以 Dev/HMR 验收**，以装机包 / 应用内更新后的发行版实测为准。
+12. **状态转换表进 README** — 登录/通话/设备/导航相关状态转换以根 `README.md`「状态转换表」为 SSOT；新功能或边界修复改了转换，**必须**更新该表（与铁律 6 配套）。
 
 ## 目录速览
 

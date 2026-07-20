@@ -795,6 +795,11 @@ export default function App() {
         setPreviewing(false)
         previewingRef.current = false
         opStateRef.current = 'idle'
+        setPeerRole('idle')
+        setPeerTransport('none')
+        setRemotePeerWindows([])
+        // State table #6/#7 — always return to Peers (logged-in idle), never stay on Monitor shell.
+        setPage('Peers')
         hostCall('set_stream_gate', { enabled: false }).catch(() => {})
         hostCall('set_control_gate', { enabled: false }).catch(() => {})
         addLog(`[Peer] session_end ${d.reason || ''}`)
@@ -1015,6 +1020,15 @@ export default function App() {
     addLog('[Nav] session → Monitor')
   }, [])
 
+  const onPeerSessionEnd = useCallback((reason?: string) => {
+    peerNavDoneRef.current = false
+    setPeerRole('idle')
+    setPeerTransport('none')
+    setRemotePeerWindows([])
+    setPage('Peers')
+    addLog(`[Nav] session end → Peers${reason ? ` (${reason})` : ''}`)
+  }, [])
+
   // ═══ Render ═══
   return (
     <div className="relative h-full flex flex-col bg-bg-primary">
@@ -1158,6 +1172,7 @@ export default function App() {
                   setPeerTransport={setPeerTransport}
                   setRemotePeerWindows={setRemotePeerWindows}
                   onSessionStart={onPeerSessionStart}
+                  onSessionEnd={onPeerSessionEnd}
                 />
               </div>
             )

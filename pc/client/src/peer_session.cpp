@@ -61,6 +61,10 @@ SOCKET g_sig_sock = INVALID_SOCKET;
 std::thread g_sig_reader;
 std::thread g_presence_hb;
 std::atomic<bool> g_sig_running{false};
+// Intent to stay logged in across WS flaps (parity with Android loggedIn).
+std::atomic<bool> g_want_online{false};
+std::atomic<bool> g_reconnecting{false};
+std::atomic<int> g_reconnect_gen{0};
 
 // LAN media
 SOCKET g_lan_listen = INVALID_SOCKET;
@@ -437,6 +441,8 @@ bool ws_handshake(SOCKET s, const std::string& host, uint16_t port, const std::s
 }
 
 void lan_stop_unlocked();
+bool open_signaling_ws(const std::string& http_base, const std::string& token);
+void schedule_ws_reconnect();
 
 void lan_send_frame_sync(uint8_t type, const uint8_t* data, size_t len) {
     // Prefer reliable LAN TCP whenever the socket is up (H.264 + control).
@@ -1133,8 +1139,85 @@ void sig_reader_loop() {
         }
     }
     g_sig_running = false;
+    if (g_sig_sock == s) g_sig_sock = INVALID_SOCKET;
     LOG("peer", "signaling disconnected");
-    emit_ui(R"({"type":"peer_offline"})");
+    // Drop local call immediately if we were mid-session (other side already got session_end).
+    {
+        std::lock_guard<std::mutex> lk(g_mtx);
+        if (g_role != PeerRole::Idle) {
+            g_role = PeerRole::Idle;
+            g_session = {};
+            g_peer_device_id.clear();
+            lan_stop_unlocked();
+            emit_ui(R"({"type":"session_end","reason":"signaling_drop"})");
+        }
+    }
+    if (g_want_online.load() && !g_token.empty()) {
+        schedule_ws_reconnect();
+    } else {
+        g_reconnecting = false;
+        emit_ui(R"({"type":"peer_offline"})");
+    }
+}
+
+void schedule_ws_reconnect() {
+    if (!g_want_online.load() || g_token.empty() || g_signaling_http.empty()) return;
+    const int gen = ++g_reconnect_gen;
+    g_reconnecting = true;
+    emit_ui(R"({"type":"peer_reconnecting","reason":"ws_drop"})");
+    std::thread([gen]() {
+        int attempt = 0;
+        while (g_want_online.load() && gen == g_reconnect_gen.load() && !g_token.empty()) {
+            if (g_sig_running.load() && g_sig_sock != INVALID_SOCKET) {
+                g_reconnecting = false;
+                return;
+            }
+            int delay_ms = 400;
+            if (attempt > 0) {
+                int shift = attempt - 1;
+                if (shift > 5) shift = 5;
+                delay_ms = 1000 * (1 << shift);
+                if (delay_ms > 30000) delay_ms = 30000;
+            }
+            for (int i = 0; i < delay_ms / 50 && g_want_online.load() && gen == g_reconnect_gen.load(); ++i)
+                Sleep(50);
+            if (!g_want_online.load() || gen != g_reconnect_gen.load()) return;
+
+            std::string http, tok;
+            {
+                std::lock_guard<std::mutex> lk(g_mtx);
+                http = g_signaling_http;
+                tok = g_token;
+            }
+            if (http.empty() || tok.empty()) break;
+
+            if (g_sig_reader.joinable() && g_sig_reader.get_id() != std::this_thread::get_id()) {
+                try { g_sig_reader.join(); } catch (...) { /* */ }
+            }
+            if (g_presence_hb.joinable() && g_presence_hb.get_id() != std::this_thread::get_id()) {
+                try { g_presence_hb.join(); } catch (...) { /* */ }
+            }
+
+            LOG("peer", "ws reconnect attempt=%d", attempt + 1);
+            if (open_signaling_ws(http, tok)) {
+                g_reconnecting = false;
+                emit_ui(R"({"type":"peer_online","reconnected":true})");
+                LOG("peer", "ws reconnected");
+                return;
+            }
+            ++attempt;
+            if (attempt >= 12) break;
+        }
+        if (gen != g_reconnect_gen.load()) return;
+        g_reconnecting = false;
+        g_want_online = false;
+        {
+            std::lock_guard<std::mutex> lk(g_mtx);
+            g_token.clear();
+        }
+        emit_ui(R"({"type":"peer_offline"})");
+        LOG_WARN("peer", "ws reconnect gave up");
+    }).detach();
 }
 
 bool open_signaling_ws(const std::string& http_base, const std::string& token) {
@@ -1309,6 +1392,8 @@ std::string peer_login(const std::string& signaling_url,
     if (!open_signaling_ws(g_signaling_http, g_token)) {
         return R"({"ok":false,"error":"ws connect failed"})";
     }
+    g_want_online = true;
+    g_reconnecting = false;
     LOG("peer", "logged in user=%s device=%s", user.c_str(), g_device_id.c_str());
     char out[512];
     snprintf(out, sizeof(out),
@@ -1318,6 +1403,9 @@ std::string peer_login(const std::string& signaling_url,
 }
 
 void peer_logout() {
+    g_want_online = false;
+    g_reconnect_gen.fetch_add(1);
+    g_reconnecting = false;
     g_sig_running = false;
     if (g_sig_sock != INVALID_SOCKET) {
         closesocket(g_sig_sock);
@@ -1342,11 +1430,16 @@ bool peer_online() { return g_sig_running.load() && g_sig_sock != INVALID_SOCKET
 PeerRole peer_role() { return g_role; }
 
 std::string peer_status_json() {
-    char buf[512];
+    char buf[640];
+    const bool logged_in = g_want_online.load() && !g_token.empty();
+    const bool reconnecting = g_reconnecting.load();
     snprintf(buf, sizeof(buf),
-             "{\"ok\":true,\"online\":%s,\"role\":\"%s\",\"user\":\"%s\",\"deviceId\":\"%s\","
+             "{\"ok\":true,\"online\":%s,\"logged_in\":%s,\"reconnecting\":%s,"
+             "\"role\":\"%s\",\"user\":\"%s\",\"deviceId\":\"%s\","
              "\"transport\":\"%s\",\"controlMode\":\"%s\",\"mediaReady\":%s}",
              peer_online() ? "true" : "false",
+             logged_in ? "true" : "false",
+             reconnecting ? "true" : "false",
              role_str(g_role).c_str(),
              g_user.c_str(), g_device_id.c_str(),
              g_transport.c_str(), g_control_mode.c_str(),

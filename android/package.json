@@ -1,8 +1,8 @@
 {
     "name":  "mimic-android",
     "private":  true,
-    "version":  "0.1.37",
-    "mimicReleaseNote":  "Native scroll-snap tabs; controlled auto MediaProjection; LAN transport heal",
+    "version":  "0.1.38",
+    "mimicReleaseNote":  "Peer state machine: instant session_end on peer kill; 10s ringing fuse; roster away",
     "description":  "Mimic Android shell 闂?Capacitor WebView hosting shared/web",
     "scripts":  {
                     "build:web":  "npm --prefix ../shared/web run build",

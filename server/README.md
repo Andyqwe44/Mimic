@@ -48,6 +48,11 @@ Seeded `demo` / `demo` uses the new protocol. Old clients that POST plaintext `p
 WebSocket messages: `presence`, `invite`, `invite_accept`, `invite_reject`, `hangup`, `signal`.
 Server → client: `hello`, `devices`, `session_state`, `invite`, `session_start`, `session_end`, `signal`, `error`.
 
+**Presence / call teardown:** `devices[]` includes `online` + `state` (`online`|`away`).
+On WS close while in an active session, server sends `session_end(peer_disconnect)` **immediately**;
+roster keeps the device as `away` for `OFFLINE_GRACE` (20s) then drops it.
+App state table SSOT: root [README.md](../README.md)「状态转换表」.
+
 `devices` entries: `{ deviceId, deviceName, lanIps, platform, peerProto, online }` — peer devices only.
 
 ## Cloud install (foolproof)

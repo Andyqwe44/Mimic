@@ -12,6 +12,8 @@ type Device = {
   deviceName: string
   lanIps?: string[]
   online?: boolean
+  /** Server presence: online | away (grace) — offline devices are omitted. */
+  state?: 'online' | 'away' | 'offline'
   platform?: string
   peerProto?: number
 }
@@ -31,6 +33,7 @@ export function PeerPanel({
   controlMode,
   onControlMode,
   onSessionStart,
+  onSessionEnd,
 }: {
   expanded: boolean
   onToggle: () => void
@@ -43,6 +46,8 @@ export function PeerPanel({
   onControlMode: (m: 'human' | 'ai') => void
   /** Fired when a peer session becomes active (navigate to Monitor). */
   onSessionStart?: () => void
+  /** Call ended — navigate back to Peers (hangup / peer_disconnect). */
+  onSessionEnd?: (reason?: string) => void
 }) {
   const { t } = useTranslation()
   // Default = public Mimic signaling (Aliyun). Override anytime in the field.
@@ -255,15 +260,21 @@ export function PeerPanel({
         // Role must be synced before Monitor workspace switches layout.
         void refreshStatus().then(() => onSessionStart?.())
       } else if (d.type === 'session_end') {
+        const reason = String(d.reason || '')
         setRole('idle')
         onRole?.('idle')
         setTransport('none')
-        setStatus(t('peer.session_ended'))
+        setStatus(
+          reason === 'peer_disconnect'
+            ? t('peer.peer_device_offline')
+            : t('peer.session_ended'),
+        )
         onTransport?.('none')
         window.dispatchEvent(new CustomEvent('peer-link-stats', {
           detail: { transport: 'none', rtt_ms: rttMsRef.current },
         }))
         onRemoteWindows?.([])
+        onSessionEnd?.(reason)
       } else if (d.type === 'peer_transport') {
         const mode = String(d.mode || 'none')
         setTransport(mode)
@@ -320,7 +331,7 @@ export function PeerPanel({
         void refreshStatus({ pullDevices: true })
       }
     }
-  }, [onRemoteWindows, onTransport, onRole, onSessionStart, refreshStatus, t, pullPeerFrame])
+  }, [onRemoteWindows, onTransport, onRole, onSessionStart, onSessionEnd, refreshStatus, t, pullPeerFrame])
 
   useEffect(() => {
     return onNativePush((d: Record<string, unknown>) => {
@@ -403,6 +414,8 @@ export function PeerPanel({
     onRole?.('idle')
     setTransport('none')
     onTransport?.('none')
+    setStatus(t('peer.session_ended'))
+    onSessionEnd?.('hangup')
   }
 
   const others = devices.filter((d) => d.deviceId !== myId)
@@ -546,17 +559,21 @@ export function PeerPanel({
             {others.length === 0 && (
               <div className="text-[11px] text-text-muted">{t('peer.no_devices')}</div>
             )}
-            {others.map((d) => (
-              <div key={d.deviceId} className="flex items-center gap-2 rounded-lg border border-border px-2 py-1.5 min-w-0">
+            {others.map((d) => {
+              const away = d.state === 'away' || d.online === false
+              const canInvite = role === 'idle' && !away
+              return (
+              <div key={d.deviceId} className={`flex items-center gap-2 rounded-lg border border-border px-2 py-1.5 min-w-0 ${away ? 'opacity-60' : ''}`}>
                 <Monitor className="w-3.5 h-3.5 text-text-muted shrink-0" />
                 <div className="flex-1 min-w-0">
                   <div className="text-xs text-text-primary truncate">{d.deviceName}</div>
                   <div className="text-[10px] text-text-tertiary truncate">
+                    {away ? `${t('peer.device_away')} · ` : ''}
                     {d.platform ? `${d.platform} · ` : ''}{d.deviceId}
                     {d.peerProto ? ` · v${d.peerProto}` : ''}
                   </div>
                 </div>
-                {role === 'idle' && (
+                {canInvite && (
                   <button type="button"
                     className="text-[11px] px-2 py-1 rounded-md bg-accent text-white shrink-0"
                     onClick={() => invite(d.deviceId)}>
@@ -564,7 +581,8 @@ export function PeerPanel({
                   </button>
                 )}
               </div>
-            ))}
+              )
+            })}
           </div>
         </>
       )}

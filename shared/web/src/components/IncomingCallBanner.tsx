@@ -8,7 +8,8 @@ import { isAndroidHost } from '../lib/platform'
 import { ActionBtn } from './Toolkit'
 import { TEXT, RADIUS } from '../lib/design'
 
-const INCOMING_TIMEOUT_MS = 45_000
+/** Ringing fuse — auto peer_reject when burned out (state table #9). */
+const INCOMING_TIMEOUT_MS = 10_000
 
 type Incoming = { fromDeviceId: string; fromDeviceName: string }
 
@@ -138,11 +139,15 @@ export function IncomingCallBanner({
     ? t('peer.call_banner_android', { name: incoming.fromDeviceName })
     : t('peer.call_banner_pc', { name: incoming.fromDeviceName })
 
+  // Fuse under banner: full → empty over INCOMING_TIMEOUT_MS (warn tone).
   const progressBar = (
-    <div className="mt-2.5 -mx-3 -mb-2.5 h-1 overflow-hidden rounded-b-[inherit] bg-bg-tertiary">
+    <div
+      className="mt-2.5 -mx-3 -mb-2.5 h-1.5 overflow-hidden rounded-b-[inherit] bg-bg-tertiary"
+      aria-hidden
+    >
       <div
-        className="h-full bg-accent origin-left"
-        style={{ width: `${remain * 100}%`, transition: 'width 50ms linear' }}
+        className="h-full bg-warning origin-left"
+        style={{ width: `${remain * 100}%`, transition: 'width 80ms linear' }}
       />
     </div>
   )

@@ -58,6 +58,58 @@ docs/
 2. Every MimicServer install joins Bootstrap (`/api/cluster/join` + heartbeat)
 3. Clients default-login to Bootstrap; cross-node presence is later (roadmap)
 
+## 状态转换表（SSOT · 铁律 6 + 12）
+
+> 新功能若改变登录 / 通话 / 设备在线 / 页面跳转，**先出表 → 确认 → 改码 → 更新本节**。  
+> 四层正交：**Auth**（认证）· **Call**（通话）· **Device**（目录项）· **Page**（导航）。
+
+### 状态列表
+
+| 层 | 状态 | 含义 |
+|----|------|------|
+| Auth | `LoggedOut` | 无 token / 已 logout |
+| Auth | `LoggedIn` | 持有 token，信令在线或意图保持登录 |
+| Auth | `Reconnecting` | 持有 token，本机 WS 断、正在重连（**不是**登出） |
+| Call | `Idle` | 已登录，无呼叫 |
+| Call | `Outgoing` | 已发出邀请 |
+| Call | `Ringing` | 来电振铃（Banner + 导火索进度条） |
+| Call | `InCall` | 会话中（`controller` / `controlled`） |
+| Device | `online` / `away` / （移除=offline） | 对端 live WS / grace 中 / 确认离线 |
+| Page | `Peers` / `Monitor` / … | 通话结束**强制**回 Peers |
+
+### 转换表
+
+| # | Auth | Call | 事件 | → Auth | → Call | Page | 可见反馈 |
+|---|------|------|------|--------|--------|------|----------|
+| 1 | LoggedOut | — | login 成功 | LoggedIn | Idle | Peers | 设备列表 |
+| 2 | LoggedIn | Idle | logout | LoggedOut | — | Peers | 登录表单 |
+| 3 | LoggedIn | Idle | invite 发出 | LoggedIn | Outgoing | Peers | 呼叫中 |
+| 4 | LoggedIn | Idle | 收到 invite | LoggedIn | Ringing | Peers | Banner |
+| 5 | LoggedIn | Outgoing/Ringing | session_start | LoggedIn | InCall | **Monitor** | 进入通话 |
+| 6 | LoggedIn | InCall | 本机 hangup | LoggedIn | Idle | **Peers** | 会话已结束 |
+| 7 | LoggedIn | InCall | 对方杀进程 / WS 死 → `session_end(peer_disconnect)` | **LoggedIn** | **Idle** | **Peers** | **对方设备已离线**；目录 away→移除 |
+| 8 | LoggedIn | Outgoing | 对方 reject | LoggedIn | Idle | Peers | 邀请被拒绝 |
+| 9 | LoggedIn | Ringing | **本机 Banner 超时（10s 导火索烧完）** → `peer_reject` | LoggedIn | Idle | Peers | Banner 关闭 |
+| 10 | LoggedIn | * | 本机 WS 断 | Reconnecting | 保持或本地降级 | 保持/Peers | 重连中 |
+| 11 | Reconnecting | * | WS 重连成功 | LoggedIn | 保持或 session_state | 保持 | 已在线 |
+| 12 | Reconnecting | InCall | token grace 耗尽 | LoggedOut/需重登 | Idle | Peers | 连接丢失 |
+| 13 | LoggedIn | Idle | 目录某设备 away | LoggedIn | Idle | Peers | 灰显、禁用 Invite |
+| 14 | LoggedIn | Idle | 目录移除设备 | LoggedIn | Idle | Peers | 列表更新 |
+
+**#7 要点**：拆通话**立刻**（不经 20s roster grace）；Auth 不变。Roster 仍可用 20s `away` 防 Android 切后台闪烁。
+
+**#9 要点**：`IncomingCallBanner` 底部导火索进度条，`INCOMING_TIMEOUT_MS = 10000`。
+
+### 实现落点
+
+| 层 | 代码 |
+|----|------|
+| Auth / Call native | `pc/client/src/peer_session.cpp` · `android/.../PeerSession.kt` |
+| Roster | `server/server.js` `devicesForUser`（`online` + `state`） |
+| Banner #9 | `shared/web/src/components/IncomingCallBanner.tsx` |
+| Page 导航 | `App.tsx` `session_end` → `Peers`；`onPeerSessionStart` → `Monitor` |
+| UI 投影 | `PeerPanel.tsx` |
+
 ## Build & release (PC + Server)
 
 ```powershell

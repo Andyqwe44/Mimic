@@ -356,8 +356,8 @@ function devicesForUser(user) {
   const list = [];
   for (const [, s] of sessions) {
     if (s.user !== user) continue;
-    const live = s.ws && s.ws.readyState === 1;
-    // Still list during offline grace so peers do not flicker to "0 devices".
+    const live = !!(s.ws && s.ws.readyState === 1);
+    // Still list during offline grace (away) so peers do not flicker to "0 devices".
     if (!live && !s.offlineTimer) continue;
     list.push({
       deviceId: s.deviceId,
@@ -365,11 +365,24 @@ function devicesForUser(user) {
       lanIps: s.lanIps || [],
       platform: s.platform || 'unknown',
       peerProto: s.peerProto || 1,
-      // Optimistic online during grace — invite still needs a live WS (findByDevice).
-      online: true,
+      // Honest online — invite needs live WS (findByDevice). Grace = away.
+      online: live,
+      state: live ? 'online' : 'away',
     });
   }
   return list;
+}
+
+/** End active call for this device immediately; notify the other side. */
+function endActiveSessionForDevice(user, deviceId, reason) {
+  const cur = activeSessions.get(user);
+  if (!cur) return false;
+  if (cur.controllerId !== deviceId && cur.controlledId !== deviceId) return false;
+  activeSessions.delete(user);
+  const otherId = cur.controllerId === deviceId ? cur.controlledId : cur.controllerId;
+  const other = findByDevice(user, otherId);
+  send(other, { type: 'session_end', reason: reason || 'peer_disconnect', session: cur });
+  return true;
 }
 
 function findByDevice(user, deviceId) {
@@ -825,8 +838,14 @@ wss.on('connection', (ws, req) => {
     }
     console.log(`[signaling] offline ${sess.user}/${sess.deviceName} (grace ${OFFLINE_GRACE_MS}ms)`);
     sess.ws = null;
-    // Delay roster drop + session teardown — Android Home often flaps WS for a few seconds.
-    // Immediate broadcast made PC show "0 devices" while the phone was only backgrounded.
+
+    // Call teardown is immediate (state table #7) — do not wait for roster grace.
+    // Roster stays "away" during OFFLINE_GRACE so Android Home flap does not flicker.
+    if (endActiveSessionForDevice(sess.user, sess.deviceId, 'peer_disconnect')) {
+      console.log(`[signaling] session_end peer_disconnect ${sess.user}/${sess.deviceName}`);
+    }
+    broadcastDevices(sess.user);
+
     if (sess.offlineTimer) {
       try { clearTimeout(sess.offlineTimer); } catch { /* */ }
       sess.offlineTimer = null;
@@ -835,14 +854,6 @@ wss.on('connection', (ws, req) => {
       sess.offlineTimer = null;
       if (sess.ws != null) return; // reconnected within grace
       console.log(`[signaling] offline confirmed ${sess.user}/${sess.deviceName}`);
-      const cur = activeSessions.get(sess.user);
-      if (cur && (cur.controllerId === sess.deviceId || cur.controlledId === sess.deviceId)) {
-        activeSessions.delete(sess.user);
-        const otherId =
-          cur.controllerId === sess.deviceId ? cur.controlledId : cur.controllerId;
-        const other = findByDevice(sess.user, otherId);
-        send(other, { type: 'session_end', reason: 'peer_disconnect', session: cur });
-      }
       // Keep token briefly so the same device can re-open /ws?token=... without re-login.
       const tok = token;
       setTimeout(() => {

@@ -12,6 +12,7 @@ export function ControlView({
   setPeerTransport,
   setRemotePeerWindows,
   onSessionStart,
+  onSessionEnd,
 }: {
   peerControlMode: 'human' | 'ai'
   setPeerControlMode: (m: 'human' | 'ai') => void
@@ -19,6 +20,7 @@ export function ControlView({
   setPeerTransport: (m: string) => void
   setRemotePeerWindows: (w: Array<{ title: string; hwnd: number; id?: string }>) => void
   onSessionStart?: () => void
+  onSessionEnd?: (reason?: string) => void
 }) {
   const [peerExpanded, setPeerExpanded] = useState(true)
   const [shizukuExpanded, setShizukuExpanded] = useState(true)
@@ -42,6 +44,7 @@ export function ControlView({
           setRemotePeerWindows(wins)
         }}
         onSessionStart={onSessionStart}
+        onSessionEnd={onSessionEnd}
       />
     </div>
   )
