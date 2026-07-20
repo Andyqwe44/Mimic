@@ -1,5 +1,5 @@
 // Native overflow-x + scroll-snap (finger) · nav tap = scrollTo({ behavior:'smooth' }).
-// Last user action wins via actionSeq — old snap settle must never override a newer nav tap.
+// Last user action wins via actionSeq. After nav land, snap stays off (no hold-correct flash).
 import {
   Children,
   useEffect,
@@ -77,19 +77,24 @@ function clampIndex(i: number, pageCount: number): number {
   return Math.max(0, Math.min(pageCount - 1, i))
 }
 
-/**
- * Hard-stop in-flight fling / snap / smooth. overflow lock is brief and restores
- * immediately — needed so a newer nav tap is not overridden by an older snap.
- */
-function hardStopScroll(vp: HTMLElement) {
-  const x = vp.scrollLeft
+/** Turn off snap so a newer smooth / finger gesture is not fought by compositor snap. */
+function disarmSnap(vp: HTMLElement) {
   vp.style.scrollSnapType = 'none'
-  const prev = vp.style.overflowX
-  vp.style.overflowX = 'hidden'
-  vp.scrollLeft = x
-  void vp.offsetWidth
-  vp.style.overflowX = prev
-  vp.scrollLeft = x
+}
+
+function enableFingerSnap(vp: HTMLElement) {
+  vp.style.scrollSnapType = 'x mandatory'
+}
+
+/** Cancel in-flight smooth at current offset (finger grab). No overflow lock. */
+function cancelScrollAtCurrent(vp: HTMLElement) {
+  const x = vp.scrollLeft
+  disarmSnap(vp)
+  try {
+    vp.scrollTo({ left: x, behavior: 'instant' as ScrollBehavior })
+  } catch {
+    vp.scrollLeft = x
+  }
 }
 
 export function PagePager({
@@ -175,8 +180,8 @@ export function PagePager({
   const settleArmed = () => settleArmSeq.current === actionSeq.current && settleArmSeq.current >= 0
 
   /**
-   * End nav smooth. Never jumps if already on slot (avoids end hitch).
-   * Ignores finish if a newer user action superseded this nav.
+   * End nav smooth. Keep snap OFF after land — re-enabling snap here caused
+   * compositor pull + hold-correct flash. Snap returns on next finger-down.
    */
   const finishNavScroll = (reason: string, forSeq: number) => {
     if (forSeq !== actionSeq.current) {
@@ -191,7 +196,6 @@ export function PagePager({
     programmatic.current = false
     if (target === null || !vp || w <= 0) {
       navIntent.current = null
-      if (vp) vp.style.scrollSnapType = 'x mandatory'
       return
     }
     const exact = target * w
@@ -199,13 +203,17 @@ export function PagePager({
     vp.style.scrollSnapType = 'none'
     // Only assign if meaningfully off — assigning when already there = hitch.
     if (dist > 2) {
-      vp.scrollLeft = exact
+      try {
+        vp.scrollTo({ left: exact, behavior: 'instant' as ScrollBehavior })
+      } catch {
+        vp.scrollLeft = exact
+      }
     }
     syncPill(exact, false)
     navIntent.current = null
     holdIdx.current = target
     settleArmSeq.current = -1
-    vp.style.scrollSnapType = 'x mandatory'
+    // snap stays none — finger pointerdown re-enables
     addLog(`[pager] intent-done idx=${target} (${reason}) dist=${dist.toFixed(1)}`)
   }
 
@@ -228,14 +236,20 @@ export function PagePager({
     holdIdx.current = null
     fingerDown.current = false
 
-    hardStopScroll(vp)
+    // Disarm snap only — do NOT freeze at current (that hitch = 顿挫).
+    // scrollTo(smooth) cancels the previous scroll and retargets from here.
+    disarmSnap(vp)
 
     const targetLeft = targetIdx * w
     const from = vp.scrollLeft
     navIntent.current = targetIdx
 
     if (reduceMotion.current || Math.abs(from - targetLeft) < 1) {
-      vp.scrollLeft = targetLeft
+      try {
+        vp.scrollTo({ left: targetLeft, behavior: 'instant' as ScrollBehavior })
+      } catch {
+        vp.scrollLeft = targetLeft
+      }
       syncPill(targetLeft, false)
       finishNavScrollRef.current('instant', mySeq)
       return
@@ -343,8 +357,13 @@ export function PagePager({
       const nearest = clampIndex(Math.round(vp.scrollLeft / w), pageCount)
       const exact = nearest * w
       if (Math.abs(vp.scrollLeft - exact) > 1) {
-        vp.scrollLeft = exact
+        try {
+          vp.scrollTo({ left: exact, behavior: 'instant' as ScrollBehavior })
+        } catch {
+          vp.scrollLeft = exact
+        }
       }
+      enableFingerSnap(vp)
       syncPill(vp.scrollLeft, false)
       holdIdx.current = nearest
       commitIndex(nearest)
@@ -358,7 +377,8 @@ export function PagePager({
         || navIntent.current !== null
       syncPill(vp.scrollLeft, dragging)
 
-      // Hold slot against leftover snap after nav (no page commit).
+      // Safety net while snap is off after nav — correct drift without re-enabling snap
+      // (re-enable was a feedback loop: snap pull → hold-correct → flash).
       if (
         !fingerDown.current
         && holdIdx.current !== null
@@ -369,8 +389,11 @@ export function PagePager({
         const exact = holdIdx.current * w
         if (Math.abs(vp.scrollLeft - exact) > 2) {
           vp.style.scrollSnapType = 'none'
-          vp.scrollLeft = exact
-          vp.style.scrollSnapType = 'x mandatory'
+          try {
+            vp.scrollTo({ left: exact, behavior: 'instant' as ScrollBehavior })
+          } catch {
+            vp.scrollLeft = exact
+          }
           syncPill(exact, false)
           addLog(`[pager] hold-correct idx=${holdIdx.current}`)
           return
@@ -413,10 +436,11 @@ export function PagePager({
         clearWatchdog()
         programmatic.current = false
         navIntent.current = null
-        hardStopScroll(vp)
-        vp.style.scrollSnapType = 'x mandatory'
+        cancelScrollAtCurrent(vp)
         addLog(`[pager] intent-cancel (finger) seq=${actionSeq.current}`)
       }
+      // Re-enable snap only for finger gestures (kept off after nav land).
+      enableFingerSnap(vp)
       fingerDown.current = true
       clearSettleTimer()
     }

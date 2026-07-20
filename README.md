@@ -109,11 +109,11 @@ docs/
 | 手指横滑 + 松手 | `overflow-x` + `scroll-snap` |
 | 底栏点选 | `scrollTo({ behavior: 'smooth' })` |
 
-**最后一次用户动作胜出**（`actionSeq`）：点选会 `hardStop` 旧 snap，并 `settleArmSeq=-1`；只有**同一次**手指 gesture 的 settle 可 `commit`。点选落地后 `holdIdx` 抵制残余 snap 把页拽走。
+**最后一次用户动作胜出**（`actionSeq`）：点选只 `disarmSnap` 再 `scrollTo(smooth)` 改道（不 freeze / 不 overflow 锁，避免顿挫）；`settleArmSeq=-1` 使旧 settle 不得 commit。点选落地后 **snap 保持关闭**（下次手指按下才开），避免 `hold-correct` 闪现。
 
 | # | 事件 | → Page | 说明 |
 |---|------|--------|------|
-| P1 | 底栏点选 C | **C** | 杀 A→B snap → smooth→C |
+| P1 | 底栏点选 C | **C** | disarm snap → smooth→C（无硬停） |
 | P2 | 半滑松手未完 + 点 C | **C** | 同上；旧 settle 不得 commit B |
 | P3 | 手指滑到底 | nearest | 仅 `settleArmSeq===actionSeq` 可 commit |
 

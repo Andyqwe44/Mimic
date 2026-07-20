@@ -61,6 +61,8 @@ SOCKET g_sig_sock = INVALID_SOCKET;
 std::thread g_sig_reader;
 std::thread g_presence_hb;
 std::atomic<bool> g_sig_running{false};
+/** Last presence fingerprint sent over WS (name|ips|platform|proto). Empty = never sent. */
+std::string g_last_presence_fp;
 // Intent to stay logged in across WS flaps (parity with Android loggedIn).
 std::atomic<bool> g_want_online{false};
 std::atomic<bool> g_reconnecting{false};
@@ -390,6 +392,15 @@ bool ws_send_frame(SOCKET s, uint8_t opcode, const uint8_t* data, size_t len) {
     return send_all(s, (const char*)masked.data(), (int)len);
 }
 
+std::string presence_fingerprint(const std::vector<std::string>& ips) {
+    std::string fp = g_device_name + "|windows|2|";
+    for (size_t i = 0; i < ips.size(); ++i) {
+        if (i) fp += ",";
+        fp += ips[i];
+    }
+    return fp;
+}
+
 std::string build_presence_json() {
     g_lan_ips = collect_lan_ips();
     std::string ips = "[";
@@ -403,18 +414,36 @@ std::string build_presence_json() {
            ",\"platform\":\"windows\",\"peerProto\":2}";
 }
 
-void presence_heartbeat_loop() {
-    // Keep session lastSeen alive. Device roster is server-pushed on join/leave
-    // (and presence only when lanIps/name/platform actually change).
+/** Send presence only when fingerprint changed (or force). Returns false on socket error. */
+bool send_presence_if_changed(SOCKET s, bool force) {
+    g_lan_ips = collect_lan_ips();
+    std::string fp = presence_fingerprint(g_lan_ips);
+    if (!force && fp == g_last_presence_fp) return true;
+    std::string presence = build_presence_json();
+    // rebuild used collect again — keep fp in sync with what we actually send
+    fp = presence_fingerprint(g_lan_ips);
+    if (!ws_send_text(s, presence)) return false;
+    g_last_presence_fp = fp;
+    LOG("peer", "presence sent (force=%d ips=%zu)", force ? 1 : 0, g_lan_ips.size());
+    return true;
+}
+
+void ws_send_close(SOCKET s, uint16_t code) {
+    uint8_t payload[2] = { (uint8_t)(code >> 8), (uint8_t)(code & 0xFF) };
+    ws_send_frame(s, 0x8, payload, 2);
+}
+
+void presence_watch_loop() {
+    // Local IP scan only — WS traffic only when name/LAN IPs actually change.
+    // Liveness is server WS ping/pong (20s), not app-level presence spam.
     while (g_sig_running.load()) {
-        for (int i = 0; i < 150 && g_sig_running.load(); ++i)
-            Sleep(100); // ~15s
+        for (int i = 0; i < 50 && g_sig_running.load(); ++i)
+            Sleep(100); // ~5s local check
         if (!g_sig_running.load()) break;
         SOCKET s = g_sig_sock;
         if (s == INVALID_SOCKET) break;
-        std::string presence = build_presence_json();
-        if (!ws_send_text(s, presence)) {
-            LOG_WARN("peer", "presence heartbeat send failed");
+        if (!send_presence_if_changed(s, false)) {
+            LOG_WARN("peer", "presence watch send failed");
             break;
         }
     }
@@ -1251,15 +1280,15 @@ bool open_signaling_ws(const std::string& http_base, const std::string& token) {
     }
     g_sig_sock = s;
     g_sig_running = true;
+    g_last_presence_fp.clear();
     g_sig_reader = std::thread(sig_reader_loop);
     if (g_presence_hb.joinable()) {
         // previous login should have joined; detach if somehow still running
         g_presence_hb.detach();
     }
-    g_presence_hb = std::thread(presence_heartbeat_loop);
-    // announce presence
-    std::string presence = build_presence_json();
-    ws_send_text(s, presence);
+    g_presence_hb = std::thread(presence_watch_loop);
+    // Announce once on connect; further sends only on IP/name change.
+    send_presence_if_changed(s, true);
     ws_send_text(s, R"({"type":"list_devices"})");
     return true;
 }
@@ -1408,9 +1437,13 @@ void peer_logout() {
     g_reconnecting = false;
     g_sig_running = false;
     if (g_sig_sock != INVALID_SOCKET) {
+        // Intentional offline: tell server immediately (skip away grace), then WS close.
+        ws_send_text(g_sig_sock, R"({"type":"goodbye"})");
+        ws_send_close(g_sig_sock, 1000);
         closesocket(g_sig_sock);
         g_sig_sock = INVALID_SOCKET;
     }
+    g_last_presence_fp.clear();
     if (g_sig_reader.joinable()) {
         if (g_sig_reader.get_id() != std::this_thread::get_id()) g_sig_reader.join();
         else g_sig_reader.detach();
