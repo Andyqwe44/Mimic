@@ -1,8 +1,8 @@
 {
     "name":  "mimic-android",
     "private":  true,
-    "version":  "0.1.43",
-    "mimicReleaseNote":  "Fix pager: no setPointerCapture kill; window tracking; snap by >50% coverage",
+    "version":  "0.1.44",
+    "mimicReleaseNote":  "Pager debug logs; steal H over overlays; 20%+fling+reverse snap",
     "description":  "Mimic Android shell 闂?Capacitor WebView hosting shared/web",
     "scripts":  {
                     "build:web":  "npm --prefix ../shared/web run build",

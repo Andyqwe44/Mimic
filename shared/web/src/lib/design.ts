@@ -157,27 +157,29 @@ export const NAV = {
   bottomGap: 'gap-1',
   bottomGapRem: 0.25,
   /**
-   * Paged horizontal track (Clash Royale–style snap slots).
-   * Drag = 1:1 follow; snap ONLY on release. pageCount = PRIMARY_PAGES.length.
+   * Paged horizontal track (Clash Royale–style).
+   * Drag = 1:1; snap on release via distance OR fling; reverse (折返) cancels.
    */
-  /** Axis lock: |dx| must exceed this (px) and beat |dy| before horizontal drag */
+  /** Axis lock deadzone (px) before choosing H vs V */
   pagerAxisLockPx: 10,
+  /** Prefer H unless V clearly dominates (reduces scrollable-page false V locks) */
+  pagerVerticalBias: 1.15,
   /** Overscroll past first/last page: displayed offset *= resistance */
   pagerRubber: 0.38,
   /** Cap edge stretch as a fraction of one page width */
   pagerRubberMax: 0.28,
+  /** Commit neighbor when |delta| from start page ≥ this (≈20% screen — not 50%) */
+  pagerSnapThreshold: 0.2,
+  /** Fling: pages/ms; only if move is fresh (pagerFlingStaleMs) */
+  pagerFlingPagesPerMs: 0.0009,
+  pagerFlingStaleMs: 90,
+  pagerFlingMinDelta: 0.04,
   /**
-   * Fling commits neighbor only if finger still moving (see pagerFlingStaleMs)
-   * and displacement from gesture-start page exceeds pagerFlingMinDelta.
+   * Reverse cancel (折返): if peak excursion − current |delta| ≥ this
+   * and release is still below snap threshold → spring back to start page.
    */
-  pagerFlingPagesPerMs: 0.0012,
-  /** Ignore fling if no pointermove for this long (ms) — stops stale-velocity snaps */
-  pagerFlingStaleMs: 80,
-  /** Min |progress - startPage| before fling can change page (allows mid-drag regret) */
-  pagerFlingMinDelta: 0.12,
-  /** Position threshold from start page to commit neighbor (0.5 = halfway) */
-  pagerSnapThreshold: 0.5,
-  /** Snap settle when releasing mid-slot (ms) — short bounce-home */
+  pagerReverseCancel: 0.1,
+  /** Snap settle ms */
   pagerSnapMs: 220,
   pagerSnapEase: [0.22, 0.9, 0.28, 1] as const,
 } as const
