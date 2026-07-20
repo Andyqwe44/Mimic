@@ -85,28 +85,21 @@ class PeerSession(
     @Volatile private var h264DropCount = 0
     @Volatile private var reconnectAttempt = 0
     private val reconnectRunnable = Runnable { tryReconnect() }
-    private val presenceHb = object : Runnable {
+    @Volatile private var lastPresenceFp: String = ""
+    private val presenceWatch = object : Runnable {
         override fun run() {
             if (!running.get() || !loggedIn) return
             if (!online) {
-                // Keep hb scheduled so presence resumes right after reconnect.
-                if (running.get()) keepHandler().postDelayed(this, PRESENCE_MS)
+                // Keep watch scheduled so IP/name changes resume right after reconnect.
+                if (running.get()) keepHandler().postDelayed(this, PRESENCE_WATCH_MS)
                 return
             }
             try {
-                sendWs(
-                    JSONObject()
-                        .put("type", "presence")
-                        .put("deviceName", deviceName)
-                        .put("lanIps", JSONArray(collectLanIps()))
-                        .put("platform", "android")
-                        .put("peerProto", 2),
-                )
-                // Device list is server-pushed on join/leave; no periodic list_devices.
+                sendPresenceIfChanged(force = false)
             } catch (e: Exception) {
-                Log.w(tag, "presence hb", e)
+                Log.w(tag, "presence watch", e)
             }
-            if (running.get()) keepHandler().postDelayed(this, PRESENCE_MS)
+            if (running.get()) keepHandler().postDelayed(this, PRESENCE_WATCH_MS)
         }
     }
 
@@ -263,8 +256,8 @@ class PeerSession(
             role = "idle"
             reconnectAttempt = 0
             PeerKeepAliveService.start(context)
-            keepHandler().removeCallbacks(presenceHb)
-            keepHandler().postDelayed(presenceHb, PRESENCE_MS)
+            keepHandler().removeCallbacks(presenceWatch)
+            keepHandler().postDelayed(presenceWatch, PRESENCE_WATCH_MS)
             Log.i(tag, "logged in user=$user device=$deviceId")
             JSONObject()
                 .put("ok", true)
@@ -295,9 +288,9 @@ class PeerSession(
     fun logout(): JSONObject {
         running.set(false)
         keepHandler().removeCallbacks(reconnectRunnable)
-        keepHandler().removeCallbacks(presenceHb)
+        keepHandler().removeCallbacks(presenceWatch)
         main.removeCallbacks(reconnectRunnable)
-        main.removeCallbacks(presenceHb)
+        main.removeCallbacks(presenceWatch)
         reconnectAttempt = 0
         reconnecting = false
         loggedIn = false
@@ -305,6 +298,8 @@ class PeerSession(
         try { udp?.stop() } catch (_: Exception) {}
         udp = null
         lan.stop()
+        // Intentional offline: skip server away grace, then close WS.
+        try { sendWs(JSONObject().put("type", "goodbye")) } catch (_: Exception) {}
         try { ws?.close(1000, "logout") } catch (_: Exception) {}
         ws = null
         token = ""
@@ -312,6 +307,7 @@ class PeerSession(
         role = "idle"
         transport = "none"
         peerDeviceId = ""
+        lastPresenceFp = ""
         PeerKeepAliveService.stop(context)
         return JSONObject().put("ok", true)
     }
@@ -667,14 +663,8 @@ class PeerSession(
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 latchOk.set(true)
                 latchDone.countDown()
-                sendWs(
-                    JSONObject()
-                        .put("type", "presence")
-                        .put("deviceName", deviceName)
-                        .put("lanIps", JSONArray(collectLanIps()))
-                        .put("platform", "android")
-                        .put("peerProto", 2),
-                )
+                lastPresenceFp = ""
+                sendPresenceIfChanged(force = true)
                 sendWs(JSONObject().put("type", "list_devices"))
             }
 
@@ -810,9 +800,9 @@ class PeerSession(
                 reconnecting = false
                 reconnectAttempt = 0
                 PeerKeepAliveService.start(context)
-                // Resume presence heartbeat after reconnect.
-                keepHandler().removeCallbacks(presenceHb)
-                keepHandler().postDelayed(presenceHb, PRESENCE_MS)
+                // Resume presence watch after reconnect (onOpen already force-sent).
+                keepHandler().removeCallbacks(presenceWatch)
+                keepHandler().postDelayed(presenceWatch, PRESENCE_WATCH_MS)
                 push(JSONObject().put("type", "peer_online").put("reconnected", true))
                 Log.i(tag, "ws reconnected")
             } else {
@@ -847,6 +837,23 @@ class PeerSession(
 
     private fun sendWs(msg: JSONObject) {
         ws?.send(msg.toString())
+    }
+
+    /** Local IP scan; WS presence only when name/LAN IPs change (or force on connect). */
+    private fun sendPresenceIfChanged(force: Boolean) {
+        val ips = collectLanIps()
+        val fp = "$deviceName|android|2|${ips.joinToString(",")}"
+        if (!force && fp == lastPresenceFp) return
+        sendWs(
+            JSONObject()
+                .put("type", "presence")
+                .put("deviceName", deviceName)
+                .put("lanIps", JSONArray(ips))
+                .put("platform", "android")
+                .put("peerProto", 2),
+        )
+        lastPresenceFp = fp
+        Log.i(tag, "presence sent force=$force ips=${ips.size}")
     }
 
     private fun push(msg: JSONObject) {
@@ -907,8 +914,8 @@ class PeerSession(
 
     companion object {
         const val DEFAULT_BOOTSTRAP = "http://47.107.43.5:8443"
-        /** Presence interval — shorter than server WS_PING so NAT/OEM freezes recover faster. */
-        private const val PRESENCE_MS = 8_000L
+        /** Local LAN/IP scan interval — WS presence only sent when fingerprint changes. */
+        private const val PRESENCE_WATCH_MS = 5_000L
         private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
 
         fun sha256Hex(password: String): String {

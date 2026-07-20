@@ -727,6 +727,27 @@ wss.on('connection', (ws, req) => {
       return;
     }
 
+    // Intentional logout — remove from roster immediately (no 20s away grace).
+    // Crash / network drop still uses WS close + OFFLINE_GRACE + server ping.
+    if (type === 'goodbye') {
+      const user = sess.user;
+      const name = sess.deviceName;
+      sess.intentionalOffline = true;
+      if (sess.offlineTimer) {
+        try { clearTimeout(sess.offlineTimer); } catch { /* */ }
+        sess.offlineTimer = null;
+      }
+      if (endActiveSessionForDevice(user, sess.deviceId, 'hangup')) {
+        console.log(`[signaling] session_end hangup(goodbye) ${user}/${name}`);
+      }
+      sess.ws = null;
+      sessions.delete(token);
+      broadcastDevices(user);
+      console.log(`[signaling] goodbye ${user}/${name}`);
+      try { ws.close(1000, 'goodbye'); } catch { /* */ }
+      return;
+    }
+
     if (type === 'invite') {
       const targetId = String(msg.targetDeviceId || '');
       const peer = findByDevice(sess.user, targetId);
@@ -831,6 +852,11 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('close', () => {
+    // goodbye already deleted session + broadcast
+    if (sess.intentionalOffline) {
+      console.log(`[signaling] close after goodbye ${sess.user}/${sess.deviceName}`);
+      return;
+    }
     // Stale socket after token rebind — do NOT delete session or end peer call.
     if (sess.ws !== ws) {
       console.log(`[signaling] stale close ignored ${sess.user}/${sess.deviceName}`);

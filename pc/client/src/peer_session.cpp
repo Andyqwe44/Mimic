@@ -401,27 +401,20 @@ std::string presence_fingerprint(const std::vector<std::string>& ips) {
     return fp;
 }
 
-std::string build_presence_json() {
+/** Send presence only when fingerprint changed (or force). Returns false on socket error. */
+bool send_presence_if_changed(SOCKET s, bool force) {
     g_lan_ips = collect_lan_ips();
+    std::string fp = presence_fingerprint(g_lan_ips);
+    if (!force && fp == g_last_presence_fp) return true;
     std::string ips = "[";
     for (size_t i = 0; i < g_lan_ips.size(); ++i) {
         if (i) ips += ",";
         ips += "\"" + g_lan_ips[i] + "\"";
     }
     ips += "]";
-    return std::string("{\"type\":\"presence\",\"deviceName\":\"") + g_device_name +
+    std::string presence = std::string("{\"type\":\"presence\",\"deviceName\":\"") + g_device_name +
            "\",\"lanIps\":" + ips +
            ",\"platform\":\"windows\",\"peerProto\":2}";
-}
-
-/** Send presence only when fingerprint changed (or force). Returns false on socket error. */
-bool send_presence_if_changed(SOCKET s, bool force) {
-    g_lan_ips = collect_lan_ips();
-    std::string fp = presence_fingerprint(g_lan_ips);
-    if (!force && fp == g_last_presence_fp) return true;
-    std::string presence = build_presence_json();
-    // rebuild used collect again — keep fp in sync with what we actually send
-    fp = presence_fingerprint(g_lan_ips);
     if (!ws_send_text(s, presence)) return false;
     g_last_presence_fp = fp;
     LOG("peer", "presence sent (force=%d ips=%zu)", force ? 1 : 0, g_lan_ips.size());

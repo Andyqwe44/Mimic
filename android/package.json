@@ -2,7 +2,7 @@
     "name":  "mimic-android",
     "private":  true,
     "version":  "0.1.57",
-    "mimicReleaseNote":  "PagePager: no hardStop hitch; keep snap off after nav (no hold flash)",
+    "mimicReleaseNote":  "Event-driven presence + goodbye logout (no spam heartbeat)",
     "description":  "Mimic Android shell 闂?Capacitor WebView hosting shared/web",
     "scripts":  {
                     "build:web":  "npm --prefix ../shared/web run build",

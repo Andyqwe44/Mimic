@@ -82,7 +82,7 @@ docs/
 | # | Auth | Call | 事件 | → Auth | → Call | Page | 可见反馈 |
 |---|------|------|------|--------|--------|------|----------|
 | 1 | LoggedOut | — | login 成功 | LoggedIn | Idle | Peers | 设备列表 |
-| 2 | LoggedIn | Idle | logout | LoggedOut | — | Peers | 登录表单 |
+| 2 | LoggedIn | Idle | logout（`goodbye`） | LoggedOut | — | Peers | 登录表单；**对端目录立刻移除**（无 away grace） |
 | 3 | LoggedIn | Idle | invite 发出 | LoggedIn | Outgoing | Peers | 呼叫中 |
 | 4 | LoggedIn | Idle | 收到 invite | LoggedIn | Ringing | Peers | Banner |
 | 5 | LoggedIn | Outgoing/Ringing | session_start | LoggedIn | InCall | **Monitor** | 进入通话 |
@@ -96,7 +96,11 @@ docs/
 | 13 | LoggedIn | Idle | 目录某设备 away | LoggedIn | Idle | Peers | 灰显、禁用 Invite |
 | 14 | LoggedIn | Idle | 目录移除设备 | LoggedIn | Idle | Peers | 列表更新 |
 
+**#2 要点**：主动 logout 发 WS `goodbye` → 服务端立刻删 session 并广播；**不做** 20s away。异常断线（杀进程/断网）仍走 close + grace + 服务端 ping。
+
 **#7 要点**：拆通话**立刻**（不经 20s roster grace）；Auth 不变。Roster 仍可用 20s `away` 防 Android 切后台闪烁。
+
+**Presence**：客户端仅在 LAN IP / 设备名变化时发 `presence`（本地约 5s 扫描）；在线探活靠服务端 WS ping（20s），不靠业务层定时 presence。
 
 **#9 要点**：`IncomingCallBanner` 底部导火索进度条，`INCOMING_TIMEOUT_MS = 10000`。
 
@@ -109,13 +113,14 @@ docs/
 | 手指横滑 + 松手 | `overflow-x` + `scroll-snap` |
 | 底栏点选 | `scrollTo({ behavior: 'smooth' })` |
 
-**最后一次用户动作胜出**（`actionSeq`）：点选只 `disarmSnap` 再 `scrollTo(smooth)` 改道（不 freeze / 不 overflow 锁，避免顿挫）；`settleArmSeq=-1` 使旧 settle 不得 commit。点选落地后 **snap 保持关闭**（下次手指按下才开），避免 `hold-correct` 闪现。
+**最后一次用户动作胜出**（`actionSeq`）：点选只 `disarmSnap` 再 `scrollTo(smooth)` 改道（不 freeze / 不 overflow 锁）；`settleArmSeq=-1` 使旧 settle 不得 commit。**同目标已在飞**（finger snap 距目标 ≤0.5 页，或已有 smooth→同页）→ `adopt-snap` / `adopt-nav`，不打断。点选落地后 snap 保持关闭；finish 钉死 slot 杀残余 fling。
 
 | # | 事件 | → Page | 说明 |
 |---|------|--------|------|
 | P1 | 底栏点选 C | **C** | disarm snap → smooth→C（无硬停） |
 | P2 | 半滑松手未完 + 点 C | **C** | 同上；旧 settle 不得 commit B |
 | P3 | 手指滑到底 | nearest | 仅 `settleArmSeq===actionSeq` 可 commit |
+| P4 | A→B 松手未完 + 再点 B | **B** | adopt 原 snap，不 restart（无顿挫） |
 
 ### 实现落点
 
@@ -124,7 +129,7 @@ docs/
 | Auth / Call native | `pc/client/src/peer_session.cpp` · `android/.../PeerSession.kt` |
 | Roster | `server/server.js` `devicesForUser`（`online` + `state`） |
 | Banner #9 | `shared/web/src/components/IncomingCallBanner.tsx` |
-| Page 导航 | `App.tsx` `session_end` → `Peers`；`onPeerSessionStart` → `Monitor`；`PagePager` P1–P3 |
+| Page 导航 | `App.tsx` `session_end` → `Peers`；`onPeerSessionStart` → `Monitor`；`PagePager` P1–P4 |
 | UI 投影 | `PeerPanel.tsx` |
 
 ## Build & release (PC + Server)
