@@ -104,29 +104,41 @@ function clampIndex(i: number, pageCount: number): number {
   return Math.max(0, Math.min(pageCount - 1, i))
 }
 
-/** Nearest snap slot from fractional progress + fling velocity (pages/ms). */
-function snapTarget(progress: number, velocity: number, pageCount: number): number {
+/** Nearest snap slot — decision ONLY on release (Clash Royale / ViewPager).
+ * Anchor = page where the gesture started, so dragging past halfway then back = regret OK.
+ */
+function snapTarget(
+  progress: number,
+  velocity: number,
+  pageCount: number,
+  startPage: number,
+  moveAgeMs: number,
+): number {
   const max = pageCount - 1
   if (pageCount <= 0) return 0
-  // Already past edges → spring to first/last (rubber-band release).
+  // Edge rubber-band release → first/last
   if (progress < 0) return 0
   if (progress > max) return max
 
+  const start = clampIndex(startPage, pageCount)
+  const delta = progress - start
+  const flingFresh = moveAgeMs <= NAV.pagerFlingStaleMs
   const fling = NAV.pagerFlingPagesPerMs
-  let target: number
-  // velocity > 0: finger left → progress↑; velocity < 0: finger right → progress↓
-  if (velocity >= fling) {
-    target = Math.ceil(progress - 1e-6)
-  } else if (velocity <= -fling) {
-    target = Math.floor(progress + 1e-6)
-  } else {
-    target = Math.round(progress)
+  const minD = NAV.pagerFlingMinDelta
+  const thr = NAV.pagerSnapThreshold
+
+  // Fling: only if finger was still moving recently, and left the start slot a bit.
+  if (flingFresh && velocity >= fling && delta > minD) {
+    return clampIndex(start + 1, pageCount)
   }
-  // Fling past neighbor: still only one slot per gesture (Clash Royale card feel).
-  const base = Math.round(progress)
-  if (target < base - 1) target = base - 1
-  if (target > base + 1) target = base + 1
-  return clampIndex(target, pageCount)
+  if (flingFresh && velocity <= -fling && delta < -minD) {
+    return clampIndex(start - 1, pageCount)
+  }
+
+  // Position: past halfway from start → neighbor; else spring back (regret).
+  if (delta >= thr) return clampIndex(start + 1, pageCount)
+  if (delta <= -thr) return clampIndex(start - 1, pageCount)
+  return start
 }
 
 export function PagePager({
@@ -166,9 +178,11 @@ export function PagePager({
   const startX = useRef(0)
   const startY = useRef(0)
   const startProgress = useRef(0)
+  /** Integer page where this gesture began — snap/regret anchor. */
+  const startPage = useRef(0)
   const lastX = useRef(0)
   const lastT = useRef(0)
-  const velocity = useRef(0) // pages / ms (positive = finger right → progress ↓)
+  const velocity = useRef(0) // pages/ms; >0 finger left → progress↑
 
   const progressHost = () => progressHostRef?.current ?? null
 
@@ -189,16 +203,27 @@ export function PagePager({
     writeNavProgress(progressHost(), p, isDragging)
   }
 
-  const animateTo = (target: number, durationMs: number, ease: readonly [number, number, number, number]) => {
+  const animateTo = (
+    target: number,
+    durationMs: number,
+    ease: readonly [number, number, number, number],
+    onDone?: () => void,
+  ) => {
     cancelAnim()
     const from = progressRef.current
     if (reduceMotion.current || Math.abs(from - target) < 0.001) {
       paint(target, false)
+      onDone?.()
       return
     }
     const [x1, y1, x2, y2] = ease
     const t0 = performance.now()
     const tick = (now: number) => {
+      // Finger took over mid-settle — abandon programmatic anim.
+      if (dragging.current) {
+        animRaf.current = 0
+        return
+      }
       const t = Math.min(1, (now - t0) / durationMs)
       const e = bezierEase(t, x1, y1, x2, y2)
       paint(from + (target - from) * e, true)
@@ -208,13 +233,14 @@ export function PagePager({
       }
       animRaf.current = 0
       paint(target, false)
+      onDone?.()
     }
     animRaf.current = requestAnimationFrame(tick)
   }
 
+  /** Update React page only — never jump the track (animateTo owns transform). */
   const commitIndex = (next: number) => {
     const i = clampIndex(next, pageCount)
-    paint(i, false)
     if (i !== indexRef.current) {
       skipPropAnim.current = true
       onPageChangeRef.current(PRIMARY_PAGES[i])
@@ -238,6 +264,11 @@ export function PagePager({
       if (w <= 0) return
       widthRef.current = w
       invalidateNavPillLayout()
+      // During drag: only refresh width — do NOT snap to committed index.
+      if (dragging.current) {
+        paint(progressRef.current, true)
+        return
+      }
       cancelAnim()
       paint(indexRef.current, false)
     }
@@ -277,6 +308,7 @@ export function PagePager({
       startX.current = e.clientX
       startY.current = e.clientY
       startProgress.current = progressRef.current
+      startPage.current = clampIndex(Math.round(progressRef.current), pageCount)
       lastX.current = e.clientX
       lastT.current = e.timeStamp
       velocity.current = 0
@@ -316,6 +348,7 @@ export function PagePager({
       lastX.current = e.clientX
       lastT.current = e.timeStamp
 
+      // 1:1 free drag — never commit / never snap while finger is down.
       const raw = startProgress.current - dx / w
       paint(rubberBandPage(raw, pageCount), true)
     }
@@ -332,20 +365,28 @@ export function PagePager({
         return
       }
 
-      const target = snapTarget(progressRef.current, velocity.current, pageCount)
+      const moveAge = e.timeStamp - lastT.current
+      const target = snapTarget(
+        progressRef.current,
+        velocity.current,
+        pageCount,
+        startPage.current,
+        moveAge,
+      )
       const delta = Math.abs(target - progressRef.current)
       const dur = delta < 0.15
         ? NAV.pagerSnapMs
         : navTapDurationMs(Math.max(delta, 0.5))
-      animateTo(target, dur, NAV.pagerSnapEase)
-      // Commit React page immediately; skipPropAnim keeps the settle animation.
+      // Snap animate first; commit React page without jumping the track.
       commitIndex(target)
+      animateTo(target, dur, NAV.pagerSnapEase)
     }
 
     vp.addEventListener('pointerdown', onPointerDown, { passive: true })
     vp.addEventListener('pointermove', onPointerMove, { passive: false })
     vp.addEventListener('pointerup', endGesture)
     vp.addEventListener('pointercancel', endGesture)
+    vp.addEventListener('lostpointercapture', endGesture)
 
     paint(indexRef.current, false)
 
@@ -354,6 +395,7 @@ export function PagePager({
       vp.removeEventListener('pointermove', onPointerMove)
       vp.removeEventListener('pointerup', endGesture)
       vp.removeEventListener('pointercancel', endGesture)
+      vp.removeEventListener('lostpointercapture', endGesture)
       cancelAnim()
     }
     // pageCount is PRIMARY_PAGES.length — rebuild if nav slots change
@@ -369,7 +411,6 @@ export function PagePager({
       <div
         ref={trackRef}
         className="flex h-full w-full will-change-transform"
-        style={{ transform: 'translate3d(0,0,0)' }}
       >
         {panels.map((panel, i) => (
           <div

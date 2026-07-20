@@ -158,7 +158,7 @@ export const NAV = {
   bottomGapRem: 0.25,
   /**
    * Paged horizontal track (Clash Royale–style snap slots).
-   * Edge rubber-band + fling thresholds — pageCount comes from PRIMARY_PAGES.
+   * Drag = 1:1 follow; snap ONLY on release. pageCount = PRIMARY_PAGES.length.
    */
   /** Axis lock: |dx| must exceed this (px) and beat |dy| before horizontal drag */
   pagerAxisLockPx: 10,
@@ -166,8 +166,17 @@ export const NAV = {
   pagerRubber: 0.38,
   /** Cap edge stretch as a fraction of one page width */
   pagerRubberMax: 0.28,
-  /** Fling: velocity (pages/ms) above this commits neighbor page */
-  pagerFlingPagesPerMs: 0.00055,
+  /**
+   * Fling commits neighbor only if finger still moving (see pagerFlingStaleMs)
+   * and displacement from gesture-start page exceeds pagerFlingMinDelta.
+   */
+  pagerFlingPagesPerMs: 0.0012,
+  /** Ignore fling if no pointermove for this long (ms) — stops stale-velocity snaps */
+  pagerFlingStaleMs: 80,
+  /** Min |progress - startPage| before fling can change page (allows mid-drag regret) */
+  pagerFlingMinDelta: 0.12,
+  /** Position threshold from start page to commit neighbor (0.5 = halfway) */
+  pagerSnapThreshold: 0.5,
   /** Snap settle when releasing mid-slot (ms) — short bounce-home */
   pagerSnapMs: 220,
   pagerSnapEase: [0.22, 0.9, 0.28, 1] as const,
