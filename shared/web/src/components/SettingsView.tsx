@@ -1176,10 +1176,12 @@ export function SettingsView({
               <Tooltip text={t('settings.gitee_tip')}>
               <button
                 onClick={() => {
-                  try {
-                    window.open('https://gitee.com/Andyqwe44/mimic', '_blank')
-                  } catch {}
-                  addLog('[Project] open Gitee')
+                  void hostCall('open_url', { url: 'https://gitee.com/Andyqwe44/mimic' })
+                    .then((r: any) => {
+                      if (r?.ok === false) addLog(`[Project] open Gitee failed: ${r.error}`)
+                      else addLog('[Project] open Gitee')
+                    })
+                    .catch((e) => addLog(`[Project] open Gitee failed: ${e}`))
                 }}
                 className="text-accent hover:underline cursor-pointer truncate"
               >
@@ -1197,9 +1199,11 @@ export function SettingsView({
               title={t('settings.star_tip')}
               variant="primary"
               onClick={() => {
-                try {
-                  window.open('https://github.com/Andyqwe44/Mimic', '_blank')
-                } catch {}
+                void hostCall('open_url', { url: 'https://github.com/Andyqwe44/Mimic' })
+                  .then((r: any) => {
+                    if (r?.ok === false) addLog(`[Project] open GitHub failed: ${r.error}`)
+                  })
+                  .catch((e) => addLog(`[Project] open GitHub failed: ${e}`))
               }}
               className="shrink-0 ml-2"
             />

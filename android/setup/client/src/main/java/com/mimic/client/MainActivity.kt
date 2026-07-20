@@ -144,6 +144,25 @@ class MainActivity : AppCompatActivity() {
                 return request?.url?.let { assetLoader.shouldInterceptRequest(it) }
             }
 
+            override fun shouldOverrideUrlLoading(
+                view: WebView?,
+                request: WebResourceRequest?
+            ): Boolean {
+                val uri = request?.url ?: return false
+                val host = uri.host ?: return false
+                // Keep app assets in-WebView; everything else → system browser.
+                if (host == "appassets.androidplatform.net") return false
+                return try {
+                    startActivity(
+                        Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                    true
+                } catch (e: Exception) {
+                    Log.e(tag, "external nav failed: $uri", e)
+                    true // still block in-app navigation
+                }
+            }
+
             override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                 injectBridgeShim()
             }

@@ -1582,6 +1582,25 @@ static std::string cmd_open_dir(const std::string& dir) {
     return R"({"ok":true})";
 }
 
+/** Open http(s) URL in the system default browser (not WebView2). */
+static std::string cmd_open_url(const std::string& args) {
+    std::string url = json_get_str(args, "url");
+    if (url.empty()) return R"({"ok":false,"error":"empty url"})";
+    // Only allow http(s) — refuse file:/javascript:/etc (铁律 5: fail loud).
+    if (url.rfind("http://", 0) != 0 && url.rfind("https://", 0) != 0) {
+        LOG_ERROR("cmd", "open_url: rejected scheme url=%.80s", url.c_str());
+        return R"({"ok":false,"error":"only http(s) urls allowed"})";
+    }
+    HINSTANCE hi = ShellExecuteA(nullptr, "open", url.c_str(), nullptr, nullptr, SW_SHOW);
+    if ((INT_PTR)hi <= 32) {
+        LOG_ERROR("cmd", "open_url: ShellExecute failed code=%d", (int)(INT_PTR)hi);
+        return "{\"ok\":false,\"error\":\"ShellExecute failed, code=" +
+               std::to_string((int)(INT_PTR)hi) + "\"}";
+    }
+    LOG("cmd", "open_url: %s", url.c_str());
+    return R"({"ok":true})";
+}
+
 // Save a single BGRA frame as PNG to dump dir
 static void dump_frame_to_disk(const uint8_t* bgra, int w, int h, const char* prefix) {
     if (g_dump_dir.empty()) {
@@ -3393,6 +3412,7 @@ std::string dispatch_command(const std::string& json) {
     }
     else if (cmd == "pick_dir") result = cmd_pick_dir();
     else if (cmd == "open_dir") result = cmd_open_dir(json_get_str(args, "dir"));
+    else if (cmd == "open_url") result = cmd_open_url(args);
 
     else if (cmd == "send_input") {
         result = cmd_send_input(args);

@@ -379,6 +379,7 @@ class AndroidHost(
                 .put("a11y_enabled", MimicAccessibilityService.isEnabled())
             "set_capability_backend" -> caps.setBackend(args.optString("backend", "normal"))
             "open_shizuku" -> openShizukuApp()
+            "open_url" -> openExternalUrl(args.optString("url", ""))
             "crash_log" -> {
                 appendLog("crash", "${args.optString("kind")} | ${args.optString("message")}")
                 jsonOk()
@@ -1099,6 +1100,29 @@ class AndroidHost(
             context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "0.0.0"
         } catch (_: Exception) {
             "0.0.0"
+        }
+    }
+
+    /** Open http(s) URL in the system browser — never navigate the app WebView. */
+    private fun openExternalUrl(url: String): JSONObject {
+        val trimmed = url.trim()
+        if (trimmed.isEmpty()) return jsonErr("empty url")
+        val uri = try {
+            Uri.parse(trimmed)
+        } catch (e: Exception) {
+            return jsonErr(e.message ?: "invalid url")
+        }
+        val scheme = (uri.scheme ?: "").lowercase()
+        if (scheme != "http" && scheme != "https") {
+            return jsonErr("only http(s) urls allowed")
+        }
+        return try {
+            val intent = Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(intent)
+            appendLog("ui", "open_url $trimmed")
+            jsonOk()
+        } catch (e: Exception) {
+            jsonErr(e.message ?: "startActivity failed")
         }
     }
 

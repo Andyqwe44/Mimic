@@ -91,6 +91,7 @@ class MimicHostPlugin : Plugin() {
                 jsonOk()
             }
             "show_window" -> jsonOk()
+            "open_url" -> openExternalUrl(args.getString("url") ?: "")
             else -> {
                 val o = JSObject()
                 o.put("ok", false)
@@ -184,6 +185,34 @@ class MimicHostPlugin : Plugin() {
             ai.versionName ?: "0.1.0"
         } catch (_: Exception) {
             "0.1.0"
+        }
+    }
+
+    private fun openExternalUrl(url: String): JSObject {
+        val trimmed = url.trim()
+        if (trimmed.isEmpty()) {
+            val o = JSObject()
+            o.put("ok", false)
+            o.put("error", "empty url")
+            return o
+        }
+        val uri = Uri.parse(trimmed)
+        val scheme = (uri.scheme ?: "").lowercase()
+        if (scheme != "http" && scheme != "https") {
+            val o = JSObject()
+            o.put("ok", false)
+            o.put("error", "only http(s) urls allowed")
+            return o
+        }
+        return try {
+            val intent = Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(intent)
+            jsonOk()
+        } catch (e: Exception) {
+            val o = JSObject()
+            o.put("ok", false)
+            o.put("error", e.message ?: "startActivity failed")
+            o
         }
     }
 
