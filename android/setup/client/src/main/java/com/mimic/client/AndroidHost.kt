@@ -108,6 +108,9 @@ class AndroidHost(
             appendLog("peer", "need_key → requestKeyframe")
             capture.requestKeyframe()
         }
+        peer.onControlledMediaReady = {
+            ensureDefaultControlledCapture()
+        }
         peer.onSessionEnd = {
             allowStream = false
             acceptControl = false
@@ -166,6 +169,43 @@ class AndroidHost(
             sessions.drop(20).forEach { it.delete() }
         } catch (e: Exception) {
             Log.w(tag, "log rotate", e)
+        }
+    }
+
+    /**
+     * Controlled + LAN ready: default to Main Display without waiting for controller set_target.
+     * Prompts MediaProjection consent if needed; local preview appears after encoder starts.
+     */
+    private fun ensureDefaultControlledCapture() {
+        if (peer.role != "controlled") return
+        if (capture.streaming) return
+        // Do not override an active/pending app sandbox target.
+        if (activeTargetId.startsWith("app:")) return
+        val tid = if (activeTargetId.startsWith("display:")) activeTargetId else "display:0"
+        activeTargetId = tid
+        allowStream = true
+        acceptControl = true
+        main.post {
+            pushToJs(
+                JSONObject()
+                    .put("type", "gates")
+                    .put("allow_stream", true)
+                    .put("accept_control", true)
+                    .put("target_id", tid),
+            )
+        }
+        appendLog("peer", "controlled default target=$tid")
+        if (!capture.hasProjectionConsent()) {
+            pendingStartAfterConsent = true
+            appendLog("cap", "request MediaProjection for default Main Display")
+            main.post { requestProjection?.invoke() }
+            return
+        }
+        io.execute {
+            val started = startCaptureForActiveTarget(tid)
+            if (!started.optBoolean("ok", false)) {
+                appendLog("cap", "default capture failed: ${started.optString("error")}")
+            }
         }
     }
 

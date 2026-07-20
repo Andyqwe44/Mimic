@@ -1,41 +1,14 @@
-// Horizontal page track — four primary pages side-by-side with drag/swipe animation.
-// Android WebView: prefer TouchEvent (PointerEvent cancel is unreliable with overflow-y-auto).
+// Horizontal page track — native CSS scroll-snap (compositor-driven).
+// No per-frame React state / no per-child touch hijacking.
 import {
   Children,
-  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
-  useState,
   type ReactNode,
   type RefObject,
 } from 'react'
-import { NAV } from '../lib/design'
-import { PRIMARY_PAGES, fractionalPageIndex, pageIndex, type AppPage } from '../lib/pages'
-
-const MIN_DX = 28
-/** Horizontal wins unless clearly vertical (Clash-Royale-style tab swipe). */
-const MAX_SLOPE = 1.0
-/** Edge strips always allow swipe even over canvas / data-no-page-swipe. */
-const EDGE_PX = 48
-
-function blockedTarget(t: EventTarget | null): boolean {
-  if (!(t instanceof Element)) return false
-  // Do NOT block on bare canvas — Monitor chrome must stay swipeable.
-  // Only hard-block form fields and explicit opt-outs (remote control overlays).
-  return !!t.closest(
-    'input, textarea, select, [contenteditable="true"], [data-no-page-swipe]',
-  )
-}
-
-function nearHorizontalEdge(clientX: number, width: number): boolean {
-  return clientX <= EDGE_PX || clientX >= width - EDGE_PX
-}
-
-function prefersReducedMotion(): boolean {
-  return typeof window !== 'undefined'
-    && window.matchMedia('(prefers-reduced-motion: reduce)').matches
-}
+import { PRIMARY_PAGES, pageIndex, type AppPage } from '../lib/pages'
 
 /** Write CSS vars on a host so bottom-nav pill can follow without React re-renders. */
 export function writeNavProgress(
@@ -48,12 +21,9 @@ export function writeNavProgress(
   host.classList.toggle('nav-dragging', dragging)
 }
 
-type Gesture = {
-  x: number
-  y: number
-  id: number
-  blocked: boolean
-  axis: 'undecided' | 'h' | 'v'
+function prefersReducedMotion(): boolean {
+  return typeof window !== 'undefined'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }
 
 export function PagePager({
@@ -70,29 +40,14 @@ export function PagePager({
 }) {
   const panels = Children.toArray(children)
   const index = pageIndex(page)
-  const viewportRef = useRef<HTMLDivElement>(null)
-  const [width, setWidth] = useState(0)
-  const [dragPx, setDragPx] = useState(0)
-  const [dragging, setDragging] = useState(false)
-  const start = useRef<Gesture | null>(null)
+  const scrollerRef = useRef<HTMLDivElement>(null)
   const indexRef = useRef(index)
   indexRef.current = index
-  const widthRef = useRef(width)
-  widthRef.current = width
   const onPageChangeRef = useRef(onPageChange)
   onPageChangeRef.current = onPageChange
+  const syncingFromProp = useRef(false)
+  const settleTimer = useRef(0)
   const reduceMotion = useRef(prefersReducedMotion())
-  const dragPxRef = useRef(0)
-
-  useLayoutEffect(() => {
-    const el = viewportRef.current
-    if (!el) return
-    const measure = () => setWidth(el.clientWidth)
-    measure()
-    const ro = new ResizeObserver(measure)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [])
 
   useEffect(() => {
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
@@ -102,205 +57,118 @@ export function PagePager({
     return () => mq.removeEventListener('change', sync)
   }, [])
 
-  useEffect(() => {
-    if (!dragging) setDragPx(0)
-  }, [index, dragging])
-
+  // Nav tap / external page change → native scroll (no transform math).
   useLayoutEffect(() => {
-    const frac = fractionalPageIndex(index, dragPx, width)
-    writeNavProgress(progressHostRef?.current ?? null, frac, dragging)
-  }, [index, dragPx, width, dragging, progressHostRef])
-
-  const settleTo = useCallback((nextIdx: number) => {
-    const cur = indexRef.current
-    const clamped = Math.max(0, Math.min(PRIMARY_PAGES.length - 1, nextIdx))
-    setDragging(false)
-    setDragPx(0)
-    dragPxRef.current = 0
-    if (clamped !== cur) {
-      onPageChangeRef.current(PRIMARY_PAGES[clamped])
+    const el = scrollerRef.current
+    if (!el) return
+    const w = el.clientWidth
+    if (w <= 0) return
+    const target = index * w
+    if (Math.abs(el.scrollLeft - target) < 2) {
+      writeNavProgress(progressHostRef?.current ?? null, index, false)
+      return
     }
-  }, [])
+    syncingFromProp.current = true
+    el.scrollTo({
+      left: target,
+      behavior: reduceMotion.current ? 'auto' : 'smooth',
+    })
+    writeNavProgress(progressHostRef?.current ?? null, index, false)
+    window.clearTimeout(settleTimer.current)
+    settleTimer.current = window.setTimeout(() => {
+      syncingFromProp.current = false
+    }, reduceMotion.current ? 50 : 360) as unknown as number
+  }, [index, progressHostRef])
 
   useEffect(() => {
-    const el = viewportRef.current
-    if (!el || width <= 0) return
+    const el = scrollerRef.current
+    if (!el) return
 
-    const begin = (clientX: number, clientY: number, id: number, target: EventTarget | null) => {
-      const w = widthRef.current
-      const edge = nearHorizontalEdge(clientX, w)
-      start.current = {
-        x: clientX,
-        y: clientY,
-        id,
-        blocked: edge ? false : blockedTarget(target),
-        axis: 'undecided',
+    const progressHost = () => progressHostRef?.current ?? null
+
+    const commitPage = () => {
+      const w = el.clientWidth
+      if (w <= 0) return
+      const next = Math.max(0, Math.min(PRIMARY_PAGES.length - 1, Math.round(el.scrollLeft / w)))
+      writeNavProgress(progressHost(), next, false)
+      if (syncingFromProp.current) return
+      if (next !== indexRef.current) {
+        onPageChangeRef.current(PRIMARY_PAGES[next])
       }
     }
 
-    const move = (clientX: number, clientY: number, id: number, ev: Event) => {
-      const s = start.current
-      if (!s || s.blocked || s.id !== id) return
-      const dx = clientX - s.x
-      const dy = clientY - s.y
-
-      if (s.axis === 'undecided') {
-        if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return
-        // Prefer horizontal when comparable — Clash Royale tab feel.
-        s.axis = Math.abs(dx) >= Math.abs(dy) * (1 / MAX_SLOPE) ? 'h' : 'v'
-        if (s.axis === 'v') return
-        setDragging(true)
-        el.style.touchAction = 'none'
-      }
-      if (s.axis !== 'h') return
-
-      ev.preventDefault()
-      const i = indexRef.current
-      let next = dx
-      if ((i === 0 && dx > 0) || (i === PRIMARY_PAGES.length - 1 && dx < 0)) {
-        next = dx * 0.35
-      }
-      dragPxRef.current = next
-      setDragPx(next)
+    const onScroll = () => {
+      const w = el.clientWidth
+      if (w <= 0) return
+      writeNavProgress(progressHost(), el.scrollLeft / w, true)
+      // Android WebView may lack scrollend — debounce settle.
+      window.clearTimeout(settleTimer.current)
+      settleTimer.current = window.setTimeout(() => {
+        syncingFromProp.current = false
+        commitPage()
+      }, 80) as unknown as number
     }
 
-    const end = (clientX: number, id: number) => {
-      const s = start.current
-      start.current = null
-      el.style.touchAction = ''
-      if (!s || s.blocked || s.id !== id) {
-        setDragging(false)
-        setDragPx(0)
-        dragPxRef.current = 0
-        return
-      }
-      if (s.axis !== 'h') {
-        setDragging(false)
-        setDragPx(0)
-        dragPxRef.current = 0
-        return
-      }
-      const dx = clientX - s.x
-      const i = indexRef.current
-      const w = widthRef.current
-      const threshold = Math.max(MIN_DX, w * 0.18)
-      if (dx <= -threshold && i < PRIMARY_PAGES.length - 1) {
-        settleTo(i + 1)
-      } else if (dx >= threshold && i > 0) {
-        settleTo(i - 1)
-      } else {
-        setDragging(false)
-        setDragPx(0)
-        dragPxRef.current = 0
-      }
+    const onScrollEnd = () => {
+      window.clearTimeout(settleTimer.current)
+      syncingFromProp.current = false
+      commitPage()
     }
 
-    const cancel = () => {
-      start.current = null
-      el.style.touchAction = ''
-      setDragging(false)
-      setDragPx(0)
-      dragPxRef.current = 0
-    }
+    el.addEventListener('scroll', onScroll, { passive: true })
+    el.addEventListener('scrollend', onScrollEnd)
+    // Initial pill position
+    writeNavProgress(progressHost(), indexRef.current, false)
 
-    // Touch first — reliable on Android WebView over scrollable children.
-    const onTouchStart = (e: TouchEvent) => {
-      if (e.touches.length !== 1) return
-      const t = e.touches[0]
-      begin(t.clientX, t.clientY, t.identifier, e.target)
-    }
-    const onTouchMove = (e: TouchEvent) => {
-      const s = start.current
-      if (!s) return
-      let t: Touch | null = null
-      for (let i = 0; i < e.touches.length; i++) {
-        if (e.touches[i].identifier === s.id) {
-          t = e.touches[i]
-          break
-        }
-      }
-      if (!t) return
-      move(t.clientX, t.clientY, s.id, e)
-    }
-    const onTouchEnd = (e: TouchEvent) => {
-      const s = start.current
-      if (!s) return
-      let clientX = s.x
-      for (let i = 0; i < e.changedTouches.length; i++) {
-        if (e.changedTouches[i].identifier === s.id) {
-          clientX = e.changedTouches[i].clientX
-          break
-        }
-      }
-      end(clientX, s.id)
-    }
+    const ro = new ResizeObserver(() => {
+      const w = el.clientWidth
+      if (w <= 0) return
+      // Keep current page aligned after rotation / keyboard resize.
+      syncingFromProp.current = true
+      el.scrollLeft = indexRef.current * w
+      writeNavProgress(progressHost(), indexRef.current, false)
+      window.clearTimeout(settleTimer.current)
+      settleTimer.current = window.setTimeout(() => {
+        syncingFromProp.current = false
+      }, 50) as unknown as number
+    })
+    ro.observe(el)
 
-    // Mouse / pen fallback (desktop emulator, stylus).
-    const onPointerDown = (e: PointerEvent) => {
-      if (e.pointerType === 'touch') return // handled by TouchEvent
-      if (e.pointerType === 'mouse' && e.button !== 0) return
-      begin(e.clientX, e.clientY, e.pointerId, e.target)
-    }
-    const onPointerMove = (e: PointerEvent) => {
-      if (e.pointerType === 'touch') return
-      move(e.clientX, e.clientY, e.pointerId, e)
-    }
-    const onPointerUp = (e: PointerEvent) => {
-      if (e.pointerType === 'touch') return
-      end(e.clientX, e.pointerId)
-    }
-
-    el.addEventListener('touchstart', onTouchStart, { passive: true, capture: true })
-    el.addEventListener('touchmove', onTouchMove, { passive: false, capture: true })
-    el.addEventListener('touchend', onTouchEnd, { capture: true })
-    el.addEventListener('touchcancel', cancel, { capture: true })
-    el.addEventListener('pointerdown', onPointerDown)
-    el.addEventListener('pointermove', onPointerMove, { passive: false })
-    el.addEventListener('pointerup', onPointerUp)
-    el.addEventListener('pointercancel', cancel)
     return () => {
-      el.removeEventListener('touchstart', onTouchStart, true)
-      el.removeEventListener('touchmove', onTouchMove, true)
-      el.removeEventListener('touchend', onTouchEnd, true)
-      el.removeEventListener('touchcancel', cancel, true)
-      el.removeEventListener('pointerdown', onPointerDown)
-      el.removeEventListener('pointermove', onPointerMove)
-      el.removeEventListener('pointerup', onPointerUp)
-      el.removeEventListener('pointercancel', cancel)
-      el.style.touchAction = ''
+      el.removeEventListener('scroll', onScroll)
+      el.removeEventListener('scrollend', onScrollEnd)
+      ro.disconnect()
+      window.clearTimeout(settleTimer.current)
     }
-  }, [width, settleTo])
-
-  const tx = width > 0 ? -index * width + dragPx : 0
-  const settleMs = reduceMotion.current ? 0 : NAV.settleMs
+  }, [progressHostRef])
 
   return (
     <div
-      ref={viewportRef}
-      className="flex-1 min-h-0 overflow-hidden relative"
-      style={{ touchAction: 'pan-y' }}
+      ref={scrollerRef}
+      className="flex-1 min-h-0 flex overflow-x-auto overflow-y-hidden overscroll-x-contain"
+      style={{
+        scrollSnapType: 'x mandatory',
+        WebkitOverflowScrolling: 'touch',
+        scrollbarWidth: 'none',
+        msOverflowStyle: 'none',
+      }}
       data-page-pager
     >
-      <div
-        className="pager-track flex h-full will-change-transform"
-        style={{
-          transform: `translate3d(${tx}px, 0, 0)`,
-          transition: dragging ? 'none' : `transform ${settleMs}ms ${NAV.settleEase}`,
-        }}
-      >
-        {panels.map((panel, i) => (
-          <div
-            key={PRIMARY_PAGES[i] ?? i}
-            className={`h-full shrink-0 flex flex-col min-h-0 overflow-hidden ${
-              i === index ? '' : 'pointer-events-none'
-            }`}
-            style={{ width: width > 0 ? width : '100%' }}
-            aria-hidden={i !== index}
-          >
-            {panel}
-          </div>
-        ))}
-      </div>
+      {panels.map((panel, i) => (
+        <div
+          key={PRIMARY_PAGES[i] ?? i}
+          className="h-full shrink-0 flex flex-col min-h-0 overflow-hidden"
+          style={{
+            width: '100%',
+            minWidth: '100%',
+            scrollSnapAlign: 'start',
+            scrollSnapStop: 'always',
+          }}
+          aria-hidden={i !== index}
+        >
+          {panel}
+        </div>
+      ))}
     </div>
   )
 }

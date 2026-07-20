@@ -671,7 +671,7 @@ export function PeerRemoteView({
             <span className="font-medium text-text-secondary shrink-0">{titleLabel}</span>
             <span className="tabular-nums text-text-secondary shrink-0">{hudPrimary || '—'}</span>
             <span className="truncate min-w-0 text-text-muted">
-              {status}{!humanControl ? ` · ${t('peer.ai_mode_short')}` : ''}
+              {status}{!humanControl && source !== 'local' ? ` · ${t('peer.ai_mode_short')}` : ''}
             </span>
             <Tooltip text={t('peer.expand_view')}>
               <button

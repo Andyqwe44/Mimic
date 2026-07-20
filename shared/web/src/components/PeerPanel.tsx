@@ -184,10 +184,11 @@ export function PeerPanel({
       setRole(r)
       onRole?.(r)
       if (st?.deviceId) setMyId(st.deviceId)
-      if (st?.transport) {
-        setTransport(st.transport)
-        onTransport?.(st.transport)
-      }
+      // Always sync transport (incl. "none") — mediaReady can heal a missed peer_transport push.
+      const tx = typeof st?.transport === 'string' ? st.transport
+        : (st?.mediaReady ? 'lan' : 'none')
+      setTransport(tx)
+      onTransport?.(tx)
       // Device roster is server-pushed on join/leave/meta change.
       // Explicit pull only on login/reconnect recovery (not on a timer).
       if (opts?.pullDevices && st?.online) {
@@ -328,11 +329,12 @@ export function PeerPanel({
   }, [])
 
   useEffect(() => {
-    // Light status poll only (role / transport). Device list is event-driven from server.
-    pollRef.current = window.setInterval(() => { void refreshStatus() }, 15000) as unknown as number
+    // Light status poll (role / transport). Faster while in session so LAN state heals quickly.
+    const ms = role !== 'idle' ? 2000 : 15000
+    pollRef.current = window.setInterval(() => { void refreshStatus() }, ms) as unknown as number
     void refreshStatus({ pullDevices: true })
     return () => clearInterval(pollRef.current)
-  }, [refreshStatus])
+  }, [refreshStatus, role])
 
   // Auto-probe when URL changes / panel opens (not logged in)
   useEffect(() => {

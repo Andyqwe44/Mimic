@@ -1,8 +1,8 @@
 {
     "name":  "mimic-android",
     "private":  true,
-    "version":  "0.1.36",
-    "mimicReleaseNote":  "Swipe tabs; share QQ fix; bidirectional LAN; DesktopBlt stream",
+    "version":  "0.1.37",
+    "mimicReleaseNote":  "Native scroll-snap tabs; controlled auto MediaProjection; LAN transport heal",
     "description":  "Mimic Android shell 闂?Capacitor WebView hosting shared/web",
     "scripts":  {
                     "build:web":  "npm --prefix ../shared/web run build",

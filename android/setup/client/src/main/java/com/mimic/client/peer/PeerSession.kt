@@ -132,6 +132,8 @@ class PeerSession(
     var onRequestKeyframe: (() -> Unit)? = null
     /** Session ended (local or remote) — host closes stream/control gates. */
     var onSessionEnd: (() -> Unit)? = null
+    /** Controlled + media writable — host should start default Main Display capture. */
+    var onControlledMediaReady: (() -> Unit)? = null
 
     private fun mediaReady(): Boolean = lan.ready || (udp?.ready == true)
 
@@ -145,19 +147,24 @@ class PeerSession(
         if (u != null && u.ready) u.sendJson(obj)
     }
 
-    fun statusJson(): JSONObject = JSONObject()
-        .put("ok", true)
-        .put("online", online)
-        .put("logged_in", loggedIn)
-        .put("reconnecting", reconnecting)
-        .put("role", role)
-        .put("transport", transport)
-        .put("user", user)
-        .put("deviceId", deviceId)
-        .put("deviceName", deviceName)
-        .put("platform", "android")
-        .put("peer_proto", 2)
-        .put("mediaReady", mediaReady())
+    fun statusJson(): JSONObject {
+        // Heal missed peer_transport if socket is already up.
+        if (lan.ready && transport != "lan") transport = "lan"
+        else if (udp?.ready == true && transport == "none") transport = "p2p"
+        return JSONObject()
+            .put("ok", true)
+            .put("online", online)
+            .put("logged_in", loggedIn)
+            .put("reconnecting", reconnecting)
+            .put("role", role)
+            .put("transport", transport)
+            .put("user", user)
+            .put("deviceId", deviceId)
+            .put("deviceName", deviceName)
+            .put("platform", "android")
+            .put("peer_proto", 2)
+            .put("mediaReady", mediaReady())
+    }
 
     fun sendH264Packed(packed: ByteArray) {
         if (role != "controlled") return
@@ -203,6 +210,12 @@ class PeerSession(
                 Log.i(tag, "resent buffered IDR (${key.size} bytes) after media ready")
             } catch (e: Exception) {
                 Log.w(tag, "resent IDR failed", e)
+            }
+        }
+        // Default Main Display capture (MediaProjection consent) — do not wait for set_target.
+        main.post {
+            try { onControlledMediaReady?.invoke() } catch (e: Exception) {
+                Log.w(tag, "onControlledMediaReady", e)
             }
         }
         // Single keyframe request — AndroidHost also kicks once after encoder start.
@@ -425,6 +438,7 @@ class PeerSession(
 
     private fun startLanAsControlled() {
         try {
+            val wasListening = lan.isListening
             val port = lan.startServer(0)
             val ips = collectLanIps()
             val payload = JSONObject()
@@ -439,7 +453,7 @@ class PeerSession(
                         .put("payload", payload),
                 )
             }
-            Log.i(tag, "LAN listen port=$port")
+            Log.i(tag, "LAN ${if (wasListening) "re-offer" else "listen"} port=$port")
         } catch (e: Exception) {
             Log.e(tag, "LAN listen", e)
             push(JSONObject().put("type", "peer_error").put("error", "lan listen failed"))
@@ -677,11 +691,20 @@ class PeerSession(
                         "session_start", "session_state" -> {
                             applySessionRole(msg)
                             // Both roles listen+offer — reverse dial fixes PC inbound firewall.
+                            // If already listening, only re-offer the same port (never rebind).
                             if ((role == "controlled" || role == "controller") && !lan.ready) {
                                 startLanAsControlled()
                             }
-                            if (lan.ready) transport = "lan"
+                            if (lan.ready) {
+                                transport = "lan"
+                                push(JSONObject().put("type", "peer_transport").put("mode", "lan"))
+                            }
                             push(msg)
+                            if (role == "controlled" && lan.ready) {
+                                main.post {
+                                    try { onControlledMediaReady?.invoke() } catch (_: Exception) {}
+                                }
+                            }
                         }
                         "signal" -> {
                             val from = msg.optString("fromDeviceId", msg.optString("from", ""))

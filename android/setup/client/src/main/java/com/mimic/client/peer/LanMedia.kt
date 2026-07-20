@@ -37,6 +37,9 @@ class LanMedia(
         private set
     @Volatile var listenPort: Int = 0
         private set
+    /** True while ServerSocket is bound and accept thread is alive (not yet connected). */
+    val isListening: Boolean
+        get() = server != null && !ready
 
     private val sendLock = Any()
     /** Latest pending H.264; overwritten by newer frames (drop-old). */
@@ -51,7 +54,16 @@ class LanMedia(
     private val sendBlockMsMax = AtomicLong(0)
 
     fun startServer(preferredPort: Int = 9999): Int {
-        stop()
+        // Idempotent: do not kill an existing listen/accept — session_state storms
+        // used to rebind a new port while the peer still dialed the old one.
+        if (ready) {
+            Log.i(tag, "startServer skipped — already connected")
+            return listenPort
+        }
+        if (server != null) {
+            Log.i(tag, "startServer skipped — already listening port=$listenPort")
+            return listenPort
+        }
         val ss = ServerSocket()
         ss.reuseAddress = true
         ss.bind(InetSocketAddress(preferredPort))

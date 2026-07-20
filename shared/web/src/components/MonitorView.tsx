@@ -18,6 +18,7 @@ import { SessionPanicBar } from './SessionPanicBar'
 import { STATE_LABEL, codeToName, resolveInputMethods } from '../lib/constants'
 import { THIN_CLIENT } from '../lib/features'
 import { addLog, hostCall, onNativePush } from '../lib/bridge'
+import { isAndroidHost } from '../lib/platform'
 import { RADIUS, RING, SHELL_PAD, TEXT, PEER_WORKSPACE } from '../lib/design'
 import type { WindowInfo, Rect } from '../lib/types'
 
@@ -959,7 +960,9 @@ export function MonitorView({
                   )
                 })}
                 <p className={`${TEXT.tiny} text-text-muted px-1 pt-0.5`}>
-                  {t('peer.controller_picks_target')}
+                  {isAndroidHost()
+                    ? t('peer.controller_picks_target')
+                    : t('peer.controller_picks_target_android')}
                 </p>
               </div>
             </div>
@@ -970,7 +973,7 @@ export function MonitorView({
           <div className={`flex-1 flex flex-col min-h-0 ${SHELL_PAD.page} gap-2`}>
             <div className={`${PEER_WORKSPACE.previewWeight}`}>
               <PeerRemoteView
-                active={lanReady}
+                active={isControlled}
                 humanControl={false}
                 source="local"
               />
@@ -978,7 +981,9 @@ export function MonitorView({
             <div className="text-center space-y-1 max-w-md mx-auto shrink-0">
               <div className={`${TEXT.sm} text-text-primary`}>{t('peer.controlled_title')}</div>
               <div className={`${TEXT.xs} text-text-muted leading-relaxed`}>
-                {t('peer.controlled_preview_hint')}
+                {!lanReady
+                  ? t('peer.wait_lan')
+                  : t('peer.controlled_preview_hint')}
               </div>
             </div>
             <SessionPanicBar

@@ -181,13 +181,9 @@ svg.lucide {
   }
 }
 
-/* PagePager: children must not claim horizontal pan — leave it to JS tab swipe.
-   touch-action does not inherit; without this, overflow-y-auto steals the gesture. */
-[data-page-pager] .overflow-y-auto,
-[data-page-pager] .overflow-y-scroll,
-[data-page-pager] .overflow-auto,
-[data-page-pager] .overflow-scroll {
-  touch-action: pan-y;
+/* PagePager uses native overflow-x + scroll-snap — hide scrollbar chrome. */
+[data-page-pager]::-webkit-scrollbar {
+  display: none;
 }
 
 /* ── Skeleton screen shimmer (startup placeholder) ── */
@@ -212,7 +208,6 @@ svg.lucide {
 }
 @media (prefers-reduced-motion: reduce) {
   .skeleton { animation: none; }
-  .pager-track,
   .nav-pill {
     transition: none !important;
   }
