@@ -102,20 +102,20 @@ docs/
 
 ### Page 导航（底部栏 / 横滑 · `PagePager`）
 
-两条路径都走**浏览器原生滚动**（合成器），不是 JS `ease` rAF：
+两条路径都走**浏览器原生滚动**：
 
-| 操作 | 机制 | 曲线 / 时长 |
-|------|------|-------------|
-| 手指横滑 + 松手 | `overflow-x` + `scroll-snap: mandatory` | Chromium snap/惯性（**非** CSS ease；时长随滑速变） |
-| 底栏点选 | `scrollTo({ behavior: 'smooth' })` | 浏览器 native smooth（同样非我们自写的 ease） |
+| 操作 | 机制 |
+|------|------|
+| 手指横滑 + 松手 | `overflow-x` + `scroll-snap` |
+| 底栏点选 | `scrollTo({ behavior: 'smooth' })` |
 
-**最后一次操作胜出**；点选后 `settleAllowed=false`，禁止旧滑动的 `scrollend` 再 `commit` 错页（防闪现）。
+**最后一次用户动作胜出**（`actionSeq`）：点选会 `hardStop` 旧 snap，并 `settleArmSeq=-1`；只有**同一次**手指 gesture 的 settle 可 `commit`。点选落地后 `holdIdx` 抵制残余 snap 把页拽走。
 
 | # | 事件 | → Page | 说明 |
 |---|------|--------|------|
-| P1 | 底栏点选 T（`navSeq++`） | **T** | 冻 fling → native smooth → T |
-| P2 | 半滑中再点 T/U | **T/U** | 同上；废弃未完成 snap settle |
-| P3 | 手指滑 + settle | nearest | 仅 `settleAllowed`（pointerdown 后）可 commit |
+| P1 | 底栏点选 C | **C** | 杀 A→B snap → smooth→C |
+| P2 | 半滑松手未完 + 点 C | **C** | 同上；旧 settle 不得 commit B |
+| P3 | 手指滑到底 | nearest | 仅 `settleArmSeq===actionSeq` 可 commit |
 
 ### 实现落点
 

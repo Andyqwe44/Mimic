@@ -1,8 +1,8 @@
 {
     "name":  "mimic-android",
     "private":  true,
-    "version":  "0.1.55",
-    "mimicReleaseNote":  "PagePager: restore native scroll-snap; nav tap uses scrollTo smooth",
+    "version":  "0.1.56",
+    "mimicReleaseNote":  "PagePager: actionSeq last-wins; holdIdx vs leftover snap; no 500ms chop hitch",
     "description":  "Mimic Android shell 闂?Capacitor WebView hosting shared/web",
     "scripts":  {
                     "build:web":  "npm --prefix ../shared/web run build",

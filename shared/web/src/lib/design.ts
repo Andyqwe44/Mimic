@@ -147,10 +147,10 @@ export const NAV = {
   settleMs: 300,
   settleEase: 'cubic-bezier(0.25, 0.85, 0.3, 1)',
   /**
-   * Nav tap uses native scrollTo({ behavior:'smooth' }) — browser owns curve/duration.
-   * This is only a watchdog ceiling if scrollend never fires (some Android WebViews).
+   * Nav tap uses native scrollTo({ behavior:'smooth' }).
+   * Ceiling only — prefer scrollend/near; do not chop animation early (was 500ms hitch).
    */
-  tapSmoothWatchdogMs: 500,
+  tapSmoothWatchdogMs: 900,
   /** @deprecated unused — native smooth owns timing */
   pageAnimMs: 220,
   pageAnimEase: [0.22, 0.9, 0.28, 1] as const,
