@@ -1,8 +1,8 @@
 {
     "name":  "mimic-android",
     "private":  true,
-    "version":  "0.1.38",
-    "mimicReleaseNote":  "Peer state machine: instant session_end on peer kill; 10s ringing fuse; roster away",
+    "version":  "0.1.39",
+    "mimicReleaseNote":  "Fix bottom-nav swipe flicker: gesture-aware page commit, pill tracks scroll 1:1, selected = pill only",
     "description":  "Mimic Android shell 闂?Capacitor WebView hosting shared/web",
     "scripts":  {
                     "build:web":  "npm --prefix ../shared/web run build",

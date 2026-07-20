@@ -45,7 +45,12 @@ export function PagePager({
   indexRef.current = index
   const onPageChangeRef = useRef(onPageChange)
   onPageChangeRef.current = onPageChange
+  /** True while programmatic scrollTo from a nav tap is in flight. */
   const syncingFromProp = useRef(false)
+  /** Skip next layout scroll — page was committed from our own snap settle. */
+  const skipNextScrollSync = useRef(false)
+  /** Finger/pointer still down on the pager. */
+  const gestureActive = useRef(false)
   const settleTimer = useRef(0)
   const reduceMotion = useRef(prefersReducedMotion())
 
@@ -58,11 +63,24 @@ export function PagePager({
   }, [])
 
   // Nav tap / external page change → native scroll (no transform math).
+  // Swipe-driven commits set skipNextScrollSync so we never fight the finger.
   useLayoutEffect(() => {
     const el = scrollerRef.current
     if (!el) return
     const w = el.clientWidth
     if (w <= 0) return
+
+    if (skipNextScrollSync.current) {
+      skipNextScrollSync.current = false
+      writeNavProgress(progressHostRef?.current ?? null, index, false)
+      return
+    }
+
+    // User is mid-gesture — don't inject scrollTo (causes page flicker).
+    if (gestureActive.current) {
+      return
+    }
+
     const target = index * w
     if (Math.abs(el.scrollLeft - target) < 2) {
       writeNavProgress(progressHostRef?.current ?? null, index, false)
@@ -87,36 +105,78 @@ export function PagePager({
     const progressHost = () => progressHostRef?.current ?? null
 
     const commitPage = () => {
+      if (gestureActive.current) return
       const w = el.clientWidth
       if (w <= 0) return
       const next = Math.max(0, Math.min(PRIMARY_PAGES.length - 1, Math.round(el.scrollLeft / w)))
       writeNavProgress(progressHost(), next, false)
       if (syncingFromProp.current) return
       if (next !== indexRef.current) {
+        // Page already snapped here — don't scrollTo back in useLayoutEffect.
+        skipNextScrollSync.current = true
         onPageChangeRef.current(PRIMARY_PAGES[next])
       }
+    }
+
+    const scheduleCommit = () => {
+      window.clearTimeout(settleTimer.current)
+      // Wait for momentum / snap to finish. Longer than a quick reverse pause.
+      settleTimer.current = window.setTimeout(() => {
+        if (gestureActive.current) return
+        syncingFromProp.current = false
+        commitPage()
+      }, 120) as unknown as number
     }
 
     const onScroll = () => {
       const w = el.clientWidth
       if (w <= 0) return
+      // Keep pill 1:1 with scroll; leave nav-dragging on until true settle.
       writeNavProgress(progressHost(), el.scrollLeft / w, true)
-      // Android WebView may lack scrollend — debounce settle.
-      window.clearTimeout(settleTimer.current)
-      settleTimer.current = window.setTimeout(() => {
-        syncingFromProp.current = false
-        commitPage()
-      }, 80) as unknown as number
+      // While finger is down, never commit (avoids flicker on quick reverse).
+      if (gestureActive.current) return
+      // After finger-up (or nav-tap smooth scroll): debounce settle.
+      // Android WebView may lack scrollend.
+      scheduleCommit()
     }
 
     const onScrollEnd = () => {
+      if (gestureActive.current) return
       window.clearTimeout(settleTimer.current)
       syncingFromProp.current = false
       commitPage()
     }
 
+    const onPointerDown = (e: PointerEvent) => {
+      // Only track primary touch/pen on the scroller itself (not nested controls).
+      if (e.pointerType === 'mouse' && e.button !== 0) return
+      gestureActive.current = true
+      window.clearTimeout(settleTimer.current)
+      writeNavProgress(progressHost(), el.scrollLeft / Math.max(1, el.clientWidth), true)
+    }
+
+    const endGesture = () => {
+      if (!gestureActive.current) return
+      gestureActive.current = false
+      // Momentum may still be running — commit after scroll quiesces.
+      scheduleCommit()
+    }
+
     el.addEventListener('scroll', onScroll, { passive: true })
     el.addEventListener('scrollend', onScrollEnd)
+    el.addEventListener('pointerdown', onPointerDown, { passive: true })
+    // Some Android WebViews are flaky on pointer*; touch* is a belt-and-suspenders.
+    const onTouchStart = () => {
+      gestureActive.current = true
+      window.clearTimeout(settleTimer.current)
+    }
+    el.addEventListener('touchstart', onTouchStart, { passive: true })
+    // pointerup/cancel on window: finger may leave the scroller mid-swipe.
+    window.addEventListener('pointerup', endGesture, { passive: true })
+    window.addEventListener('pointercancel', endGesture, { passive: true })
+    window.addEventListener('touchend', endGesture, { passive: true })
+    window.addEventListener('touchcancel', endGesture, { passive: true })
+
     // Initial pill position
     writeNavProgress(progressHost(), indexRef.current, false)
 
@@ -137,6 +197,12 @@ export function PagePager({
     return () => {
       el.removeEventListener('scroll', onScroll)
       el.removeEventListener('scrollend', onScrollEnd)
+      el.removeEventListener('pointerdown', onPointerDown)
+      el.removeEventListener('touchstart', onTouchStart)
+      window.removeEventListener('pointerup', endGesture)
+      window.removeEventListener('pointercancel', endGesture)
+      window.removeEventListener('touchend', endGesture)
+      window.removeEventListener('touchcancel', endGesture)
       ro.disconnect()
       window.clearTimeout(settleTimer.current)
     }

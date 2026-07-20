@@ -1,9 +1,10 @@
 // AppShell — unified responsive chrome: side or bottom PrimaryNav + page column.
-import { useRef, type ReactNode, type RefObject } from 'react'
+import { useLayoutEffect, useRef, type ReactNode, type RefObject } from 'react'
 import { PrimaryNav } from './PrimaryNav'
 import { PageHeader } from './PageHeader'
 import { pageIndex, type AppPage } from '../lib/pages'
 import type { ShellMode } from '../hooks/useViewport'
+import { writeNavProgress } from './PagePager'
 
 export function AppShell({
   page,
@@ -51,6 +52,18 @@ export function AppShell({
   const localRef = useRef<HTMLDivElement>(null)
   const progressHostRef = shellRefOut ?? localRef
 
+  // Seed --nav-fraction once via DOM — never bind it in React `style`.
+  // React style would overwrite PagePager's per-frame fractional updates on every
+  // AppShell re-render (FPS/peers/logs), causing pill snap/flicker mid-swipe.
+  const initialPageRef = useRef(page)
+  useLayoutEffect(() => {
+    if (!bottom) return
+    const host = progressHostRef.current
+    if (!host) return
+    if (host.style.getPropertyValue('--nav-fraction')) return
+    writeNavProgress(host, pageIndex(initialPageRef.current), false)
+  }, [bottom, progressHostRef])
+
   return (
     <div
       ref={progressHostRef}
@@ -58,10 +71,6 @@ export function AppShell({
         ${bottom
           ? 'pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)]'
           : ''}`}
-      style={bottom ? {
-        // Initial pill position before PagePager mounts
-        ['--nav-fraction' as string]: String(pageIndex(page)),
-      } : undefined}
     >
       {!bottom && (
         <PrimaryNav
