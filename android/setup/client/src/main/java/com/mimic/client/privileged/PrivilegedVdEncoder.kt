@@ -69,7 +69,11 @@ class PrivilegedVdEncoder(
                 setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
                 setInteger(MediaFormat.KEY_BIT_RATE, 6_000_000)
                 setInteger(MediaFormat.KEY_FRAME_RATE, 30)
-                setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+                try {
+                    setFloat(MediaFormat.KEY_I_FRAME_INTERVAL, 0.33f)
+                } catch (_: Exception) {
+                    setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+                }
                 setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline)
                 setInteger(MediaFormat.KEY_LEVEL, MediaCodecInfo.CodecProfileLevel.AVCLevel4)
             }

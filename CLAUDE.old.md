@@ -1,5 +1,12 @@
 # Archive notes
 
+## 2026-07-20 — Peer LAN UDP MPC2 抗花屏（PC 0.3.79 / Android 0.1.62）
+
+同网媒体改 **UDP MPC2**：16B 头、XOR FEC(4+1)、NACK≤2、重组超时 80ms。控制 JSON 仍 LAN TCP。
+drop-old / 编码丢输入 / reasm fail → `media_broken` 强制 IDR 并抑制 delta。解码端冻帧不 clear canvas。
+`lan_offer` 带 `udpPort`+`udpCands`；同网 host punch 不必等 WAN ICE。
+史：TCP 优先 + drop-old 无 IDR → 宏块撕裂。
+
 ## 2026-07-20 — Android PagePager：原生横滑 + 点选冲突（v0.1.52–0.1.56）
 
 **问题**：底栏点选卡顿/末尾硬停；A→B 横滑未完立刻点 C 最终落到 B（旧 snap settle 覆盖新意图）；半滑中途点选闪现。

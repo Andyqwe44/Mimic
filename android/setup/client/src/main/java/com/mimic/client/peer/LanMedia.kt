@@ -27,6 +27,8 @@ class LanMedia(
     private val onH264: (ByteArray) -> Unit,
     private val onReady: (() -> Unit)? = null,
     private val onClosed: (() -> Unit)? = null,
+    /** Drop-old overwrote an unsent H.264 frame — request IDR. */
+    private val onSendDrop: (() -> Unit)? = null,
 ) {
     private val tag = "MimicLan"
     private val running = AtomicBoolean(false)
@@ -163,8 +165,9 @@ class LanMedia(
             if (pendingH264 != null) {
                 val d = h264Dropped.incrementAndGet()
                 if (d <= 3 || d % 60 == 0) {
-                    Log.i(tag, "send drop-old #$d q=1 (keep latest)")
+                    Log.i(tag, "send drop-old #$d q=1 (keep latest) → force IDR")
                 }
+                try { onSendDrop?.invoke() } catch (_: Exception) {}
             }
             pendingH264 = packedMetaAndAnnexB
             h264Enqueued.incrementAndGet()

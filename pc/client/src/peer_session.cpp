@@ -840,6 +840,8 @@ void lan_stop_unlocked() {
     g_media_ready = false;
     g_transport = "none";
     g_ice_started = false;
+    g_lan_udp_started = false;
+    g_media_broken = false;
     peer_udp_stop();
     if (g_lan_listen != INVALID_SOCKET) { closesocket(g_lan_listen); g_lan_listen = INVALID_SOCKET; }
     {
@@ -980,10 +982,9 @@ void begin_ice_p2p(const char* offer_kind) {
                 LOG("peer", "P2P media ready (UDP hole-punch)");
             },
             [](uint8_t type) {
-                // Lost UDP fragment → whole frame gone; ask controlled for a fresh IDR.
-                if (type == 1 && g_cb.on_need_key) {
+                if (type == 1) {
                     LOG("peer", "UDP reasm fail type=1 → need_key");
-                    g_cb.on_need_key();
+                    arm_media_broken_("reasm-fail");
                 }
             });
         if (!ok) {
@@ -1024,17 +1025,9 @@ void try_establish_lan_as_controlled(const PeerSessionInfo& /*sess*/,
         emit_ui(R"({"type":"peer_error","error":"lan listen failed"})");
         return;
     }
-    g_lan_ips = collect_lan_ips();
-    char buf[256];
-    snprintf(buf, sizeof(buf),
-             "{\"kind\":\"lan_offer\",\"port\":%u,\"ips\":[", (unsigned)g_lan_port);
-    std::string payload = buf;
-    for (size_t i = 0; i < g_lan_ips.size(); ++i) {
-        if (i) payload += ",";
-        payload += "\"" + g_lan_ips[i] + "\"";
-    }
-    payload += "]}";
-    LOG("peer", "LAN offer port=%u ips=%zu", (unsigned)g_lan_port, g_lan_ips.size());
+    std::string payload = build_lan_offer_json();
+    LOG("peer", "LAN offer port=%u udp=%u ips=%zu",
+        (unsigned)g_lan_port, (unsigned)peer_udp_local_port(), g_lan_ips.size());
     signal_send(g_peer_device_id, payload);
 }
 
@@ -1045,27 +1038,21 @@ void try_establish_lan_as_controller() {
         LOG_WARN("peer", "LAN listen (controller) failed — rely on dial-in only");
         return;
     }
-    g_lan_ips = collect_lan_ips();
-    char buf[256];
-    snprintf(buf, sizeof(buf),
-             "{\"kind\":\"lan_offer\",\"port\":%u,\"ips\":[", (unsigned)g_lan_port);
-    std::string payload = buf;
-    for (size_t i = 0; i < g_lan_ips.size(); ++i) {
-        if (i) payload += ",";
-        payload += "\"" + g_lan_ips[i] + "\"";
-    }
-    payload += "]}";
-    LOG("peer", "LAN offer (controller) port=%u ips=%zu", (unsigned)g_lan_port, g_lan_ips.size());
+    std::string payload = build_lan_offer_json();
+    LOG("peer", "LAN offer (controller) port=%u udp=%u",
+        (unsigned)g_lan_port, (unsigned)peer_udp_local_port());
     signal_send(g_peer_device_id, payload);
 }
 
 void try_connect_lan_offer(const std::string& payload) {
-    // Either role may receive lan_offer — dial if not already connected.
-    if (g_media_ready.load() && g_lan_sock != INVALID_SOCKET) {
-        LOG("peer", "lan_offer ignored — already connected");
+    // Always start LAN UDP punch from offer (media path); TCP is control.
+    apply_lan_udp_from_offer(payload);
+    if (g_lan_sock != INVALID_SOCKET) {
+        LOG("peer", "lan_offer: TCP already up — UDP punch applied");
         return;
     }
     uint16_t port = 0;
+    // Prefer exact "port": (TCP) — skip udpPort by searching after kind.
     size_t p = payload.find("\"port\":");
     if (p != std::string::npos) port = (uint16_t)atoi(payload.c_str() + p + 7);
     std::vector<std::string> ips;
@@ -1092,8 +1079,6 @@ void try_connect_lan_offer(const std::string& payload) {
         if (lan_connect_to(ip, port)) { ok = true; break; }
     }
     if (!ok) {
-        // Only the Controller falls through to ICE after failing to dial Controlled.
-        // Controlled already listens — wait for reverse dial / ICE answer.
         if (g_role != PeerRole::Controller) {
             LOG_WARN("peer", "LAN dial-out failed (controlled still listening)");
             return;
@@ -1102,7 +1087,6 @@ void try_connect_lan_offer(const std::string& payload) {
         emit_ui(R"({"type":"peer_transport","mode":"ice"})");
         signal_send(g_peer_device_id, R"({"kind":"wan_probe","proto":"udp-punch","ver":1})");
         begin_ice_p2p("ice_offer");
-        // Fail soft if P2P not up in 15s
         std::thread([]() {
             Sleep(15000);
             if (!peer_udp_ready() && g_transport != "lan") {
@@ -1112,6 +1096,7 @@ void try_connect_lan_offer(const std::string& payload) {
         }).detach();
     } else {
         signal_send(g_peer_device_id, R"({"kind":"lan_ack"})");
+        apply_lan_udp_from_offer(payload);
     }
 }
 
@@ -1696,6 +1681,11 @@ std::string peer_set_control_mode(const std::string& mode) {
 
 void peer_send_h264(const H264Packet& pkt) {
     if (g_role != PeerRole::Controlled) return;
+    // Dependency gate: after drop/loss, suppress delta until an IDR is sent.
+    if (g_media_broken.load() && !pkt.keyframe) {
+        if (g_cb.on_need_key) g_cb.on_need_key();
+        return;
+    }
     uint32_t flags = pkt.keyframe ? 1u : 0u;
     std::vector<uint8_t> body(16 + pkt.annexb.size());
     uint32_t meta[4] = { (uint32_t)pkt.w, (uint32_t)pkt.h, flags, pkt.ts_ms };
@@ -1705,6 +1695,7 @@ void peer_send_h264(const H264Packet& pkt) {
     if (pkt.keyframe) {
         std::lock_guard<std::mutex> lk(g_outbound_key_mtx);
         g_last_outbound_key = body;
+        g_media_broken.store(false);
     }
     if (!g_media_ready.load() && !peer_udp_ready()) return;
     lan_send_frame(1, body.data(), body.size());

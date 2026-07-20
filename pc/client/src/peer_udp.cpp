@@ -188,17 +188,6 @@ bool reasm_complete(const Reasm& r) {
     return true;
 }
 
-void emit_complete(uint32_t mid, Reasm& r) {
-    size_t total = 0;
-    for (auto& p : r.parts) total += p.size();
-    std::vector<uint8_t> body;
-    body.reserve(total);
-    for (auto& p : r.parts) body.insert(body.end(), p.begin(), p.end());
-    uint8_t t = r.type;
-    g_reasm.erase(mid);
-    if (g_on_payload) g_on_payload(t, body);
-}
-
 void send_nack_for(uint32_t frame_id, const Reasm& r) {
     if (!g_ready.load()) return;
     uint32_t bitmap = 0;

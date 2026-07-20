@@ -805,7 +805,9 @@ bool H264Encoder::feed_nv12_and_drain_(std::vector<H264Packet>& out) {
             pump_async_(out, 8); // may also collect prior HaveOutput
         }
         if (impl_->need_input <= 0) {
-            // Still no slot — drop this frame to keep latency bounded.
+            // Still no slot — drop this frame to keep latency bounded; next must be IDR.
+            impl_->force_key_pending = true;
+            LOG_WARN("h264", "async NeedInput starved — drop frame, force next IDR");
             return !out.empty();
         }
         hr = impl_->xform->ProcessInput(0, sample.Get(), 0);

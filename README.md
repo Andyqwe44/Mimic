@@ -104,6 +104,17 @@ docs/
 
 **#9 要点**：`IncomingCallBanner` 底部导火索进度条，`INCOMING_TIMEOUT_MS = 10000`。
 
+### Peer 媒体传输（LAN UDP 抗花屏）
+
+| # | 事件 | 行为 |
+|---|------|------|
+| M1 | session_start | 双方 TCP listen + `lan_offer{port,udpPort,udpCands}`；同网 host UDP punch |
+| M2 | transport=`lan` | **控制**走 LAN TCP；**H.264** 走 UDP MPC2（FEC 4+1 + NACK，重组≤80ms） |
+| M3 | transport=`p2p` | WAN STUN + UDP punch；媒体同 MPC2 |
+| M4 | 分片丢失 | FEC 补洞 → NACK 重传（≤2）→ 超时 `need_key` / force IDR |
+| M5 | 发送 drop-old / 编码丢帧 | `media_broken` → 只发 IDR，抑制 delta |
+| M6 | 解码失败 | 冻住上一好帧 + `need_key`，不 clear canvas |
+
 ### Page 导航（底部栏 / 横滑 · `PagePager`）
 
 两条路径都走**浏览器原生滚动**：

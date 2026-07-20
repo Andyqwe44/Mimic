@@ -502,6 +502,8 @@ locales/: en.json, zh-CN.json, zh-TW.json
 
 **PagePager（摘要）**：横滑仅过 slop+H 轴有效；短触忽略；底栏点选 = disarm→rAF→`scrollTo(smooth)`；冲突以有效动作胜出（`pending|dragging`）。状态表 → 根 [README.md](README.md) P1–P7；史 → `CLAUDE.old.md`。
 
+**Peer 媒体（摘要 · 2026-07-20）**：同网 H.264 走 **UDP MPC2**（FEC 4+1 + NACK，80ms 重组）；控制 JSON 仍 LAN TCP。drop-old / 丢片 → force IDR + 依赖门闸；解码冻帧。详表 → README「Peer 媒体传输」。
+
 ---
 
 

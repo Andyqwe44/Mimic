@@ -75,9 +75,11 @@ class PeerSession(
                 Log.w(tag, "LAN closed → transport=none")
             }
         },
+        onSendDrop = { armMediaBroken("lan-drop-old") },
     )
     private var udp: UdpMedia? = null
     @Volatile private var iceStarted = false
+    @Volatile private var mediaBroken = false
     @Volatile private var lastFrame: ByteArray? = null
     /** Last outbound IDR while controlled — resent when media link becomes ready. */
     @Volatile private var lastOutboundKey: ByteArray? = null
@@ -128,10 +130,16 @@ class PeerSession(
     /** Controlled + media writable — host should start default Main Display capture. */
     var onControlledMediaReady: (() -> Unit)? = null
 
+    private fun armMediaBroken(reason: String) {
+        mediaBroken = true
+        Log.i(tag, "media_broken armed ($reason) → force IDR")
+        try { onRequestKeyframe?.invoke() } catch (_: Exception) {}
+    }
+
     private fun mediaReady(): Boolean = lan.ready || (udp?.ready == true)
 
     private fun mediaSendJson(obj: JSONObject) {
-        // Control JSON (incl. mousedown/up atoms) prefers reliable LAN TCP.
+        // Control JSON prefers reliable LAN TCP.
         if (lan.ready) {
             lan.sendJson(obj)
             return
@@ -142,7 +150,9 @@ class PeerSession(
 
     fun statusJson(): JSONObject {
         // Heal missed peer_transport if socket is already up.
-        if (lan.ready && transport != "lan") transport = "lan"
+        if ((lan.ready || udp?.ready == true) && transport == "none") {
+            transport = if (lan.ready) "lan" else "p2p"
+        } else if (lan.ready && transport != "lan" && transport != "p2p") transport = "lan"
         else if (udp?.ready == true && transport == "none") transport = "p2p"
         return JSONObject()
             .put("ok", true)
@@ -163,17 +173,24 @@ class PeerSession(
         if (role != "controlled") return
         val isKey = packed.size >= 12 &&
             (java.nio.ByteBuffer.wrap(packed, 8, 4).order(java.nio.ByteOrder.LITTLE_ENDIAN).int and 1) != 0
-        if (isKey) lastOutboundKey = packed.copyOf()
-        // Prefer reliable LAN TCP when available — UDP fragments cause tearing on loss.
-        if (lan.ready) {
-            lan.sendH264(packed)
-            noteH264Sent(isKey, viaUdp = false)
+        if (mediaBroken && !isKey) {
+            try { onRequestKeyframe?.invoke() } catch (_: Exception) {}
             return
         }
+        if (isKey) {
+            lastOutboundKey = packed.copyOf()
+            mediaBroken = false
+        }
+        // H.264: UDP primary (MPC2); TCP only if UDP not locked.
         val u = udp
         if (u != null && u.ready) {
             u.sendH264(packed)
             noteH264Sent(isKey, viaUdp = true)
+            return
+        }
+        if (lan.ready) {
+            lan.sendH264(packed)
+            noteH264Sent(isKey, viaUdp = false)
             return
         }
         h264DropCount++
@@ -198,8 +215,9 @@ class PeerSession(
         val key = lastOutboundKey
         if (key != null && key.isNotEmpty()) {
             try {
-                if (lan.ready) lan.sendH264(key)
-                else udp?.takeIf { it.ready }?.sendH264(key)
+                val u = udp
+                if (u != null && u.ready) u.sendH264(key)
+                else if (lan.ready) lan.sendH264(key)
                 Log.i(tag, "resent buffered IDR (${key.size} bytes) after media ready")
             } catch (e: Exception) {
                 Log.w(tag, "resent IDR failed", e)
@@ -432,15 +450,67 @@ class PeerSession(
         else -> err("android: unknown peer cmd '$cmd'")
     }
 
+    private fun ensureLanUdp(): UdpMedia {
+        val existing = udp
+        if (existing != null) return existing
+        val media = UdpMedia(
+            onJson = { handleLanJson(it) },
+            onH264 = { bytes ->
+                if (storeFramePreferKey(bytes))
+                    push(JSONObject().put("type", "peer_frame"))
+            },
+            onReady = {
+                // Keep lan label when TCP control is up; media is UDP.
+                onMediaLinkReady(if (lan.ready) "lan" else "lan")
+                Log.i(tag, "LAN UDP media ready (MPC2)")
+            },
+            onReasmFail = { type ->
+                if (type == 1) {
+                    Log.i(tag, "UDP reasm fail type=1 → need_key")
+                    armMediaBroken("reasm-fail")
+                }
+            },
+            onSendDrop = { armMediaBroken("udp-drop-old") },
+        )
+        media.startLan()
+        udp = media
+        return media
+    }
+
+    private fun applyLanUdpFromOffer(payload: JSONObject) {
+        val media = ensureLanUdp()
+        var rem = UdpMedia.parseCands(payload.optJSONArray("udpCands"))
+        if (rem.isEmpty()) {
+            val udpPort = payload.optInt("udpPort", 0)
+            val ips = payload.optJSONArray("ips")
+            if (udpPort > 0 && ips != null) {
+                rem = ArrayList()
+                for (i in 0 until ips.length()) {
+                    val ip = ips.optString(i)
+                    if (ip.isBlank() || ip.startsWith("169.254.") || ip.startsWith("127.")) continue
+                    rem.add(UdpCand(ip, udpPort, "host"))
+                }
+            }
+        }
+        if (rem.isNotEmpty()) {
+            media.setRemoteCands(rem)
+            Log.i(tag, "LAN UDP punch toward ${rem.size} cands")
+        }
+    }
+
     private fun startLanAsControlled() {
         try {
             val wasListening = lan.isListening
             val port = lan.startServer(0)
             val ips = collectLanIps()
+            val media = ensureLanUdp()
             val payload = JSONObject()
                 .put("kind", "lan_offer")
                 .put("port", port)
+                .put("udpPort", media.localPort)
                 .put("ips", JSONArray(ips))
+                .put("udpCands", UdpMedia.candsToJson(media.localCands()))
+                .put("media", "mpc2")
             if (peerDeviceId.isNotBlank()) {
                 sendWs(
                     JSONObject()
@@ -449,7 +519,7 @@ class PeerSession(
                         .put("payload", payload),
                 )
             }
-            Log.i(tag, "LAN ${if (wasListening) "re-offer" else "listen"} port=$port")
+            Log.i(tag, "LAN ${if (wasListening) "re-offer" else "listen"} port=$port udp=${media.localPort}")
         } catch (e: Exception) {
             Log.e(tag, "LAN listen", e)
             push(JSONObject().put("type", "peer_error").put("error", "lan listen failed"))
@@ -457,8 +527,9 @@ class PeerSession(
     }
 
     private fun connectLanOffer(payload: JSONObject) {
+        applyLanUdpFromOffer(payload)
         if (lan.ready) {
-            Log.i(tag, "lan_offer ignored — already connected")
+            Log.i(tag, "lan_offer: TCP already up — UDP punch applied")
             return
         }
         val port = payload.optInt("port", 0)
@@ -475,6 +546,7 @@ class PeerSession(
             Log.w(tag, "LAN dial failed $ip:$port")
         }
         if (ok) {
+            applyLanUdpFromOffer(payload)
             if (peerDeviceId.isNotBlank()) {
                 sendWs(
                     JSONObject()
@@ -484,7 +556,6 @@ class PeerSession(
                 )
             }
         } else {
-            // Controlled still listens for reverse dial; only Controller starts ICE.
             if (role != "controller") {
                 Log.w(tag, "LAN dial-out failed (still listening for reverse)")
                 return
@@ -521,29 +592,35 @@ class PeerSession(
     private fun beginIce(kind: String) {
         if (!iceStarted) {
             iceStarted = true
-            val media = UdpMedia(
-                onJson = { handleLanJson(it) },
-                onH264 = { bytes ->
-                    if (storeFramePreferKey(bytes))
-                        push(JSONObject().put("type", "peer_frame"))
-                },
-                onReady = {
-                    onMediaLinkReady("p2p")
-                    Log.i(tag, "P2P media ready (UDP hole-punch)")
-                },
-                onReasmFail = { type ->
-                    if (type == 1) {
-                        Log.i(tag, "UDP reasm fail type=1 → need_key")
-                        onRequestKeyframe?.invoke()
-                    }
-                },
-            )
-            if (!media.start(stunHost(), 3478)) {
-                iceStarted = false
-                push(JSONObject().put("type", "peer_error").put("error", "ICE/STUN start failed"))
-                return
+            // If LAN UDP already started, upgrade with STUN — else fresh socket.
+            val existing = udp
+            if (existing == null || !existing.ready) {
+                existing?.stop()
+                val media = UdpMedia(
+                    onJson = { handleLanJson(it) },
+                    onH264 = { bytes ->
+                        if (storeFramePreferKey(bytes))
+                            push(JSONObject().put("type", "peer_frame"))
+                    },
+                    onReady = {
+                        onMediaLinkReady("p2p")
+                        Log.i(tag, "P2P media ready (UDP hole-punch)")
+                    },
+                    onReasmFail = { type ->
+                        if (type == 1) {
+                            Log.i(tag, "UDP reasm fail type=1 → need_key")
+                            armMediaBroken("reasm-fail")
+                        }
+                    },
+                    onSendDrop = { armMediaBroken("udp-drop-old") },
+                )
+                if (!media.start(stunHost(), 3478)) {
+                    iceStarted = false
+                    push(JSONObject().put("type", "peer_error").put("error", "ICE/STUN start failed"))
+                    return
+                }
+                udp = media
             }
-            udp = media
         }
         val cands = udp?.localCands() ?: emptyList()
         val payload = JSONObject()
@@ -724,6 +801,10 @@ class PeerSession(
                         }
                         "session_end", "hangup" -> {
                             lan.stop()
+                            try { udp?.stop() } catch (_: Exception) {}
+                            udp = null
+                            iceStarted = false
+                            mediaBroken = false
                             role = "idle"
                             transport = "none"
                             onSessionEnd?.invoke()

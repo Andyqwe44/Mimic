@@ -147,16 +147,17 @@ export function PeerRemoteView({
     const canvas = canvasRef.current
     if (!canvas || w <= 0 || h <= 0) return
     if (decoderRef.current && videoSizeRef.current.w === w && videoSizeRef.current.h === h) {
-      if (canvas.width !== w || canvas.height !== h) {
-        canvas.width = w
-        canvas.height = h
-      }
       return
     }
+    const sizeChanged =
+      videoSizeRef.current.w !== w || videoSizeRef.current.h !== h
     closeDecoder()
     videoSizeRef.current = { w, h }
-    canvas.width = w
-    canvas.height = h
+    // Resizing canvas clears pixels — only do it when geometry changes.
+    if (sizeChanged) {
+      canvas.width = w
+      canvas.height = h
+    }
     setDims(`${w}×${h}`)
     setVideoAspect(w / h)
     needKeyRef.current = true
@@ -170,10 +171,10 @@ export function PeerRemoteView({
       error: (e) => {
         decodeErrRef.current++
         closeDecoder()
-        videoSizeRef.current = { w: 0, h: 0 }
+        // Freeze last painted frame — do not clear canvas / zero size.
         requestKeyframe('error')
         setStatus(t('peer.decoder_error', { msg: e.message }))
-        addLog(`[Decode] VideoDecoder error #${decodeErrRef.current}: ${e.message}`)
+        addLog(`[Decode] VideoDecoder error #${decodeErrRef.current}: ${e.message} (freeze)`)
         setDiagTick((n) => n + 1)
       },
     })
@@ -318,11 +319,11 @@ export function PeerRemoteView({
       } catch (e: unknown) {
         decodeErrRef.current++
         closeDecoder()
-        videoSizeRef.current = { w: 0, h: 0 }
+        // Keep last good canvas pixels until next IDR.
         requestKeyframe('decode')
         const msg = e instanceof Error ? e.message : String(e)
         setStatus(t('peer.decode_error', { msg }))
-        addLog(`[Decode] decode() throw #${decodeErrRef.current}: ${msg}`)
+        addLog(`[Decode] decode() throw #${decodeErrRef.current}: ${msg} (freeze)`)
         setDiagTick((n) => n + 1)
       }
       const nowDiag = performance.now()

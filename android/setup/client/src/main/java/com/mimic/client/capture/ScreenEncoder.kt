@@ -58,8 +58,12 @@ class ScreenEncoder(
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
             setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
             setInteger(MediaFormat.KEY_FRAME_RATE, fps)
-            // 1s GOP; force-sync via requestKeyframe for faster recovery.
-            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+            // ~0.33s GOP (align PC fps/3); float interval when OEM supports it.
+            try {
+                setFloat(MediaFormat.KEY_I_FRAME_INTERVAL, 0.33f)
+            } catch (_: Exception) {
+                setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+            }
             // Prefer low-latency encode when the OEM exposes the key (API 30+).
             try {
                 if (android.os.Build.VERSION.SDK_INT >= 30) {

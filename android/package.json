@@ -1,8 +1,8 @@
 {
     "name":  "mimic-android",
     "private":  true,
-    "version":  "0.1.61",
-    "mimicReleaseNote":  "PagePager: slop+H before drag; tap ignores nav; no snap-jump hitch",
+    "version":  "0.1.62",
+    "mimicReleaseNote":  "LAN UDP MPC2 media: FEC+NACK, force-IDR on drop, anti-tearing",
     "description":  "Mimic Android shell — Capacitor WebView hosting shared/web",
     "scripts":  {
                     "build:web":  "npm --prefix ../shared/web run build",
