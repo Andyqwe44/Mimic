@@ -181,7 +181,7 @@ svg.lucide {
   }
 }
 
-/* PagePager uses native overflow-x + scroll-snap — hide scrollbar chrome. */
+/* PagePager is transform-based (no overflow scroll); keep scrollbar hidden if any. */
 [data-page-pager]::-webkit-scrollbar {
   display: none;
 }
@@ -213,12 +213,8 @@ svg.lucide {
   }
 }
 
-/* Bottom-nav sliding pill — transform driven by PagePager writeNavProgress (translate3d).
-   CSS transition only applies when not dragging; drag/tap-anim set .nav-dragging. */
+/* Bottom-nav sliding pill — 100% JS translate3d (no CSS transition; avoids lag vs track). */
 .nav-pill {
-  transition: transform 200ms cubic-bezier(0.25, 0.85, 0.3, 1);
-}
-.nav-dragging .nav-pill {
   transition: none;
 }
 

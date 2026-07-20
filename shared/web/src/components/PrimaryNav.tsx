@@ -61,7 +61,8 @@ export function PrimaryNav({
       >
         {/* Content row: fixed height; safe-area padding is outside so pill isn't pushed down */}
         <div
-          className={`relative grid grid-cols-4 ${NAV.bottomGap} px-1.5 ${NAV.bottomH}`}
+          className={`relative grid ${NAV.bottomGap} px-1.5 ${NAV.bottomH}`}
+          style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}
         >
           <div
             aria-hidden

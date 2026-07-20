@@ -156,6 +156,21 @@ export const NAV = {
   /** grid gap-1 between bottom tabs */
   bottomGap: 'gap-1',
   bottomGapRem: 0.25,
+  /**
+   * Paged horizontal track (Clash Royale–style snap slots).
+   * Edge rubber-band + fling thresholds — pageCount comes from PRIMARY_PAGES.
+   */
+  /** Axis lock: |dx| must exceed this (px) and beat |dy| before horizontal drag */
+  pagerAxisLockPx: 10,
+  /** Overscroll past first/last page: displayed offset *= resistance */
+  pagerRubber: 0.38,
+  /** Cap edge stretch as a fraction of one page width */
+  pagerRubberMax: 0.28,
+  /** Fling: velocity (pages/ms) above this commits neighbor page */
+  pagerFlingPagesPerMs: 0.00055,
+  /** Snap settle when releasing mid-slot (ms) — short bounce-home */
+  pagerSnapMs: 220,
+  pagerSnapEase: [0.22, 0.9, 0.28, 1] as const,
 } as const
 
 /** Duration (ms) for programmatic page jump by |page delta|. */
@@ -165,6 +180,20 @@ export function navTapDurationMs(pageDelta: number): number {
     NAV.tapDurMax,
     Math.max(NAV.tapDurMin, NAV.tapDurBase + NAV.tapDurPerPage * pages),
   )
+}
+
+/**
+ * Rubber-band a fractional page position outside [0, pageCount-1].
+ * Extensible: pageCount = PRIMARY_PAGES.length (or any N).
+ */
+export function rubberBandPage(raw: number, pageCount: number): number {
+  if (pageCount <= 0) return 0
+  const max = pageCount - 1
+  if (raw >= 0 && raw <= max) return raw
+  const r = NAV.pagerRubber
+  const cap = NAV.pagerRubberMax
+  if (raw < 0) return -Math.min(cap, -raw * r)
+  return max + Math.min(cap, (raw - max) * r)
 }
 
 export const SHELL_PAD = {
