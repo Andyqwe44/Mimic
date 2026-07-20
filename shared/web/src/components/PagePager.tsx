@@ -77,6 +77,33 @@ function clampIndex(i: number, pageCount: number): number {
   return Math.max(0, Math.min(pageCount - 1, i))
 }
 
+/** 1-based axis: 1=Monitor 2=Peers 3=Log 4=Settings (matches bottom-nav left→right). */
+function axisX(frac0: number): number {
+  return frac0 + 1
+}
+
+/** Human label for fractional 0-based page index, e.g. "3.42(Log→Settings)". */
+function fmtX(frac0: number): string {
+  const x = axisX(frac0)
+  const n = PRIMARY_PAGES.length
+  if (n <= 0) return `x=${x.toFixed(2)}`
+  const lo = Math.max(0, Math.min(n - 1, Math.floor(frac0 + 1e-6)))
+  const hi = Math.max(0, Math.min(n - 1, Math.ceil(frac0 - 1e-6)))
+  if (lo === hi || Math.abs(frac0 - lo) < 0.02) {
+    return `x=${x.toFixed(2)}(${PRIMARY_PAGES[lo]})`
+  }
+  return `x=${x.toFixed(2)}(${PRIMARY_PAGES[lo]}→${PRIMARY_PAGES[hi]})`
+}
+
+function fmtTarget(idx0: number): string {
+  const name = PRIMARY_PAGES[idx0] ?? `?${idx0}`
+  return `${axisX(idx0).toFixed(0)}(${name})`
+}
+
+function axisLegend(): string {
+  return PRIMARY_PAGES.map((p, i) => `${i + 1}=${p}`).join(' ')
+}
+
 /** Turn off snap so a newer smooth / finger gesture is not fought by compositor snap. */
 function disarmSnap(vp: HTMLElement) {
   vp.style.scrollSnapType = 'none'
@@ -145,8 +172,42 @@ export function PagePager({
   const watchdog = useRef(0)
   /** Last scroll event time — used to adopt in-flight snap even if settle was disarmed. */
   const lastScrollTs = useRef(0)
+  /** Throttle progress logs (ms + min Δx in 1-based units). */
+  const lastProgLogTs = useRef(0)
+  const lastProgLogX = useRef(Number.NaN)
 
   const progressHost = () => progressHostRef?.current ?? null
+
+  const readFrac = () => {
+    const vp = viewportRef.current
+    const w = widthRef.current
+    if (!vp || w <= 0) return progressRef.current
+    return vp.scrollLeft / w
+  }
+
+  /** Sample progress while animating / dragging. Throttled to avoid log floods. */
+  const logProgress = (why: string, force = false) => {
+    const frac = readFrac()
+    const x = axisX(frac)
+    const now = performance.now()
+    const dt = now - lastProgLogTs.current
+    const dx = Number.isFinite(lastProgLogX.current) ? Math.abs(x - lastProgLogX.current) : 99
+    if (!force && dt < 32 && dx < 0.03) return
+    lastProgLogTs.current = now
+    lastProgLogX.current = x
+    const intent = navIntent.current
+    const intentStr = intent !== null ? ` →${fmtTarget(intent)}` : ''
+    const mode = fingerDown.current
+      ? 'finger'
+      : programmatic.current || intent !== null
+        ? 'nav'
+        : settleArmed()
+          ? 'snap'
+          : holdIdx.current !== null
+            ? 'hold'
+            : 'idle'
+    addLog(`[pager] ${fmtX(frac)} ${why} mode=${mode}${intentStr}`)
+  }
 
   const clearSettleTimer = () => {
     if (settleTimer.current) {
@@ -174,7 +235,10 @@ export function PagePager({
     const i = clampIndex(next, pageCount)
     if (i !== indexRef.current) {
       skipPropScroll.current = true
-      addLog(`[pager] commit ${PRIMARY_PAGES[indexRef.current]}→${PRIMARY_PAGES[i]}`)
+      const from = indexRef.current
+      addLog(
+        `[pager] commit ${fmtTarget(from)}→${fmtTarget(i)} at ${fmtX(readFrac())}`,
+      )
       onPageChangeRef.current(PRIMARY_PAGES[i])
     }
   }
@@ -187,7 +251,9 @@ export function PagePager({
    */
   const finishNavScroll = (reason: string, forSeq: number) => {
     if (forSeq !== actionSeq.current) {
-      addLog(`[pager] finish-skip stale seq=${forSeq} now=${actionSeq.current}`)
+      addLog(
+        `[pager] finish-skip stale seq=${forSeq} now=${actionSeq.current} at ${fmtX(readFrac())}`,
+      )
       return
     }
     const vp = viewportRef.current
@@ -201,6 +267,7 @@ export function PagePager({
       return
     }
     const exact = target * w
+    const before = vp.scrollLeft / w
     const dist = Math.abs(vp.scrollLeft - exact)
     disarmSnap(vp)
     // Pin + cancel residual momentum (even when close — otherwise fling → hold-correct 抽搐)
@@ -213,7 +280,11 @@ export function PagePager({
     navIntent.current = null
     holdIdx.current = target
     settleArmSeq.current = -1
-    addLog(`[pager] intent-done idx=${target} (${reason}) dist=${dist.toFixed(1)}`)
+    addLog(
+      `[pager] intent-done →${fmtTarget(target)} (${reason}) `
+      + `from ${fmtX(before)} distPx=${dist.toFixed(1)}`,
+    )
+    logProgress('landed', true)
   }
 
   const finishNavScrollRef = useRef(finishNavScroll)
@@ -242,18 +313,17 @@ export function PagePager({
       holdIdx.current = targetIdx
       disarmSnap(vp)
       syncPill(targetLeft, false)
-      addLog(`[pager] noop-on-slot idx=${targetIdx}`)
+      addLog(`[pager] noop-on-slot ${fmtX(frac)} already ${fmtTarget(targetIdx)}`)
       return
     }
 
     // Already smooth-scrolling to same page — leave it alone
     if (navIntent.current === targetIdx && programmatic.current) {
-      addLog(`[pager] adopt-nav idx=${targetIdx}`)
+      addLog(`[pager] adopt-nav ${fmtX(frac)} keep→${fmtTarget(targetIdx)}`)
       return
     }
 
     // Already moving toward this page (finger snap or residual) — do not restart.
-    // settleArmed covers the common path; recent scroll covers snap after settle was cleared.
     const recentlyScrolling = performance.now() - lastScrollTs.current < 120
     if (
       Math.abs(frac - targetIdx) <= 0.5
@@ -264,7 +334,7 @@ export function PagePager({
       programmatic.current = false
       holdIdx.current = null
       addLog(
-        `[pager] adopt-snap→${PRIMARY_PAGES[targetIdx]} from=${frac.toFixed(2)}`
+        `[pager] adopt-snap ${fmtX(frac)} keep→${fmtTarget(targetIdx)}`
         + ` armed=${settleArmed() ? 1 : 0} recent=${recentlyScrolling ? 1 : 0}`,
       )
       return
@@ -298,10 +368,11 @@ export function PagePager({
 
     programmatic.current = true
     addLog(
-      `[pager] native-smooth→${PRIMARY_PAGES[targetIdx]} `
-      + `from=${(from / w).toFixed(2)} Δ=${(Math.abs(targetLeft - from) / w).toFixed(2)} `
-      + `seq=${mySeq}`,
+      `[pager] nav-smooth ${fmtX(frac)}→${fmtTarget(targetIdx)} `
+      + `Δ=${Math.abs(axisX(targetIdx) - axisX(frac)).toFixed(2)} seq=${mySeq}`
+      + ` armed=0 recent=${recentlyScrolling ? 1 : 0}`,
     )
+    logProgress('nav-start', true)
     vp.scrollTo({ left: targetLeft, behavior: 'smooth' })
 
     watchdog.current = window.setTimeout(() => {
@@ -375,7 +446,7 @@ export function PagePager({
       holdIdx.current = index
       return
     }
-    addLog(`[pager] prop→scroll idx=${index} from=${(vp.scrollLeft / w).toFixed(2)} seq=${navSeq}`)
+    addLog(`[pager] prop→scroll →${fmtTarget(index)} at ${fmtX(vp.scrollLeft / w)} seq=${navSeq}`)
     nativeScrollToRef.current(index)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [index, navSeq])
@@ -393,8 +464,10 @@ export function PagePager({
 
       const w = widthRef.current
       if (w <= 0) return
-      const nearest = clampIndex(Math.round(vp.scrollLeft / w), pageCount)
+      const frac = vp.scrollLeft / w
+      const nearest = clampIndex(Math.round(frac), pageCount)
       const exact = nearest * w
+      addLog(`[pager] settle ${fmtX(frac)} →${fmtTarget(nearest)}`)
       if (Math.abs(vp.scrollLeft - exact) > 1) {
         try {
           vp.scrollTo({ left: exact, behavior: 'instant' as ScrollBehavior })
@@ -418,6 +491,11 @@ export function PagePager({
         || navIntent.current !== null
       syncPill(vp.scrollLeft, dragging)
 
+      // Progress trace while user / snap / nav is moving
+      if (dragging) {
+        logProgress('tick')
+      }
+
       // Rare safety: residual drift while holding after nav (snap stays off).
       // One-shot pin — do not fight a fling in a loop (that was the 抽搐).
       if (
@@ -439,7 +517,7 @@ export function PagePager({
           }
           holdIdx.current = held
           syncPill(exact, false)
-          addLog(`[pager] hold-correct idx=${held}`)
+          addLog(`[pager] hold-correct →${fmtTarget(held)} at ${fmtX(exact / w)}`)
           return
         }
       }
@@ -461,6 +539,7 @@ export function PagePager({
     }
 
     const onScrollEnd = () => {
+      logProgress('scrollend', true)
       if (fingerDown.current) return
       if (navIntent.current !== null || programmatic.current) {
         finishNavScrollRef.current('scrollend', navActionSeq.current)
@@ -476,21 +555,33 @@ export function PagePager({
       actionSeq.current += 1
       settleArmSeq.current = actionSeq.current
       holdIdx.current = null
+      const frac = widthRef.current > 0 ? vp.scrollLeft / widthRef.current : progressRef.current
       if (navIntent.current !== null || programmatic.current) {
         clearWatchdog()
+        const was = navIntent.current
         programmatic.current = false
         navIntent.current = null
         cancelScrollAtCurrent(vp)
-        addLog(`[pager] intent-cancel (finger) seq=${actionSeq.current}`)
+        addLog(
+          `[pager] finger↓ cancel-nav ${fmtX(frac)}`
+          + (was !== null ? ` was→${fmtTarget(was)}` : '')
+          + ` seq=${actionSeq.current}`,
+        )
+      } else {
+        addLog(`[pager] finger↓ ${fmtX(frac)} seq=${actionSeq.current}`)
       }
       // Re-enable snap only for finger gestures (kept off after nav land).
       enableFingerSnap(vp)
       fingerDown.current = true
       clearSettleTimer()
+      logProgress('finger-down', true)
     }
 
     const onPointerUp = () => {
+      const frac = widthRef.current > 0 ? vp.scrollLeft / widthRef.current : progressRef.current
       fingerDown.current = false
+      addLog(`[pager] finger↑ ${fmtX(frac)} armed=${settleArmed() ? 1 : 0}`)
+      logProgress('finger-up', true)
       if (!settleArmed()) return
       clearSettleTimer()
       settleTimer.current = window.setTimeout(settleFromScroll, 120)
@@ -501,7 +592,8 @@ export function PagePager({
     vp.addEventListener('pointerdown', onPointerDown, { passive: true })
     vp.addEventListener('pointerup', onPointerUp, { passive: true })
     vp.addEventListener('pointercancel', onPointerUp, { passive: true })
-    addLog(`[pager] native-scroll ready pages=${pageCount} idx=${indexRef.current}`)
+    addLog(`[pager] ready axis ${axisLegend()}`)
+    addLog(`[pager] ready at ${fmtX(indexRef.current)} pages=${pageCount}`)
     if (widthRef.current > 0) {
       vp.scrollLeft = indexRef.current * widthRef.current
       syncPill(vp.scrollLeft, false)
