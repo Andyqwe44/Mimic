@@ -124,7 +124,7 @@ docs/
 | Auth / Call native | `pc/client/src/peer_session.cpp` · `android/.../PeerSession.kt` |
 | Roster | `server/server.js` `devicesForUser`（`online` + `state`） |
 | Banner #9 | `shared/web/src/components/IncomingCallBanner.tsx` |
-| Page 导航 | `App.tsx` `session_end` → `Peers`；`onPeerSessionStart` → `Monitor`；`PagePager` P1–P5 |
+| Page 导航 | `App.tsx` `session_end` → `Peers`；`onPeerSessionStart` → `Monitor`；`PagePager` P1–P3 |
 | UI 投影 | `PeerPanel.tsx` |
 
 ## Build & release (PC + Server)

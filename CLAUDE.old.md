@@ -1,5 +1,25 @@
 # Archive notes
 
+## 2026-07-20 — Android PagePager：原生横滑 + 点选冲突（v0.1.52–0.1.56）
+
+**问题**：底栏点选卡顿/末尾硬停；A→B 横滑未完立刻点 C 最终落到 B（旧 snap settle 覆盖新意图）；半滑中途点选闪现。
+
+**终态（v0.1.56，CDN）** — `shared/web/src/components/PagePager.tsx`：
+
+| 路径 | 机制 |
+|------|------|
+| 手指横滑 + 松手 | 浏览器原生 `overflow-x` + `scroll-snap` |
+| 底栏点选 | 原生 `scrollTo({ behavior: 'smooth' })` |
+| 冲突 | **最后一次用户动作胜出**（`actionSeq`） |
+
+关键 refs：`actionSeq`（单调用户动作 ID）· `settleArmSeq`（仅同次手指 gesture 可 `commit`；点选置 `-1`）· `holdIdx`（点选落地后抵制残余 snap）· `hardStopScroll`（杀 fling/snap 惯性）· `navSeq`（App 每次底栏点选递增，触发 prop→scroll）。
+
+Watchdog：`NAV.tapSmoothWatchdogMs = 900`（勿过早 `scrollLeft=` 硬对齐，避免末尾顿一下）。
+
+状态表 SSOT → 根 `README.md`「Page 导航」。中间尝试史：rAF bezier 点选（52–53）→ 统一 transform（54，横滑手感变差）→ 恢复原生双路径（55）→ actionSeq 武装 settle（56）。
+
+`Publish-Cdn.ps1`：Android 只 scp 当前版 APK（避免 `scp -r *` 历史树挂死）。
+
 ## 2026-07-18 — Deep layout: pc / server / android / shared
 
 - Moved Windows stack under `pc/` (`client`, capture, input, logger, updater, …).
