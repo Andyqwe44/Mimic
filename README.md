@@ -117,25 +117,30 @@ docs/
 
 ### Page 导航（底部栏 / 横滑 · `PagePager`）
 
-两条路径都走**浏览器原生滚动**（复刻 **v0.1.65** / 同 v0.1.61）：
+轴：`x ∈ [0,5]` — 槽 0/5 为回弹空白，槽 1…4 为监视/对等/日志/设置。胶囊小地图同轴（`pillTranslateX = x * pitch`，槽 0/5 出屏）；底栏标签**不高亮**，只靠胶囊表示位置。
+
+两条路径都走**浏览器原生滚动**（N0，无速度衔接）：
 
 | 操作 | 机制 |
 |------|------|
-| 手指横滑（过 slop + H 轴）+ 松手 | `overflow-x`；松手瞬间开 `scroll-snap` settle，随后关掉 |
-| 底栏点选 | `disarmSnap` → rAF → `scrollTo({ behavior: 'smooth' })` |
-| 短触 / 未过 slop | **无效** — 不 cancel nav、不武装 settle |
+| 手指横滑（过 slop + H 轴）+ 松手 | 原生 `overflow-x` 跟手；松手按 B1 选目标 → `scrollTo(smooth)` |
+| 底栏点选 | 取消旧动画 → 从当前 x → `scrollTo({ behavior: 'smooth' })` |
+| 选目标 | **T1** 立刻 `onPageChange`；动画只追视觉 |
 
-**最后一次有效用户动作胜出**：点选一律有效；手指仅在过 `NAV.pagerAxisLockPx` 且 `resolvePagerAxis===h` 后才算。点选落地后 snap 保持关闭；`hold-correct` 每个 hold 最多一次。
+**松手选页（B1 混合）**：从整数内容页起拖 → 相对出发页 ±0.15（越过则至少进一步并用 round）；打断 ease 后 / 小数位 → `round(x)`；`x<1→1`，`x>4→4`。不按速度 fling。
+
+**最后一次有效动作胜出**：点选可打断 settle；ease 中 pointerdown **立刻挺住**（B2-A）；短触按打断点 + B1 落地（不透明 resume）。
 
 | # | 当前状态 | 事件 | → | 说明 |
 |---|----------|------|---|------|
-| P1 | 任意 | 底栏点选 C | **C** | disarm → rAF → smooth→C |
-| P2 | nav→C | pointerdown 未过 slop | **仍 C** | tap-ignore；必要时 nav-resume |
-| P3 | nav→C | 横滑过 slop | finger-drag | freeze 当前 x，snap 仍关（无跳格） |
-| P4 | finger-drag | finger↑ | nearest | 仅此次 drag 可 commit |
-| P5 | idle/hold | 短触未过 slop | 不变 | 不 fling |
-| P6 | snap 动画中 | 底栏点选 C | **C** | 同 P1 |
-| P7 | hold 后漂移 | — | pin×1 | 无 hold-correct 连打 |
+| P1 | 任意 | 底栏点选 C | **C** | 从当前 x smooth→C；再点同 C 不重启 |
+| P2 | nav→C | pointerdown | 挺住当前 x | 取消旧 smooth |
+| P2a | 挺住后短触 up | B1 选页 | 例 2.25→2 | 不 resume 旧 C |
+| P3 | 挺住 / idle | 横滑过 slop | finger-follow | 原生跟手 |
+| P4 | finger-follow | finger↑ | B1 目标 | 再 smooth；T1 commit |
+| P5 | idle | 短触未过 slop | 不变 | — |
+| P6 | settle→C 中 | 点选 D | **D** | 从当前 x 重新 smooth（速度从 0） |
+| P7 | 任意 | 先分轴锁轴 | — | H/V 互斥；第二指忽略 |
 
 ### 实现落点
 
@@ -144,7 +149,7 @@ docs/
 | Auth / Call native | `pc/client/src/peer_session.cpp` · `android/.../PeerSession.kt` |
 | Roster | `server/server.js` `devicesForUser`（`online` + `state`） |
 | Banner #9 | `shared/web/src/components/IncomingCallBanner.tsx` |
-| Page 导航 | `App.tsx` `session_end` → `Peers`；`onPeerSessionStart` → `Monitor`；`PagePager` P1–P7（v0.1.65） |
+| Page 导航 | `App.tsx` `session_end` → `Peers`；`onPeerSessionStart` → `Monitor`；`PagePager` P1–P7（轴 0…5 + 胶囊同轴 N0） |
 | UI 投影 | `PeerPanel.tsx` |
 
 ## Build & release (PC + Server)

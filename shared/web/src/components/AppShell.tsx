@@ -61,7 +61,8 @@ export function AppShell({
     const host = progressHostRef.current
     if (!host) return
     if (host.style.getPropertyValue('--nav-fraction')) return
-    writeNavProgress(host, pageIndex(initialPageRef.current), false)
+    // Axis x = content index + 1 (slots 0 and 5 are bounce blanks).
+    writeNavProgress(host, pageIndex(initialPageRef.current) + 1, false)
   }, [bottom, progressHostRef])
 
   return (

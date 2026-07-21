@@ -59,9 +59,9 @@ export function PrimaryNav({
           pl-[max(0.375rem,env(safe-area-inset-left,0px))]
           pr-[max(0.375rem,env(safe-area-inset-right,0px))]`}
       >
-        {/* Content row: fixed height; safe-area padding is outside so pill isn't pushed down */}
+        {/* Content row: pill axis 0…5 (blanks off-screen); position only via pill, no tab highlight */}
         <div
-          className={`relative grid ${NAV.bottomGap} px-1.5 ${NAV.bottomH}`}
+          className={`relative grid ${NAV.bottomGap} px-1.5 ${NAV.bottomH} overflow-x-clip`}
           style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}
         >
           <div
@@ -76,23 +76,20 @@ export function PrimaryNav({
               willChange: 'transform',
             }}
           />
-          {items.map((it) => {
-            const active = isActive(it.id)
-            return (
-              <Tooltip key={it.id} text={it.tip} className="w-full min-w-0 relative z-[1]">
-                <button
-                  type="button"
-                  aria-current={active ? 'page' : undefined}
-                  onClick={() => select(it.id)}
-                  className={`w-full ${NAV.touchMin} flex flex-col items-center justify-center gap-0.5 px-1
-                    ${RADIUS.lg} text-text-secondary`}
-                >
-                  {it.icon}
-                  <span className={`${TEXT.tiny} font-medium truncate max-w-full`}>{it.label}</span>
-                </button>
-              </Tooltip>
-            )
-          })}
+          {items.map((it) => (
+            <Tooltip key={it.id} text={it.tip} className="w-full min-w-0 relative z-[1]">
+              <button
+                type="button"
+                aria-current={isActive(it.id) ? 'page' : undefined}
+                onClick={() => select(it.id)}
+                className={`w-full ${NAV.touchMin} flex flex-col items-center justify-center gap-0.5 px-1
+                  ${RADIUS.lg} text-text-secondary`}
+              >
+                {it.icon}
+                <span className={`${TEXT.tiny} font-medium truncate max-w-full`}>{it.label}</span>
+              </button>
+            </Tooltip>
+          ))}
         </div>
       </nav>
     )

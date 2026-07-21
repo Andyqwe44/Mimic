@@ -1,8 +1,8 @@
 {
     "name": "mimic-android",
     "private": true,
-    "version": "0.1.71",
-    "mimicReleaseNote": "PagePager: restore v0.1.65 native overflow-x + snap (P1-P7)",
+    "version": "0.1.72",
+    "mimicReleaseNote": "PagePager: 0-5 axis + bounce blanks, pill minimap sync, B1/B2 race",
     "description": "Mimic Android shell 閳?Capacitor WebView hosting shared/web",
     "scripts": {
         "build:web": "npm --prefix ../shared/web run build",

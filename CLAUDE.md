@@ -500,7 +500,7 @@ locales/: en.json, zh-CN.json, zh-TW.json
 
 **DevMode overlays（摘要 · 铁律 5）**：`display = demoOverlay ?? SSOT`。Demo（Agent/更新弹窗/自检）只写 overlay，禁止写真相。关 Dev = 清 overlay → 关能力（dump/Test Target/真自检）→ `get_agent_status` 重检。假更新弹窗纯前端，不调下载 API。细则 → `monitor-web.mdc`；史 → `CLAUDE.old.md`。
 
-**PagePager（摘要）**：复刻 **v0.1.65** 原生 `overflow-x` + snap settle / 底栏 `scrollTo(smooth)`。横滑仅当 slop+H 轴有效；短触忽略；冲突以有效动作胜出。状态表 → 根 [README.md](README.md) P1–P7；史 → `CLAUDE.old.md`。
+**PagePager（摘要）**：轴 `0…5`（两侧回弹空白 + 四内容页）；胶囊同轴小地图；原生 `overflow-x` 跟手 + `scrollTo(smooth)` 吸附/点选（N0）。状态表 → 根 [README.md](README.md) P1–P7；史 → `CLAUDE.old.md`。
 
 **Android 边界**：UI = `shared/web`（WebView）；Kotlin（`setup/client`）只做 Web 做不了的事——采集/编码、peer 信令与媒体、输入注入、Shizuku、系统 Intent/APK 更新。横滑不在 Kotlin；已删未编入发版的 Capacitor `MimicHostPlugin` 空壳。
 
