@@ -1,6 +1,6 @@
 {
     "schema":  "1",
-    "app":  "0.1.77",
+    "app":  "0.1.78",
     "platform":  "android",
     "channel":  "stable",
     "full_update":  true,

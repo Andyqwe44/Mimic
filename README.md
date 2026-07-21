@@ -119,27 +119,27 @@ docs/
 
 轴：`x ∈ [0,5]` — 槽 0/5 为回弹空白，槽 1…4 为监视/对等/日志/设置。胶囊小地图同轴（`pillTranslateX = x * pitch`，槽 0/5 出屏）；底栏标签**不高亮**，只靠胶囊表示位置。
 
-两条路径（**原生横滑跟手** + 松手硬刹停后 B1）：
+两条路径（**原生横滑跟手** + 松手 lockH 后 B1）：
 
 | 操作 | 机制 |
 |------|------|
-| 手指横滑 | 浏览器原生 `overflow-x` 跟手；`pointercancel` **不**吸附 |
-| 手指抬起 | `touchend`：硬 `killMomentum`（`overflow-x` 切换）→ **钉 2 帧** → B1；Δ≤0.25 **instant**，否则 `smooth` |
-| 底栏点选 | 同上（大跨度 smooth；近距 instant） |
-| Idle 漂移 | `holdAxis` 偏离 → `onScroll` / 下次按下纠偏回钉 |
+| 手指横滑 | 按下时 `unlockH`；原生 `overflow-x` 跟手；`pointercancel` **不**吸附 |
+| 手指抬起 | `touchend`：`lockH`（`overflow-x:hidden`，**保持锁死**）→ B1；Δ≤0.25 instant，否则 smooth |
+| 底栏点选 | 同上（大跨度 smooth；近距 instant）；落地后仍 lockH |
+| Idle | 保持 lockH，**禁止**与惯性对打纠偏（旧 idle-repin 会造成抽搐） |
 
 **松手选页（B1）**：±0.15 / round / 空白回弹。无 fling 续滑。
 
 | # | 当前状态 | 事件 | → | 说明 |
 |---|----------|------|---|------|
-| P1 | 任意 | 底栏点选 C | **C** | Δ≤0.25 instant，否则 pin→smooth→C |
-| P2 | nav→C | pointerdown | 挺住 | 取消旧 smooth |
-| P3 | idle | 横滑 | 原生跟手 | cancel 只表示浏览器接管，仍等抬手 |
-| P4 | 横滑中 | touchend | B1 | 硬刹停→钉 2 帧→吸附 |
+| P1 | 任意 | 底栏点选 C | **C** | Δ≤0.25 instant，否则 smooth→C（全程 lockH） |
+| P2 | nav→C | pointerdown | 挺住 | unlock + 取消旧 smooth |
+| P3 | idle | 横滑 | 原生跟手 | unlock 后跟手；cancel 只表示浏览器接管 |
+| P4 | 横滑中 | touchend | B1 | lockH→立刻吸附 |
 | P5 | 卡缝短触 | touchend | B1 | 同上 |
 | P6 | settle 中 | 点选 D | **D** | retarget |
 | P7 | 分轴 | V | 放弃 H | 页内竖滑 |
-| P8 | idle+hold | scroll / 按下 | 回钉 | 残留惯性纠偏 |
+| P8 | idle | — | 锁死 | lockH 直到下次按下 |
 
 ### 实现落点
 
