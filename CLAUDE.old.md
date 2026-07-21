@@ -1,5 +1,9 @@
 # Archive notes
 
+## 2026-07-21 — PagePager 恢复 v0.1.64（Android v0.1.70）
+
+用户指定 v0.1.64 手感最佳：手工 checkout `PagePager` / `design.ts` / `index.css` 自 `android-v0.1.64`（translate3d 单 owner）。非 git revert 整仓。
+
 ## 2026-07-21 — PagePager MAA 单 owner + 轻 Kotlin（Android v0.1.67）
 
 Web `translate3d` + `settleTo`（MAA duration/ease）；删 DEAD `plugins/MimicHost/MimicHostPlugin.kt`。状态表 README M1–M6。

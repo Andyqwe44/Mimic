@@ -147,20 +147,14 @@ export const NAV = {
   settleMs: 300,
   settleEase: 'cubic-bezier(0.25, 0.85, 0.3, 1)',
   /**
-   * @deprecated leftover watchdog from native scrollTo(smooth) era.
+   * @deprecated leftover from native scrollTo(smooth) era; settle uses pageAnimMs.
    */
   tapSmoothWatchdogMs: 900,
-  /**
-   * MAA-Meow HorizontalPager settle: base ms for maaSettleMs(distance).
-   * Duration = pageAnimBaseMs * distance + pageAnimBaseMs (邻页 200ms).
-   */
-  pageAnimBaseMs: 100,
-  /** MAA springEasing: CubicBezierEasing(0.32, 0.72, 0, 1) — 快起慢收 */
-  pageAnimEase: [0.32, 0.72, 0, 1] as const,
-  /** @deprecated alias — use maaSettleMs(1) ≈ 200 */
-  pageAnimMs: 200,
-  tapDurMs: 200,
-  tapEase: [0.32, 0.72, 0, 1] as const,
+  /** Clash Royale settle: rAF + cubic-bezier from current frac → target (ms). */
+  pageAnimMs: 220,
+  pageAnimEase: [0.22, 0.9, 0.28, 1] as const,
+  tapDurMs: 220,
+  tapEase: [0.22, 0.9, 0.28, 1] as const,
   /** grid gap-1 between bottom tabs */
   bottomGap: 'gap-1',
   bottomGapRem: 0.25,
@@ -187,9 +181,9 @@ export const NAV = {
   pagerFlingMinMs: 80,
   pagerReverseCancel: 0.12,
   /** @deprecated alias — use pageAnimMs */
-  pagerSnapMs: 200,
+  pagerSnapMs: 220,
   /** @deprecated alias — use pageAnimEase */
-  pagerSnapEase: [0.32, 0.72, 0, 1] as const,
+  pagerSnapEase: [0.22, 0.9, 0.28, 1] as const,
   /** Android long-press tooltip (PC keeps hover 300ms) */
   tooltipHoverMs: 300,
   tooltipLongPressMs: 450,
@@ -211,15 +205,9 @@ export function resolvePagerAxis(
   return 'v'
 }
 
-/** MAA-Meow: durationMillis = 100 * distance + 100 (邻页 200ms). */
-export function maaSettleMs(pageDistance: number): number {
-  const d = Math.max(1, Math.abs(pageDistance))
-  return NAV.pageAnimBaseMs * d + NAV.pageAnimBaseMs
-}
-
-/** @deprecated — use maaSettleMs; kept for callers that still import it. */
-export function navTapDurationMs(pageDelta?: number): number {
-  return maaSettleMs(pageDelta ?? 1)
+/** @deprecated — nav tap uses native smooth; kept for callers that still import it. */
+export function navTapDurationMs(_pageDelta?: number): number {
+  return NAV.tapSmoothWatchdogMs
 }
 
 /**

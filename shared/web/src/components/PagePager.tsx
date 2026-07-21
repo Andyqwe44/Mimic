@@ -1,7 +1,7 @@
-// MAA-Meow / ViewPager single-owner: one fractional offset (scrollLeft — not translate3d).
-// Android WebView: transform moves pixels but hit-testing often stays at layout x=0..W
-// (only Monitor swipes; Peers/Log/Settings look visible but receive no touches).
-// Drag = scrollLeft finger-follow; settleTo(T) = rAF + MAA cubic-bezier (last wins).
+// Clash Royale / ViewPager style: single offset owner.
+// Drag = manual translate3d (finger follow, no native fling).
+// settleTo(T) = rAF + cubic-bezier from current frac (tab tap + finger↑ share this).
+// translate3d stays on compositor — FPS ≈ native overflow when we only touch transform.
 import {
   Children,
   useEffect,
@@ -10,15 +10,9 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react'
-import { NAV, maaSettleMs, resolvePagerAxis, rubberBandPage } from '../lib/design'
+import { NAV, resolvePagerAxis, rubberBandPage } from '../lib/design'
 import { PRIMARY_PAGES, pageIndex, type AppPage } from '../lib/pages'
 import { addLog } from '../lib/bridge'
-
-/** Set true only when debugging PagePager; keep false so peer video logs stay readable. */
-const PAGER_DEBUG = false
-function pagerLog(msg: string) {
-  if (PAGER_DEBUG) addLog(msg)
-}
 
 type PillLayout = { padL: number; slotW: number; pitch: number; n: number }
 type PtrPhase = 'none' | 'pending' | 'dragging'
@@ -111,6 +105,7 @@ function axisLegend(): string {
   return PRIMARY_PAGES.map((p, i) => `${i + 1}=${p}`).join(' ')
 }
 
+/** Sample cubic bezier dimension (control a,b; ends 0→1). */
 function bezSample(s: number, a: number, b: number): number {
   const u = 1 - s
   return 3 * u * u * s * a + 3 * u * s * s * b + s * s * s
@@ -121,7 +116,7 @@ function bezDeriv(s: number, a: number, b: number): number {
   return 3 * u * u * a + 6 * u * s * (b - a) + 3 * s * s * (1 - b)
 }
 
-/** MAA springEasing cubic-bezier(x1,y1,x2,y2). */
+/** cubic-bezier(x1,y1,x2,y2) eased progress for t∈[0,1]. */
 function bezierEase(t: number, ease: readonly [number, number, number, number]): number {
   if (t <= 0) return 0
   if (t >= 1) return 1
@@ -215,13 +210,13 @@ export function PagePager({
     }
   }
 
+  /** Apply fractional page offset via translate3d (compositor). */
   const applyFrac = (frac: number, dragging: boolean) => {
-    const vp = viewportRef.current
+    const track = trackRef.current
     const w = widthRef.current
-    if (!vp || w <= 0) return
+    if (!track || w <= 0) return
     progressRef.current = frac
-    // Programmatic scrollLeft only (overflow-x:hidden) — no native fling fight.
-    vp.scrollLeft = frac * w
+    track.style.transform = `translate3d(${-frac * w}px,0,0)`
     writeNavProgress(progressHost(), frac, dragging)
   }
 
@@ -245,7 +240,7 @@ export function PagePager({
           : ptrPhase.current === 'pending'
             ? 'pending'
             : 'idle'
-    pagerLog(`[pager] ${fmtX(frac)} ${why} mode=${mode}${intentStr}`)
+    addLog(`[pager] ${fmtX(frac)} ${why} mode=${mode}${intentStr}`)
   }
 
   const commitIndex = (next: number) => {
@@ -253,7 +248,7 @@ export function PagePager({
     if (i !== indexRef.current) {
       skipPropScroll.current = true
       const from = indexRef.current
-      pagerLog(
+      addLog(
         `[pager] commit ${fmtTarget(from)}→${fmtTarget(i)} at ${fmtX(progressRef.current)}`,
       )
       onPageChangeRef.current(PRIMARY_PAGES[i])
@@ -262,7 +257,7 @@ export function PagePager({
 
   const finishSettle = (reason: string, forSeq: number) => {
     if (forSeq !== animSeq.current) {
-      pagerLog(
+      addLog(
         `[pager] finish-skip stale seq=${forSeq} now=${animSeq.current} `
         + `at ${fmtX(progressRef.current)}`,
       )
@@ -275,7 +270,7 @@ export function PagePager({
     applyFrac(target, false)
     animTarget.current = null
     holdIdx.current = target
-    pagerLog(
+    addLog(
       `[pager] settle-done →${fmtTarget(target)} (${reason}) from ${fmtX(before)}`,
     )
     logProgress('landed', true)
@@ -286,7 +281,8 @@ export function PagePager({
   finishSettleRef.current = finishSettle
 
   /**
-   * Sole settler (MAA animateScrollToPage). Last call wins via animSeq.
+   * Sole settler — from current fractional x to target page.
+   * Last call wins (new seq cancels previous rAF).
    */
   const settleTo = (targetIdx: number, why: string) => {
     const w = widthRef.current
@@ -295,9 +291,8 @@ export function PagePager({
     const target = clampIndex(targetIdx, pageCount)
     const from = progressRef.current
 
-    // Same target already settling — adopt (MAA: index == targetPage return).
     if (animTarget.current === target && Math.abs(from - target) > 0.002) {
-      pagerLog(`[pager] adopt-settle ${fmtX(from)} keep→${fmtTarget(target)} why=${why}`)
+      addLog(`[pager] adopt-settle ${fmtX(from)} keep→${fmtTarget(target)} why=${why}`)
       return
     }
 
@@ -305,7 +300,7 @@ export function PagePager({
       holdIdx.current = target
       applyFrac(target, false)
       commitIndex(target)
-      pagerLog(`[pager] noop-on-slot ${fmtX(from)} already ${fmtTarget(target)} why=${why}`)
+      addLog(`[pager] noop-on-slot ${fmtX(from)} already ${fmtTarget(target)} why=${why}`)
       return
     }
 
@@ -315,17 +310,19 @@ export function PagePager({
     const mySeq = animSeq.current
     animTarget.current = target
 
-    const distance = Math.abs(target - from)
-    if (reduceMotion.current || distance < 0.002) {
+    if (reduceMotion.current || Math.abs(from - target) < 0.002) {
       applyFrac(target, false)
       finishSettleRef.current('instant', mySeq)
       return
     }
 
-    const dur = maaSettleMs(distance)
-    pagerLog(
+    const delta = Math.abs(target - from)
+    // Slightly longer for multi-page jumps (still one owner).
+    const dur = Math.round(NAV.pageAnimMs * (0.85 + 0.15 * Math.min(3, delta)))
+
+    addLog(
       `[pager] settleTo ${fmtX(from)}→${fmtTarget(target)} `
-      + `Δ=${distance.toFixed(2)} ${dur}ms seq=${mySeq} why=${why}`,
+      + `Δ=${delta.toFixed(2)} ${dur}ms seq=${mySeq} why=${why}`,
     )
     logProgress('settle-start', true)
 
@@ -352,6 +349,7 @@ export function PagePager({
   const settleToRef = useRef(settleTo)
   settleToRef.current = settleTo
 
+  /** Stop settle at current frac (for drag grab). */
   const freezeSettle = () => {
     clearSettleRaf()
     const was = animTarget.current
@@ -421,7 +419,7 @@ export function PagePager({
       holdIdx.current = index
       return
     }
-    pagerLog(
+    addLog(
       `[pager] prop→settle →${fmtTarget(index)} at ${fmtX(progressRef.current)} seq=${navSeq}`,
     )
     settleToRef.current(index, `prop/navSeq=${navSeq}`)
@@ -449,41 +447,35 @@ export function PagePager({
       return (b.frac - a.frac) / dt
     }
 
-    const beginDrag = (clientX: number, pointerId: number) => {
+    const beginDrag = (clientX: number) => {
       if (ptrPhase.current === 'dragging') return
       ptrPhase.current = 'dragging'
       holdIdx.current = null
       velSamples.current = []
 
       const was = freezeSettle()
-      // Sync from real scrollLeft (may have tiny drift before capture).
-      const w = widthRef.current
-      const frac = w > 0 ? vp.scrollLeft / w : progressRef.current
-      progressRef.current = frac
+      const frac = progressRef.current
       dragOriginFrac.current = frac
       dragStartClientX.current = clientX
-      try {
-        vp.setPointerCapture(pointerId)
-      } catch { /* ignore */ }
 
       if (was !== null) {
-        pagerLog(`[pager] drag-grab ${fmtX(frac)} was→${fmtTarget(was)}`)
+        addLog(`[pager] drag-grab ${fmtX(frac)} was→${fmtTarget(was)}`)
       } else {
-        pagerLog(`[pager] drag-start ${fmtX(frac)}`)
+        addLog(`[pager] drag-start ${fmtX(frac)}`)
       }
       logProgress('finger', true)
     }
 
     const onPointerDown = (e: PointerEvent) => {
       if (ptrPhase.current !== 'none') return
-      const t = e.target
-      if (t instanceof Element && t.closest('[data-no-page-swipe]')) return
       ptrPhase.current = 'pending'
       ptrStartX.current = e.clientX
       ptrStartY.current = e.clientY
       ptrId.current = e.pointerId
-      // Do NOT capture yet — let nested overflow-y scroll until H-lock.
-      pagerLog(
+      try {
+        vp.setPointerCapture(e.pointerId)
+      } catch { /* ignore */ }
+      addLog(
         `[pager] pointer↓ pending ${fmtX(progressRef.current)}`
         + (animTarget.current !== null ? ` settle→${fmtTarget(animTarget.current)}` : ''),
       )
@@ -501,17 +493,20 @@ export function PagePager({
         if (axis === 'v') {
           ptrPhase.current = 'none'
           ptrId.current = null
-          pagerLog(`[pager] tap-ignore axis=v ${fmtX(progressRef.current)}`)
+          try {
+            vp.releasePointerCapture(e.pointerId)
+          } catch { /* ignore */ }
+          addLog(`[pager] tap-ignore axis=v ${fmtX(progressRef.current)}`)
           return
         }
-        beginDrag(e.clientX, e.pointerId)
+        beginDrag(e.clientX)
       }
 
       if (ptrPhase.current !== 'dragging') return
       e.preventDefault()
-      e.stopPropagation()
       const w = widthRef.current
       if (w <= 0) return
+      // Finger right → content moves right → frac decreases (same as scrollLeft).
       const dxPx = e.clientX - dragStartClientX.current
       const raw = dragOriginFrac.current - dxPx / w
       const frac = rubberBandPage(raw, pageCount)
@@ -526,24 +521,20 @@ export function PagePager({
       ptrPhase.current = 'none'
       ptrId.current = null
       try {
-        if (vp.hasPointerCapture?.(e.pointerId)) {
-          vp.releasePointerCapture(e.pointerId)
-        }
+        vp.releasePointerCapture(e.pointerId)
       } catch { /* ignore */ }
 
       if (phase === 'pending') {
-        pagerLog(`[pager] tap-ignore ${fmtX(progressRef.current)} reason=${reason}`)
+        addLog(`[pager] tap-ignore ${fmtX(progressRef.current)} reason=${reason}`)
         logProgress('tap-ignore', true)
         return
       }
       if (phase !== 'dragging') return
 
-      const w = widthRef.current
-      const frac = w > 0 ? vp.scrollLeft / w : progressRef.current
-      progressRef.current = frac
+      const frac = progressRef.current
       const vel = readVel()
       const target = resolveReleaseTarget(frac, vel, pageCount, dragOriginFrac.current)
-      pagerLog(
+      addLog(
         `[pager] finger↑ ${fmtX(frac)} vel=${vel.toFixed(4)} →${fmtTarget(target)}`,
       )
       logProgress('finger-up', true)
@@ -553,37 +544,23 @@ export function PagePager({
     const onPointerUp = (e: PointerEvent) => endPointer(e, 'up')
     const onPointerCancel = (e: PointerEvent) => endPointer(e, 'cancel')
 
-    const onScrollNative = () => {
-      // Only pin when fully idle — never during pending/drag/settle (was causing twitch).
-      if (ptrPhase.current !== 'none' || animTarget.current !== null) return
-      const w = widthRef.current
-      const hold = holdIdx.current
-      if (w <= 0 || hold === null) return
-      const exact = hold * w
-      if (Math.abs(vp.scrollLeft - exact) > 1) {
-        vp.scrollLeft = exact
-      }
-    }
-
-    // Capture phase for H-drag; vertical still reaches children until beginDrag.
-    vp.addEventListener('scroll', onScrollNative, { passive: true })
-    vp.addEventListener('pointerdown', onPointerDown, { passive: true, capture: true })
-    vp.addEventListener('pointermove', onPointerMove, { passive: false, capture: true })
-    vp.addEventListener('pointerup', onPointerUp, { passive: true, capture: true })
-    vp.addEventListener('pointercancel', onPointerCancel, { passive: true, capture: true })
-    pagerLog(`[pager] ready axis ${axisLegend()} mode=maa-single-owner(scrollLeft-hidden)`)
-    pagerLog(`[pager] ready at ${fmtX(indexRef.current)} pages=${pageCount}`)
+    // non-passive so H-drag can preventDefault (block native scroll / nested steal).
+    vp.addEventListener('pointerdown', onPointerDown, { passive: true })
+    vp.addEventListener('pointermove', onPointerMove, { passive: false })
+    vp.addEventListener('pointerup', onPointerUp, { passive: true })
+    vp.addEventListener('pointercancel', onPointerCancel, { passive: true })
+    addLog(`[pager] ready axis ${axisLegend()} mode=clash-royale(translate3d)`)
+    addLog(`[pager] ready at ${fmtX(indexRef.current)} pages=${pageCount}`)
     if (widthRef.current > 0) {
       applyFrac(indexRef.current, false)
       holdIdx.current = indexRef.current
     }
 
     return () => {
-      vp.removeEventListener('scroll', onScrollNative)
-      vp.removeEventListener('pointerdown', onPointerDown, true)
-      vp.removeEventListener('pointermove', onPointerMove, true)
-      vp.removeEventListener('pointerup', onPointerUp, true)
-      vp.removeEventListener('pointercancel', onPointerCancel, true)
+      vp.removeEventListener('pointerdown', onPointerDown)
+      vp.removeEventListener('pointermove', onPointerMove)
+      vp.removeEventListener('pointerup', onPointerUp)
+      vp.removeEventListener('pointercancel', onPointerCancel)
       clearSettleRaf()
       animTarget.current = null
     }
@@ -593,19 +570,23 @@ export function PagePager({
   return (
     <div
       ref={viewportRef}
-      className="flex-1 min-h-0 overflow-x-hidden overflow-y-hidden"
+      className="flex-1 min-h-0 overflow-hidden"
       data-page-pager
       style={{
-        // hidden = no native H fling; we only set scrollLeft in applyFrac.
         touchAction: 'pan-y',
         overscrollBehaviorX: 'none',
-        scrollbarWidth: 'none',
-        msOverflowStyle: 'none',
         WebkitUserSelect: 'none',
         userSelect: 'none',
       }}
     >
-      <div ref={trackRef} className="flex h-full">
+      <div
+        ref={trackRef}
+        className="flex h-full will-change-transform"
+        style={{
+          transform: 'translate3d(0,0,0)',
+          backfaceVisibility: 'hidden',
+        }}
+      >
         {panels.map((panel, i) => (
           <div
             key={PRIMARY_PAGES[i] ?? i}

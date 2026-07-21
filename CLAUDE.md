@@ -500,7 +500,7 @@ locales/: en.json, zh-CN.json, zh-TW.json
 
 **DevMode overlays（摘要 · 铁律 5）**：`display = demoOverlay ?? SSOT`。Demo（Agent/更新弹窗/自检）只写 overlay，禁止写真相。关 Dev = 清 overlay → 关能力（dump/Test Target/真自检）→ `get_agent_status` 重检。假更新弹窗纯前端，不调下载 API。细则 → `monitor-web.mdc`；史 → `CLAUDE.old.md`。
 
-**PagePager（摘要）**：MAA 单 owner（`scrollLeft` 跟手 + `settleTo`；忌 transform 命中错位）；时长 `100×Δ+100`。状态表 → README M1–M6。
+**PagePager（摘要）**：复刻 **v0.1.64** 皇室战争式单 offset（`translate3d`）；跟手手写、松手/底栏唯一 `settleTo`（rAF+bezier）。状态表 → 根 [README.md](README.md) C1–C6；史 → `CLAUDE.old.md`。
 
 **Android 边界**：UI = `shared/web`（WebView）；Kotlin（`setup/client`）只做 Web 做不了的事——采集/编码、peer 信令与媒体、输入注入、Shizuku、系统 Intent/APK 更新。横滑不在 Kotlin；已删未编入发版的 Capacitor `MimicHostPlugin` 空壳。
 

@@ -181,7 +181,7 @@ svg.lucide {
   }
 }
 
-/* PagePager: scrollLeft single-owner track; hide scrollbar chrome. */
+/* PagePager: translate3d track (Clash Royale); no native overflow-x scrollbar. */
 [data-page-pager]::-webkit-scrollbar {
   display: none;
 }

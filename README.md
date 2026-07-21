@@ -117,19 +117,17 @@ docs/
 
 ### Page 导航（底部栏 / 横滑 · `PagePager`）
 
-**MAA-Meow / ViewPager 单 owner**（Web `scrollLeft` 承载 offset，**不用** `translate3d`——Android WebView 上 transform 常导致命中区留在第 1 页，后三页滑不动）。  
-跟手 / 松手 / 底栏只走 `settleTo(T)`（末次 `animSeq` 胜出）。
-
-动画对齐 MAA：`cubic-bezier(0.32, 0.72, 0, 1)`，时长 `100×页距+100` ms（邻页 200ms）。
+**皇室战争 / ViewPager 单 owner**（复刻 **v0.1.64**）：一个小数 `offset`（`translate3d`，走 compositor）。  
+跟手 = 手指直接写 offset；松手 / 底栏点选 = 唯一 `settleTo(T)`（rAF + cubic-bezier）。无 `overflow-x` fling、无 snap 第二条时间线。
 
 | # | 当前 | 事件 | 行为 |
 |---|------|------|------|
-| M1 | Idle @ n | 横滑过 slop+H | Dragging：手写 offset；若正在 settle → 冻当前小数再跟手 |
-| M2 | Dragging | finger↑ → 判定 T | `settleTo(T)` |
-| M3 | Settling→A | 底栏点 C / 再 settle | 取消 rAF → 从当前 x `settleTo(C)` |
-| M4 | Settling→A | 再横滑 | 冻当前 x → Dragging |
-| M5 | 任意 | 底栏点 C | 已在目标则 noop；否则 `settleTo(C)` |
-| M6 | pending | 未过 slop | tap-ignore（不打断 settle） |
+| C1 | Idle @ n | 横滑过 slop + H | Dragging，跟手写 offset；若正在 settle 则冻在当前小数再跟手 |
+| C2 | Dragging | finger↑ → 判定 T | `settleTo(T)` |
+| C3 | Settling→A | 底栏点 C | 冻当前 x → `settleTo(C)` |
+| C4 | Settling→A | 再横滑 | 冻当前 x → Dragging |
+| C5 | Idle / Settling | 底栏点 C | `settleTo(C)` |
+| C6 | pending 短触 | 未过 slop | tap-ignore |
 
 ### 实现落点
 
@@ -138,7 +136,7 @@ docs/
 | Auth / Call native | `pc/client/src/peer_session.cpp` · `android/.../PeerSession.kt` |
 | Roster | `server/server.js` `devicesForUser`（`online` + `state`） |
 | Banner #9 | `shared/web/src/components/IncomingCallBanner.tsx` |
-| Page 导航 | `App.tsx` `session_end` → `Peers`；`onPeerSessionStart` → `Monitor`；`PagePager` M1–M6 |
+| Page 导航 | `App.tsx` `session_end` → `Peers`；`onPeerSessionStart` → `Monitor`；`PagePager` C1–C6（v0.1.64） |
 | UI 投影 | `PeerPanel.tsx` |
 
 ## Build & release (PC + Server)

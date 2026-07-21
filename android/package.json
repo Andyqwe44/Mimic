@@ -1,8 +1,8 @@
 ﻿{
     "name":  "mimic-android",
     "private":  true,
-    "version":  "0.1.69",
-    "mimicReleaseNote":  "PagePager: stop scroll fight (overflow-x hidden + no hold-pin while pending)",
+    "version":  "0.1.70",
+    "mimicReleaseNote":  "PagePager: restore v0.1.64 Clash Royale translate3d single-owner",
     "description":  "Mimic Android shell 閳?Capacitor WebView hosting shared/web",
     "scripts":  {
                     "build:web":  "npm --prefix ../shared/web run build",
