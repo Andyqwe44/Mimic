@@ -500,7 +500,7 @@ locales/: en.json, zh-CN.json, zh-TW.json
 
 **DevMode overlays（摘要 · 铁律 5）**：`display = demoOverlay ?? SSOT`。Demo（Agent/更新弹窗/自检）只写 overlay，禁止写真相。关 Dev = 清 overlay → 关能力（dump/Test Target/真自检）→ `get_agent_status` 重检。假更新弹窗纯前端，不调下载 API。细则 → `monitor-web.mdc`；史 → `CLAUDE.old.md`。
 
-**PagePager（摘要）**：单一 `animateTo(target)` 封装系统 `scrollTo(smooth)`；跟手 = 原生 `overflow-x`；松手/底栏都只进 `animateTo`（末次目标胜出，无 snap settle 竞态）。状态表 → 根 [README.md](README.md) U1–U6；史 → `CLAUDE.old.md`。
+**PagePager（摘要）**：皇室战争式单 offset（`translate3d`）；跟手手写、松手/底栏唯一 `settleTo`（rAF+bezier）。状态表 → 根 [README.md](README.md) C1–C6；史 → `CLAUDE.old.md`。
 
 **Peer 媒体（摘要 · 2026-07-20）**：同网 H.264 走 **UDP MPC2**（FEC 4+1 + NACK，80ms 重组）；控制 JSON 仍 LAN TCP。drop-old / 丢片 → force IDR + 依赖门闸；解码冻帧。详表 → README「Peer 媒体传输」。
 

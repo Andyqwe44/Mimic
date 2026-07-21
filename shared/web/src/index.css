@@ -181,7 +181,7 @@ svg.lucide {
   }
 }
 
-/* PagePager: native overflow-x follow + animateTo(scrollTo smooth); hide scrollbar. */
+/* PagePager: translate3d track (Clash Royale); no native overflow-x scrollbar. */
 [data-page-pager]::-webkit-scrollbar {
   display: none;
 }

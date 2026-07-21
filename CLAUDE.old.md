@@ -1,8 +1,12 @@
 # Archive notes
 
+## 2026-07-21 — PagePager 皇室战争单 owner（Android v0.1.64）
+
+`translate3d` 跟手 + 唯一 `settleTo`（rAF+bezier）。无 overflow-x fling / snap。状态表 README C1–C6。
+
 ## 2026-07-20 — PagePager 统一 animateTo（Android v0.1.63）
 
-**确认设计**：单一 `animateTo(target)` 封装系统 `scrollTo({ behavior:'smooth' })`；跟手仍原生 `overflow-x`；**废除 snap settle 第二条时间线**。末次 `animateTo` 胜出（从当前小数 x 续播）。状态表 README U1–U6。
+单一 `animateTo` 封装 `scrollTo(smooth)` + 原生 overflow 跟手；仍有 fling 残留竞态 → 被 0.1.64 取代。
 
 前序 v0.1.52–0.1.62 双路径（snap + smooth）竞态史见下节。
 

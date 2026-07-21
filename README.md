@@ -117,19 +117,19 @@ docs/
 
 ### Page 导航（底部栏 / 横滑 · `PagePager`）
 
-**单一入口** `animateTo(target)`：封装系统 `scrollTo({ behavior: 'smooth' })`（compositor，帧率不掉）。  
-跟手用原生 `overflow-x`；**松手与底栏点选都只走 `animateTo`**。`scroll-snap` 永不 settle（避免第二条时间线竞态）。
+**皇室战争 / ViewPager 单 owner**：一个小数 `offset`（`translate3d`，走 compositor，帧率≈原生滚动）。  
+跟手 = 手指直接写 offset；松手 / 底栏点选 = 唯一 `settleTo(T)`（rAF + cubic-bezier）。无 `overflow-x` fling、无 snap 第二条时间线。
 
 坐标：`1=Monitor 2=Peers 3=Log 4=Settings`（可带小数，如 `x=2.50`）。
 
 | # | 当前 | 事件 | 行为 |
 |---|------|------|------|
-| U1 | idle @ n | 手指拖动（过 slop + H） | 原生跟手；若正在 anim 则 freeze 当前小数 x 再跟手 |
-| U2 | 跟手 | finger↑ → 判定 T | `animateTo(T)`（系统 smooth） |
-| U3 | `animateTo(A)` 中 | 再判定 / 再点 → B | freeze 当前 x → `animateTo(B)`（末次胜出） |
-| U4 | 任意 | 底栏点 C | `animateTo(C)` |
-| U5 | 系统滚到 T | scrollend / near | pin + `commit` 一次 |
-| U6 | pending 短触 | 未过 slop | tap-ignore（不打断 anim） |
+| C1 | Idle @ n | 横滑过 slop + H | Dragging，跟手写 offset；若正在 settle 则冻在当前小数再跟手 |
+| C2 | Dragging | finger↑ → 判定 T | `settleTo(T)` |
+| C3 | Settling→A | 底栏点 C | 冻当前 x → `settleTo(C)` |
+| C4 | Settling→A | 再横滑 | 冻当前 x → Dragging |
+| C5 | Idle / Settling | 底栏点 C | `settleTo(C)` |
+| C6 | pending 短触 | 未过 slop | tap-ignore |
 
 ### 实现落点
 
@@ -138,7 +138,7 @@ docs/
 | Auth / Call native | `pc/client/src/peer_session.cpp` · `android/.../PeerSession.kt` |
 | Roster | `server/server.js` `devicesForUser`（`online` + `state`） |
 | Banner #9 | `shared/web/src/components/IncomingCallBanner.tsx` |
-| Page 导航 | `App.tsx` `session_end` → `Peers`；`onPeerSessionStart` → `Monitor`；`PagePager` U1–U6 |
+| Page 导航 | `App.tsx` `session_end` → `Peers`；`onPeerSessionStart` → `Monitor`；`PagePager` C1–C6 |
 | UI 投影 | `PeerPanel.tsx` |
 
 ## Build & release (PC + Server)

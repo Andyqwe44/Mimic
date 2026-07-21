@@ -147,11 +147,10 @@ export const NAV = {
   settleMs: 300,
   settleEase: 'cubic-bezier(0.25, 0.85, 0.3, 1)',
   /**
-   * Nav tap uses native scrollTo({ behavior:'smooth' }).
-   * Ceiling only — prefer scrollend/near; do not chop animation early (was 500ms hitch).
+   * @deprecated leftover from native scrollTo(smooth) era; settle uses pageAnimMs.
    */
   tapSmoothWatchdogMs: 900,
-  /** @deprecated unused — native smooth owns timing */
+  /** Clash Royale settle: rAF + cubic-bezier from current frac → target (ms). */
   pageAnimMs: 220,
   pageAnimEase: [0.22, 0.9, 0.28, 1] as const,
   tapDurMs: 220,
