@@ -1,5 +1,9 @@
 # Archive notes
 
+## 2026-07-21 — PagePager MAA 单 owner + 轻 Kotlin（Android v0.1.67）
+
+Web `translate3d` + `settleTo`（MAA duration/ease）；删 DEAD `plugins/MimicHost/MimicHostPlugin.kt`。状态表 README M1–M6。
+
 ## 2026-07-21 — PagePager 回退到 v0.1.61 行为（Android v0.1.65）
 
 本轮 `animateTo`（0.1.63）与皇室战争 `translate3d`（0.1.64）手工改回对话前终态：原生 `overflow-x` + snap settle / 底栏 `scrollTo(smooth)`（P1–P7，同 v0.1.61）。非 git revert。

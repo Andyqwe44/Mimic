@@ -1,24 +1,8 @@
-# MimicHost Capacitor plugin
+# Android native bridge
 
-Copy `MimicHost/MimicHostPlugin.kt` into the generated Android app after `npx cap add android`:
+**发版路径**：`android/setup/client` — `MainActivity` 裸 WebView + `AndroidHost.dispatch`（页面内注入 `Capacitor.Plugins.MimicHost` shim）。
 
-```
-android/app/src/main/java/com/mimic/client/plugins/MimicHostPlugin.kt
-```
+旧 Capacitor 模板 `MimicHostPlugin.kt` 已删除（从未编入 setup/client）。
 
-Register in `MainActivity.java` / `.kt`:
-
-```kotlin
-import com.mimic.client.plugins.MimicHostPlugin
-
-class MainActivity : BridgeActivity() {
-  override fun onCreate(savedInstanceState: Bundle?) {
-    registerPlugin(MimicHostPlugin::class.java)
-    super.onCreate(savedInstanceState)
-  }
-}
-```
-
-Add a FileProvider in `AndroidManifest.xml` for APK install (`${applicationId}.fileprovider`) pointing at `cache/updates/`.
-
-JS side: `shared/web/src/lib/bridge.ts` routes `hostCall` → `Capacitor.Plugins.MimicHost.call`.
+Kotlin 只做 Web 做不了的事：采集/编码、peer、输入、Shizuku、系统 Intent / APK 更新。  
+UI 与横滑（`PagePager`）在 `shared/web`。

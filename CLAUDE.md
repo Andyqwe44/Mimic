@@ -203,7 +203,7 @@ server/                 →  Bootstrap signaling
 | C++              | PC host: Win32, WebView2, capture, peer, updater (`pc/`) |
 | TypeScript/React | Shared UI (`shared/web`)                                 |
 | Node             | MimicServer (`server/`)                                  |
-| Kotlin           | Android MimicHost plugin (`android/plugins`)             |
+| Kotlin           | Android shell only: capture / peer / input / Shizuku / update (`setup/client`) |
 
 
 
@@ -500,7 +500,9 @@ locales/: en.json, zh-CN.json, zh-TW.json
 
 **DevMode overlays（摘要 · 铁律 5）**：`display = demoOverlay ?? SSOT`。Demo（Agent/更新弹窗/自检）只写 overlay，禁止写真相。关 Dev = 清 overlay → 关能力（dump/Test Target/真自检）→ `get_agent_status` 重检。假更新弹窗纯前端，不调下载 API。细则 → `monitor-web.mdc`；史 → `CLAUDE.old.md`。
 
-**PagePager（摘要）**：横滑仅过 slop+H 轴有效；短触忽略；底栏点选 = disarm→rAF→`scrollTo(smooth)`；冲突以有效动作胜出（`pending|dragging`）。状态表 → 根 [README.md](README.md) P1–P7；史 → `CLAUDE.old.md`。
+**PagePager（摘要）**：MAA 单 owner（`translate3d` 跟手 + `settleTo` rAF/bezier，时长 `100×Δ+100`）；无 snap/smooth 双路径。状态表 → 根 [README.md](README.md) M1–M6；史 → `CLAUDE.old.md`。
+
+**Android 边界**：UI = `shared/web`（WebView）；Kotlin（`setup/client`）只做 Web 做不了的事——采集/编码、peer 信令与媒体、输入注入、Shizuku、系统 Intent/APK 更新。横滑不在 Kotlin；已删未编入发版的 Capacitor `MimicHostPlugin` 空壳。
 
 **Peer 媒体（摘要 · 2026-07-20）**：同网 H.264 走 **UDP MPC2**（FEC 4+1 + NACK，80ms 重组）；控制 JSON 仍 LAN TCP。drop-old / 丢片 → force IDR + 依赖门闸；解码冻帧。详表 → README「Peer 媒体传输」。
 

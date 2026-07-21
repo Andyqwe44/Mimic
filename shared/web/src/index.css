@@ -181,7 +181,7 @@ svg.lucide {
   }
 }
 
-/* PagePager uses native overflow-x + scroll-snap; hide scrollbar chrome. */
+/* PagePager: MAA single-owner translate3d; hide any leftover scrollbar chrome. */
 [data-page-pager]::-webkit-scrollbar {
   display: none;
 }
