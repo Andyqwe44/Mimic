@@ -3,6 +3,9 @@
  *
  * Prefer: ID3D11Texture2D (WGC BGRA) → hardware MFT → Annex-B NALs.
  * Fallback: CPU BGRA upload / software MFT (LOG_WARN, never silent).
+ *
+ * Phase-1 correctness: 3-slot BGRA/NV12 ring with MFT sample ownership.
+ * MFT_IN_FLIGHT slots are never GPU-written; FREE only on proven sample Release.
  */
 #pragma once
 #include <cstdint>
@@ -45,18 +48,27 @@ public:
     void request_keyframe();
 
     /// Encode a GPU BGRA texture (same device as init).
+    /// capture_id: optional upstream WGC frame id for lifecycle logs (0 = none).
     bool encode_texture(ID3D11Texture2D* bgra_tex, int src_w, int src_h,
-                        std::vector<H264Packet>& out);
+                        std::vector<H264Packet>& out, uint32_t capture_id = 0);
 
     /// Upload CPU BGRA then encode.
-    bool encode_bgra(const uint8_t* bgra, int src_w, int src_h, std::vector<H264Packet>& out);
+    bool encode_bgra(const uint8_t* bgra, int src_w, int src_h, std::vector<H264Packet>& out,
+                     uint32_t capture_id = 0);
 
 private:
     struct Impl;
-    bool feed_nv12_and_drain_(std::vector<H264Packet>& out);
+    friend struct TrackedReleaseCb;
+    bool feed_nv12_and_drain_(int slot_id, uint32_t capture_id, uint32_t submit_id,
+                              std::vector<H264Packet>& out);
     bool drain_output_(std::vector<H264Packet>& out);
     bool process_one_output_(std::vector<H264Packet>& out);
     bool pump_async_(std::vector<H264Packet>& out, int timeout_ms);
+    int acquire_free_slot_();
+    void release_slot_prep_fail_(int slot_id);
+    bool gpu_write_slot_(int slot_id, ID3D11Texture2D* src_bgra, const uint8_t* cpu_bgra,
+                         int src_w);
+    bool wait_gpu_idle_();
 
     Impl* impl_ = nullptr;
     bool ready_ = false;

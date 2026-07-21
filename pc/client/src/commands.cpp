@@ -726,6 +726,7 @@ static void on_wgc_gpu_frame(void* /*ctx*/, void* d3d_device, void* d3d_tex, int
     static ComPtr<ID3D11Texture2D> s_canvas;
     static ComPtr<ID3D11RenderTargetView> s_canvas_rtv;
     static int s_canvas_w = 0, s_canvas_h = 0;
+    static uint32_t s_capture_id = 0;
     uint64_t gen = g_stream_session.load();
     if (gen != s_stream_gen) {
         s_stream_gen = gen;
@@ -733,10 +734,14 @@ static void on_wgc_gpu_frame(void* /*ctx*/, void* d3d_device, void* d3d_tex, int
         s_prefer_soft_scale = false;
         s_enc_w = s_enc_h = 0;
         s_last_enc_ms = 0;
+        s_capture_id = 0;
         s_canvas.Reset();
         s_canvas_rtv.Reset();
         s_canvas_w = s_canvas_h = 0;
     }
+    const uint32_t capture_id = ++s_capture_id;
+    if (capture_id <= 8 || (capture_id % 60) == 0)
+        LOG_DEBUG("cmd", "capture_id=%u %dx%d", capture_id, w, h);
 
     auto* dev = (ID3D11Device*)d3d_device;
     auto* tex = (ID3D11Texture2D*)d3d_tex;
@@ -881,11 +886,12 @@ static void on_wgc_gpu_frame(void* /*ctx*/, void* d3d_device, void* d3d_tex, int
             s_enc_w = s_enc_h = 0;
             return;
         }
-        if (!g_h264.encode_texture(enc_tex, ew, eh, pkts) || pkts.empty()) {
+        if (!g_h264.encode_texture(enc_tex, ew, eh, pkts, capture_id) || pkts.empty()) {
             static uint32_t s_enc_empty = 0;
             uint32_t n = ++s_enc_empty;
             if (n <= 5 || n % 60 == 0)
-                LOG_WARN("cmd", "H264 encode empty/fail #%u (WGC tex %dx%d)", n, ew, eh);
+                LOG_WARN("cmd", "H264 encode empty/fail #%u capture=%u (WGC tex %dx%d)",
+                         n, capture_id, ew, eh);
             return;
         }
     } else {
@@ -928,7 +934,7 @@ static void on_wgc_gpu_frame(void* /*ctx*/, void* d3d_device, void* d3d_tex, int
             px = s_bgra_scaled.data();
             pw = tw; ph = th;
         }
-        if (!g_h264.encode_bgra(px, pw, ph, pkts) || pkts.empty()) return;
+        if (!g_h264.encode_bgra(px, pw, ph, pkts, capture_id) || pkts.empty()) return;
     }
     static std::atomic<uint32_t> s_tx_seq{0};
     static ULONGLONG s_last_tx_ms = 0;
