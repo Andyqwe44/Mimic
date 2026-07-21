@@ -119,28 +119,25 @@ docs/
 
 轴：`x ∈ [0,5]` — 槽 0/5 为回弹空白，槽 1…4 为监视/对等/日志/设置。胶囊小地图同轴（`pillTranslateX = x * pitch`，槽 0/5 出屏）；底栏标签**不高亮**，只靠胶囊表示位置。
 
-两条路径（**无原生横滑 / 无惯性漂移**）：
+两条路径（**原生横滑跟手** + 松手刹停惯性后立刻 B1）：
 
 | 操作 | 机制 |
 |------|------|
-| 手指横滑（过 slop + H 轴） | `touch-action: pan-y`；JS 写 `scrollLeft` 跟手；松手**立刻** B1 → `scrollTo(smooth)` |
+| 手指横滑 | 浏览器原生 `overflow-x` 跟手；`pointercancel` **不**吸附 |
+| 手指抬起 | `touchend`：`killMomentum` → **立刻** B1 → `scrollTo(smooth)` |
 | 底栏点选 | 从当前 x → `scrollTo({ behavior: 'smooth' })` |
-| 选目标 | **T1** 立刻 `onPageChange` |
 
-**松手选页（B1 混合）**：从整数内容页起拖 → 相对出发页 ±0.15；打断 ease / 小数位 → `round(x)`；`x<1→1`，`x>4→4`。无 fling、无等停稳。
-
-**最后一次有效动作胜出**：点选可打断；ease 中 pointerdown 立刻挺住（B2-A）。
+**松手选页（B1）**：±0.15 / round / 空白回弹。无 fling 续滑。
 
 | # | 当前状态 | 事件 | → | 说明 |
 |---|----------|------|---|------|
-| P1 | 任意 | 底栏点选 C | **C** | 从当前 x smooth→C；再点同 C 不重启 |
-| P2 | nav→C | pointerdown | 挺住当前 x | 取消旧 smooth |
-| P2a | 挺住后短触 up | B1 选页 | 例 2.25→2 | 不 resume 旧 C |
-| P3 | idle | 横滑过 slop | JS 跟手 | preventDefault；无原生 H pan |
-| P4 | finger | finger↑/cancel | B1 立刻 | **无惯性**；立即 smooth 吸附 |
-| P5 | 卡缝 | 短触 | B1 | 不在槽上则立刻吸附 |
-| P6 | settle→C 中 | 点选 D | **D** | 从当前 x 重新 smooth |
-| P7 | 任意 | 先分轴锁轴 | — | H 由 pager；V 放行页内滚动 |
+| P1 | 任意 | 底栏点选 C | **C** | smooth→C |
+| P2 | nav→C | pointerdown | 挺住 | 取消旧 smooth |
+| P3 | idle | 横滑 | 原生跟手 | cancel 只表示浏览器接管，仍等抬手 |
+| P4 | 横滑中 | touchend | B1 立刻 | 刹停惯性后吸附 |
+| P5 | 卡缝短触 | touchend | B1 | — |
+| P6 | settle 中 | 点选 D | **D** | retarget |
+| P7 | 分轴 | V | 放弃 H | 页内竖滑 |
 
 ### 实现落点
 
