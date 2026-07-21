@@ -48,6 +48,7 @@ export default function App() {
   /** Bumped on every PrimaryNav tap (even same page) so PagePager re-eases from mid-swipe. */
   const [navSeq, setNavSeq] = useState(0)
   const selectNavPage = useCallback((p: AppPage) => {
+    addLog(`[Nav] selectNavPage →${p} (bump navSeq)`)
     setPage(p)
     setNavSeq((n) => n + 1)
   }, [])

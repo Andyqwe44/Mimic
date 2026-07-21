@@ -44,7 +44,7 @@ export function PrimaryNav({
 
   const select = (id: AppPage) => {
     setPage(id)
-    addLog(`[Nav] ${id}`)
+    addLog(`[Nav] 底栏/侧栏点击 →${id}`)
   }
 
   const isActive = (id: AppPage) =>

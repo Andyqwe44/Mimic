@@ -12,8 +12,8 @@ import { NAV, resolvePagerAxis } from '../lib/design'
 import { PRIMARY_PAGES, pageIndex, type AppPage } from '../lib/pages'
 import { addLog } from '../lib/bridge'
 
-/** Set true only when debugging PagePager; keep false so peer video logs stay readable. */
-const PAGER_DEBUG = false
+/** Debug pager gestures + axis x into Log panel (Android/PC). Keep true while tuning. */
+const PAGER_DEBUG = true
 function pagerLog(msg: string) {
   if (PAGER_DEBUG) addLog(msg)
 }
@@ -235,19 +235,22 @@ export function PagePager({
     const now = performance.now()
     const dt = now - lastProgLogTs.current
     const dx = Number.isFinite(lastProgLogX.current) ? Math.abs(x - lastProgLogX.current) : 99
-    if (!force && dt < 32 && dx < 0.03) return
+    // Debug: denser x samples while finger/nav moving
+    const minDt = PAGER_DEBUG ? 48 : 32
+    const minDx = PAGER_DEBUG ? 0.02 : 0.03
+    if (!force && dt < minDt && dx < minDx) return
     lastProgLogTs.current = now
     lastProgLogX.current = x
     const intent = navIntent.current
-    const intentStr = intent !== null ? ` →${fmtTarget(intent)}` : ''
+    const intentStr = intent !== null ? ` intent→${fmtTarget(intent)}` : ''
     const mode = fingerDragging.current
       ? 'finger'
       : programmatic.current || intent !== null
-        ? 'nav'
+        ? 'nav-smooth'
         : ptrPhase.current === 'pending'
           ? 'pending'
           : 'idle'
-    pagerLog(`[pager] ${fmtX(x)} ${why} mode=${mode}${intentStr}`)
+    pagerLog(`[pager] x=${x.toFixed(3)} ${fmtX(x)} | ${why} | mode=${mode}${intentStr}`)
   }
 
   const clearSettleTimer = () => {
@@ -382,7 +385,7 @@ export function PagePager({
     // Always ease (B10).
     programmatic.current = true
     pagerLog(
-      `[pager] nav-smooth ${fmtX(x)}→${fmtTarget(target)} `
+      `[pager] nav-smooth 从 x=${x.toFixed(3)} →${fmtTarget(target)} `
       + `Δ=${Math.abs(target - x).toFixed(2)} seq=${mySeq}`,
     )
     logProgress('nav-start', true)
@@ -424,20 +427,28 @@ export function PagePager({
     interruptedEase.current = true
     dragOriginX.current = null
     holdAxis.current = null
-    pagerLog(`[pager] freeze ${why} at ${fmtX(readX())}`
-      + (was !== null ? ` was→${fmtTarget(was)}` : ''))
+    pagerLog(
+      `[pager] freeze(${why}) x=${readX().toFixed(3)}`
+      + (was !== null ? ` was→${fmtTarget(was)}` : ''),
+    )
   }
 
   /** After finger-up / short-tap: pick target, T1 commit, smooth. */
   const settleToPicked = (x: number) => {
-    const target = pickSettleTarget(
-      x,
-      dragOriginX.current,
-      interruptedEase.current,
-    )
+    const origin = dragOriginX.current
+    const interrupted = interruptedEase.current
+    const target = pickSettleTarget(x, origin, interrupted)
+    const rule = interrupted || origin === null
+      ? 'round'
+      : Math.abs(x - (origin ?? x)) <= SNAP_EPS
+        ? `stay(±${SNAP_EPS})`
+        : `step+round(±${SNAP_EPS})`
     interruptedEase.current = false
     dragOriginX.current = null
-    pagerLog(`[pager] settle-pick ${fmtX(x)} →${fmtTarget(target)}`)
+    pagerLog(
+      `[pager] 松手选页 x=${x.toFixed(3)} origin=${origin ?? 'null'} `
+      + `interrupted=${interrupted ? 1 : 0} rule=${rule} →${fmtTarget(target)}`,
+    )
     nativeScrollToRef.current(target)
   }
 
@@ -485,7 +496,7 @@ export function PagePager({
       syncPill(targetLeft, false)
       return
     }
-    pagerLog(`[pager] prop→scroll →${fmtTarget(targetAxis)} at ${fmtX(vp.scrollLeft / w)} seq=${navSeq}`)
+    pagerLog(`[pager] prop→scroll →${fmtTarget(targetAxis)} 当前x=${(vp.scrollLeft / w).toFixed(3)} navSeq=${navSeq}`)
     nativeScrollToRef.current(targetAxis)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetAxis, navSeq])
@@ -515,8 +526,10 @@ export function PagePager({
         dragOriginX.current = null
       }
       holdAxis.current = null
-      pagerLog(`[pager] drag-start ${fmtX(x)} seq=${actionSeq.current}`
-        + ` origin=${dragOriginX.current ?? 'round'} interrupted=${interruptedEase.current ? 1 : 0}`)
+      pagerLog(
+        `[pager] 横滑开始 x=${x.toFixed(3)} seq=${actionSeq.current}`
+        + ` origin=${dragOriginX.current ?? 'round'} interrupted=${interruptedEase.current ? 1 : 0}`,
+      )
       logProgress('drag-start', true)
     }
 
@@ -555,32 +568,47 @@ export function PagePager({
       ptrId.current = e.pointerId
       fingerDragging.current = false
 
+      const x0 = readX()
+      const easing = navIntent.current !== null || programmatic.current
+      pagerLog(
+        `[pager] 按下 content `
+        + `cx=${e.clientX.toFixed(0)} cy=${e.clientY.toFixed(0)} `
+        + `x=${x0.toFixed(3)} easing=${easing ? 1 : 0}`
+        + (navIntent.current !== null ? ` intent→${fmtTarget(navIntent.current)}` : ''),
+      )
+
       // B2: ease in flight → freeze immediately
-      if (navIntent.current !== null || programmatic.current) {
+      if (easing) {
         freezeEase('pointerdown')
       }
 
-      pagerLog(`[pager] pointer↓ pending ${fmtX(readX())}`)
       logProgress('pointer-down', true)
     }
 
     const onPointerMove = (e: PointerEvent) => {
       if (ptrPhase.current !== 'pending') return
       if (ptrId.current !== null && e.pointerId !== ptrId.current) return
-      const adx = Math.abs(e.clientX - ptrStartX.current)
-      const ady = Math.abs(e.clientY - ptrStartY.current)
+      const dx = e.clientX - ptrStartX.current
+      const dy = e.clientY - ptrStartY.current
+      const adx = Math.abs(dx)
+      const ady = Math.abs(dy)
       const axis = resolvePagerAxis(adx, ady)
       if (axis === 'none') return
       if (axis === 'v') {
-        // Vertical wins — abandon pager gesture; if we froze ease, settle via B1.
         ptrPhase.current = 'none'
         ptrId.current = null
-        pagerLog(`[pager] axis=v ${fmtX(readX())}`)
+        pagerLog(
+          `[pager] 轴锁定=竖滑(放弃横滑) Δx=${dx.toFixed(0)} Δy=${dy.toFixed(0)} `
+          + `x=${readX().toFixed(3)} interrupted=${interruptedEase.current ? 1 : 0}`,
+        )
         if (interruptedEase.current) {
           settleToPicked(readX())
         }
         return
       }
+      pagerLog(
+        `[pager] 轴锁定=横滑 Δx=${dx.toFixed(0)} Δy=${dy.toFixed(0)} x=${readX().toFixed(3)}`,
+      )
       beginDrag()
     }
 
@@ -590,13 +618,20 @@ export function PagePager({
       ptrPhase.current = 'none'
       ptrId.current = null
       const x = widthRef.current > 0 ? vp.scrollLeft / widthRef.current : progressRef.current
+      const dx = e.clientX - ptrStartX.current
+      const dy = e.clientY - ptrStartY.current
 
       if (phase === 'pending') {
-        // Short tap: B2-A if we interrupted ease → settle by B1; else ignore.
         fingerDragging.current = false
-        pagerLog(`[pager] tap ${fmtX(x)} reason=${reason} interrupted=${interruptedEase.current ? 1 : 0}`)
+        pagerLog(
+          `[pager] 短触抬起(${reason}) phase=pending `
+          + `Δx=${dx.toFixed(0)} Δy=${dy.toFixed(0)} x=${x.toFixed(3)} `
+          + `interrupted=${interruptedEase.current ? 1 : 0}`,
+        )
         if (interruptedEase.current) {
           settleToPicked(x)
+        } else {
+          pagerLog(`[pager] 短触忽略(未打断ease/未过slop) x=${x.toFixed(3)}`)
         }
         logProgress('tap-end', true)
         return
@@ -605,7 +640,10 @@ export function PagePager({
       if (phase !== 'dragging') return
 
       fingerDragging.current = false
-      pagerLog(`[pager] finger↑ ${fmtX(x)}`)
+      pagerLog(
+        `[pager] 手指抬起(${reason}) phase=dragging `
+        + `Δx=${dx.toFixed(0)} Δy=${dy.toFixed(0)} x=${x.toFixed(3)}`,
+      )
       logProgress('finger-up', true)
       settleToPicked(x)
     }
@@ -619,7 +657,10 @@ export function PagePager({
     vp.addEventListener('pointermove', onPointerMove, { passive: true })
     vp.addEventListener('pointerup', onPointerUp, { passive: true })
     vp.addEventListener('pointercancel', onPointerCancel, { passive: true })
-    pagerLog(`[pager] ready slots=0..${SLOT_COUNT - 1} content=${X_MIN}..${X_MAX}`)
+    pagerLog(
+      `[pager] ready 轴0..${SLOT_COUNT - 1} 内容${X_MIN}..${X_MAX} `
+      + `当前x=${pageToAxis(pageRef.current)} (${pageRef.current})`,
+    )
 
     if (widthRef.current > 0) {
       const ax = pageToAxis(pageRef.current)
